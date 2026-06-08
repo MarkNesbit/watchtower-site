@@ -1,0 +1,74 @@
+---
+import ProductHero from '../../components/ProductHero.astro';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { products } from '../../content';
+
+export function getStaticPaths() {
+	return products.map((product) => ({
+		params: { slug: product.slug },
+		props: { product },
+	}));
+}
+
+const { product } = Astro.props;
+---
+
+<SiteLayout
+	title={`${product.name} | WatchTower`}
+	description={`${product.name}: ${product.positioning}`}
+>
+	<ProductHero product={product} />
+
+	<section class="section" aria-label={`${product.name} product thinking`}>
+		<div class="content-grid content-grid--two">
+			<article class="content-card">
+				<p class="eyebrow">Problem statement</p>
+				<h2>Why this product exists</h2>
+				<p>{product.problem}</p>
+			</article>
+			<article class="content-card">
+				<p class="eyebrow">Vision</p>
+				<h2>What it is intended to enable</h2>
+				<p>{product.vision}</p>
+			</article>
+		</div>
+	</section>
+
+	<section class="section" aria-labelledby="approach-title">
+		<div class="section-heading">
+			<p class="eyebrow">Approach</p>
+			<h2 id="approach-title">Product principles</h2>
+			<p>
+				The product direction is intentionally focused on delivery thinking and decision support,
+				not on building unnecessary process or replacing professional judgement.
+			</p>
+		</div>
+		<div class="content-grid">
+			{product.approach.map((item) => (
+				<article class="content-card">
+					<h3>{item}</h3>
+				</article>
+			))}
+		</div>
+	</section>
+
+	<section class="section" aria-labelledby="status-title">
+		<div class="content-grid content-grid--two">
+			<article class="content-card">
+				<p class="eyebrow">Current status</p>
+				<h2 id="status-title">{product.status}</h2>
+				<p>
+					This page describes current product thinking for {product.name}. It does not represent a
+					live SaaS application, forecasting engine, governance engine or dashboard product.
+				</p>
+			</article>
+			<article class="content-card">
+				<p class="eyebrow">Roadmap / future direction</p>
+				<h2>Where the product may develop</h2>
+				<ul>
+					{product.future.map((item) => <li>{item}</li>)}
+				</ul>
+			</article>
+		</div>
+	</section>
+</SiteLayout>

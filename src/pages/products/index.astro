@@ -1,0 +1,31 @@
+---
+import Hero from '../../components/Hero.astro';
+import ProductCard from '../../components/ProductCard.astro';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { products } from '../../content';
+---
+
+<SiteLayout
+	title="Products | WatchTower"
+	description="Explore the WatchTower product suite: Jektor, Sentinel and TorchLite."
+>
+	<Hero
+		eyebrow="Products"
+		title="The WatchTower delivery intelligence product suite"
+		text="Jektor, Sentinel and TorchLite each address a different delivery leadership need: forecasting, governance and narrative clarity."
+	/>
+
+	<section class="section" aria-labelledby="products-list">
+		<div class="section-heading">
+			<p class="eyebrow">Suite overview</p>
+			<h2 id="products-list">Products designed for delivery confidence</h2>
+			<p>
+				The suite is being shaped for delivery managers, PMO teams, programme leaders and
+				technology leaders who need clearer insight without unnecessary complexity.
+			</p>
+		</div>
+		<div class="product-grid">
+			{products.map((product) => <ProductCard product={product} />)}
+		</div>
+	</section>
+</SiteLayout>
