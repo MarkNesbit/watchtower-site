@@ -1,0 +1,21 @@
+---
+import type { Product } from '../content';
+
+type Props = {
+	product: Product;
+	featured?: boolean;
+};
+
+const { product, featured = false } = Astro.props;
+---
+
+<article class:list={["product-card", { "product-card--featured": featured }]}>
+	<div class="product-card__topline">
+		<img src={product.logo} alt={`${product.name} logo`} loading="lazy" />
+		<span>{product.status}</span>
+	</div>
+	<h3>{product.name}</h3>
+	<p class="product-card__positioning">{product.positioning}</p>
+	<p>{product.summary}</p>
+	<a href={`/products/${product.slug}`} aria-label={`Learn more about ${product.name}`}>Explore {product.name}</a>
+</article>

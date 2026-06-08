@@ -1,0 +1,59 @@
+---
+import Hero from '../components/Hero.astro';
+import SiteLayout from '../layouts/SiteLayout.astro';
+import { products } from '../content';
+---
+
+<SiteLayout
+	title="About | WatchTower"
+	description="Learn why WatchTower exists and how its delivery intelligence philosophy shapes the product suite."
+>
+	<Hero
+		eyebrow="About WatchTower"
+		title="Delivery intelligence for clearer decisions"
+		text="WatchTower exists to help delivery organisations move beyond fragmented reporting and towards clearer evidence, communication and governance."
+	/>
+
+	<section class="section" aria-labelledby="why-title">
+		<div class="content-grid content-grid--two">
+			<article class="content-card">
+				<p class="eyebrow">Why WatchTower exists</p>
+				<h2 id="why-title">Delivery needs a clearer operating picture</h2>
+				<p>
+					Delivery leaders are often asked to make decisions from partial information, inconsistent
+					reporting and subjective confidence. WatchTower is being developed as a platform for
+					clearer delivery intelligence across teams, programmes and portfolios.
+				</p>
+			</article>
+			<article class="content-card">
+				<p class="eyebrow">Philosophy</p>
+				<h2>Evidence, clarity and confidence</h2>
+				<p>
+					The platform philosophy is simple: use evidence where possible, communicate plainly and
+					make governance useful. WatchTower is not intended to replace delivery judgement; it is
+					intended to support better conversations.
+				</p>
+			</article>
+		</div>
+	</section>
+
+	<section class="section" aria-labelledby="suite-title">
+		<div class="section-heading">
+			<p class="eyebrow">Product suite overview</p>
+			<h2 id="suite-title">A suite shaped around delivery intelligence</h2>
+			<p>
+				The WatchTower suite combines product ideas for forecasting, narrative clarity and
+				governance visibility.
+			</p>
+		</div>
+		<div class="content-grid">
+			{products.map((product) => (
+				<article class="content-card">
+					<h3>{product.name}</h3>
+					<p><strong>{product.positioning}</strong></p>
+					<p>{product.summary}</p>
+				</article>
+			))}
+		</div>
+	</section>
+</SiteLayout>
