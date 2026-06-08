@@ -1,11 +1,67 @@
 ---
-import Welcome from '../components/Welcome.astro';
-import Layout from '../layouts/Layout.astro';
-
-// Welcome to Astro! Wondering what to do next? Check out the Astro documentation at https://docs.astro.build
-// Don't want to use any of this? Delete everything in this file, the `assets`, `components`, and `layouts` directories, and start fresh.
+import Hero from '../components/Hero.astro';
+import ProductCard from '../components/ProductCard.astro';
+import RoadmapSection from '../components/RoadmapSection.astro';
+import SiteLayout from '../layouts/SiteLayout.astro';
+import { products } from '../content';
 ---
 
-<Layout>
-	<Welcome />
-</Layout>
+<SiteLayout
+	title="WatchTower | Delivery Intelligence for Teams, Programmes and Portfolios"
+	description="WatchTower is a Delivery Intelligence Platform for evidence-based forecasting, narrative intelligence and governance intelligence."
+>
+	<Hero
+		eyebrow="WatchTower platform"
+		title="Delivery Intelligence for Teams, Programmes and Portfolios"
+		text={`Forecast with confidence.\nGovern with clarity.\nCommunicate with purpose.`}
+		primaryHref="/products"
+		primaryLabel="Explore products"
+		secondaryHref="/roadmap"
+		secondaryLabel="View roadmap"
+	/>
+
+	<section class="section" aria-labelledby="platform-overview">
+		<div class="section-heading">
+			<p class="eyebrow">Platform overview</p>
+			<h2 id="platform-overview">A product suite for modern delivery leadership</h2>
+			<p>
+				WatchTower brings together delivery forecasting, narrative intelligence and governance
+				intelligence to help teams and leaders build a clearer view of delivery confidence.
+			</p>
+		</div>
+		<div class="content-grid content-grid--two">
+			<article class="panel">
+				<h3>Built for delivery conversations</h3>
+				<p>
+					The platform is designed around the decisions that delivery teams, PMOs and technology
+					leaders need to make: what is likely, where attention is needed and how progress should be
+					communicated.
+				</p>
+			</article>
+			<article class="panel">
+				<h3>Evidence over theatre</h3>
+				<p>
+					WatchTower focuses on professional, evidence-led delivery intelligence rather than
+					dashboards for their own sake. The product direction is practical, measured and built for
+					enterprise delivery environments.
+				</p>
+			</article>
+		</div>
+	</section>
+
+	<section class="section" aria-labelledby="product-overview">
+		<div class="section-heading">
+			<p class="eyebrow">Product suite</p>
+			<h2 id="product-overview">Three products, one delivery intelligence platform</h2>
+			<p>
+				Each product has a distinct purpose while contributing to a broader view of delivery
+				confidence across teams, programmes and portfolios.
+			</p>
+		</div>
+		<div class="product-grid">
+			{products.map((product) => <ProductCard product={product} featured />)}
+		</div>
+	</section>
+
+	<RoadmapSection preview />
+</SiteLayout>

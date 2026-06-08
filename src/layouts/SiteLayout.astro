@@ -1,0 +1,549 @@
+---
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+
+type Props = {
+	title?: string;
+	description?: string;
+};
+
+const {
+	title = 'WatchTower | Delivery Intelligence Platform',
+	description = 'WatchTower is a Delivery Intelligence Platform for teams, programmes and portfolios.',
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<link rel="icon" href="/favicon.ico" />
+		<meta name="description" content={description} />
+		<meta name="generator" content={Astro.generator} />
+		<title>{title}</title>
+	</head>
+	<body>
+		<a class="skip-link" href="#main-content">Skip to content</a>
+		<div class="page-shell">
+			<Header />
+			<main id="main-content">
+				<slot />
+			</main>
+			<Footer />
+		</div>
+	</body>
+</html>
+
+<style is:global>
+	:root {
+		color-scheme: dark;
+		--accent: #7fb000;
+		--accent-strong: #9bd218;
+		--bg: #070b0e;
+		--bg-soft: #0d1418;
+		--panel: #111b20;
+		--panel-strong: #17252b;
+		--border: rgba(183, 212, 194, 0.16);
+		--text: #f3f7f0;
+		--muted: #a9b7ad;
+		--muted-strong: #cad5cb;
+		--max-width: 1180px;
+		font-family:
+			Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	}
+
+	* {
+		box-sizing: border-box;
+	}
+
+	html {
+		background: var(--bg);
+		scroll-behavior: smooth;
+	}
+
+	body {
+		min-width: 320px;
+		margin: 0;
+		background:
+			radial-gradient(circle at top left, rgba(127, 176, 0, 0.16), transparent 34rem),
+			linear-gradient(180deg, #081014 0%, var(--bg) 42%, #050809 100%);
+		color: var(--text);
+		font-size: 16px;
+		line-height: 1.6;
+	}
+
+	body::before {
+		position: fixed;
+		inset: 0;
+		z-index: -1;
+		background-image:
+			linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+			linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+		background-size: 72px 72px;
+		content: "";
+		mask-image: linear-gradient(to bottom, black, transparent 75%);
+	}
+
+	a {
+		color: inherit;
+	}
+
+	img {
+		max-width: 100%;
+		height: auto;
+	}
+
+	p,
+	h1,
+	h2,
+	h3 {
+		margin-top: 0;
+	}
+
+	p {
+		color: var(--muted);
+	}
+
+	h1,
+	h2,
+	h3 {
+		color: var(--text);
+		line-height: 1.08;
+		letter-spacing: -0.04em;
+	}
+
+	h1 {
+		max-width: 980px;
+		font-size: clamp(2.6rem, 7vw, 5.9rem);
+	}
+
+	h2 {
+		font-size: clamp(2rem, 4vw, 3.5rem);
+	}
+
+	h3 {
+		font-size: clamp(1.35rem, 2vw, 1.75rem);
+	}
+
+	.skip-link {
+		position: absolute;
+		left: 1rem;
+		top: 1rem;
+		z-index: 20;
+		padding: 0.6rem 0.9rem;
+		border-radius: 999px;
+		background: var(--accent);
+		color: #101609;
+		font-weight: 700;
+		transform: translateY(-140%);
+	}
+
+	.skip-link:focus {
+		transform: translateY(0);
+	}
+
+	.page-shell {
+		width: min(100% - 2rem, var(--max-width));
+		margin-inline: auto;
+	}
+
+	.site-header,
+	.site-footer {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1.25rem;
+	}
+
+	.site-header {
+		position: sticky;
+		top: 1rem;
+		z-index: 10;
+		flex-direction: column;
+		justify-content: center;
+		margin-top: 1rem;
+		padding: 1.2rem clamp(1rem, 3vw, 2rem) 0.95rem;
+		border: 1px solid var(--border);
+		border-radius: 1.6rem;
+		background: rgba(9, 15, 18, 0.88);
+		backdrop-filter: blur(18px);
+		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+	}
+
+	.brand {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: min(100%, 26rem);
+	}
+
+	.brand img {
+		width: min(100%, clamp(16rem, 30vw, 22rem));
+		max-height: 5.25rem;
+		object-fit: contain;
+		object-position: center;
+	}
+
+	.nav,
+	.site-footer nav {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.35rem;
+		flex-wrap: wrap;
+	}
+
+	.nav a,
+	.site-footer nav a {
+		border-radius: 999px;
+		color: var(--muted-strong);
+		font-size: 0.95rem;
+		font-weight: 650;
+		padding: 0.6rem 0.9rem;
+		text-decoration: none;
+	}
+
+	.nav a:hover,
+	.nav a:focus-visible,
+	.nav a[aria-current="page"] {
+		background: rgba(127, 176, 0, 0.16);
+		color: var(--text);
+		outline: none;
+	}
+
+	.site-footer {
+		margin-top: 5rem;
+		padding: 2rem 0 3rem;
+		border-top: 1px solid var(--border);
+	}
+
+	.footer-brand {
+		color: var(--text);
+		font-size: 1.1rem;
+		font-weight: 800;
+		text-decoration: none;
+	}
+
+	.site-footer p {
+		margin: 0.25rem 0 0;
+	}
+
+	.section {
+		padding-block: clamp(3.5rem, 8vw, 7rem);
+	}
+
+	.hero {
+		min-height: 76vh;
+		display: grid;
+		align-items: center;
+	}
+
+	.hero__content {
+		max-width: 980px;
+	}
+
+	.hero__text {
+		max-width: 720px;
+		font-size: clamp(1.35rem, 2vw, 1.9rem);
+		color: var(--muted-strong);
+		white-space: pre-line;
+	}
+
+	.eyebrow {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+		color: var(--accent-strong);
+		font-size: 0.8rem;
+		font-weight: 800;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+	}
+
+	.eyebrow::before {
+		width: 0.55rem;
+		height: 0.55rem;
+		border-radius: 999px;
+		background: var(--accent);
+		content: "";
+	}
+
+	.actions {
+		display: flex;
+		gap: 1rem;
+		flex-wrap: wrap;
+		margin-top: 2rem;
+	}
+
+	.button,
+	.text-link {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 999px;
+		font-weight: 800;
+		text-decoration: none;
+		transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+	}
+
+	.button {
+		min-height: 3rem;
+		padding: 0.85rem 1.1rem;
+	}
+
+	.button:hover,
+	.text-link:hover {
+		transform: translateY(-1px);
+	}
+
+	.button--primary {
+		background: var(--accent);
+		color: #111909;
+	}
+
+	.button--secondary {
+		border: 1px solid var(--border);
+		color: var(--text);
+	}
+
+	.section-heading {
+		max-width: 780px;
+		margin-bottom: 2rem;
+	}
+
+	.section-heading p:not(.eyebrow) {
+		font-size: 1.1rem;
+	}
+
+	.panel,
+	.product-card,
+	.roadmap-card,
+	.content-card {
+		border: 1px solid var(--border);
+		border-radius: 1.35rem;
+		background: linear-gradient(180deg, rgba(23, 37, 43, 0.9), rgba(12, 19, 23, 0.92));
+		box-shadow: 0 24px 80px rgba(0, 0, 0, 0.18);
+	}
+
+	.grid,
+	.product-grid,
+	.roadmap-grid,
+	.content-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1rem;
+	}
+
+	.panel,
+	.content-card {
+		padding: clamp(1.35rem, 3vw, 2rem);
+	}
+
+	.panel strong {
+		color: var(--text);
+	}
+
+	.product-card {
+		display: flex;
+		min-height: 100%;
+		flex-direction: column;
+		padding: clamp(1.35rem, 3vw, 2rem);
+	}
+
+	.product-card--featured {
+		background: linear-gradient(180deg, rgba(29, 48, 55, 0.95), rgba(12, 19, 23, 0.96));
+	}
+
+	.product-card__topline {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		margin-bottom: 1.75rem;
+	}
+
+	.product-card__topline img {
+		width: min(100%, 13.5rem);
+		max-height: 5.75rem;
+		object-fit: contain;
+		object-position: left center;
+	}
+
+	.product-card__topline span,
+	.roadmap-card span,
+	.roadmap-card strong {
+		display: inline-flex;
+		width: fit-content;
+		border: 1px solid rgba(127, 176, 0, 0.28);
+		border-radius: 999px;
+		padding: 0.3rem 0.65rem;
+		background: rgba(127, 176, 0, 0.1);
+		color: var(--accent-strong);
+		font-size: 0.75rem;
+		font-weight: 800;
+	}
+
+	.product-card__positioning {
+		color: var(--muted-strong);
+		font-size: clamp(1.12rem, 1.6vw, 1.35rem);
+		font-weight: 750;
+		line-height: 1.25;
+	}
+
+	.product-card a {
+		margin-top: auto;
+		color: var(--accent-strong);
+		font-weight: 800;
+		text-decoration: none;
+	}
+
+	.product-card a:hover,
+	.text-link:hover {
+		text-decoration: underline;
+	}
+
+	.text-link {
+		margin-top: 1.5rem;
+		color: var(--accent-strong);
+	}
+
+	.product-hero {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(12rem, 22rem);
+		gap: 2rem;
+		align-items: center;
+	}
+
+	.product-hero__positioning {
+		color: var(--muted-strong);
+		font-size: clamp(1.25rem, 2vw, 1.8rem);
+		font-weight: 750;
+	}
+
+	.product-hero__mark {
+		display: grid;
+		min-height: 18rem;
+		place-items: center;
+		border: 1px solid var(--border);
+		border-radius: 2rem;
+		background: radial-gradient(circle, rgba(127, 176, 0, 0.18), transparent 62%), var(--panel);
+	}
+
+	.product-hero__mark img {
+		width: min(72%, 16rem);
+		max-height: 10rem;
+		object-fit: contain;
+	}
+
+	.roadmap-grid {
+		counter-reset: phase;
+	}
+
+	.roadmap-card {
+		position: relative;
+		padding: 1.35rem;
+	}
+
+	.roadmap-card::after {
+		position: absolute;
+		right: 1.25rem;
+		top: 1.25rem;
+		color: rgba(255, 255, 255, 0.07);
+		font-size: 4rem;
+		font-weight: 900;
+		line-height: 1;
+		counter-increment: phase;
+		content: counter(phase);
+	}
+
+	.roadmap-card h3 {
+		margin-top: 1.75rem;
+	}
+
+	.roadmap-card strong {
+		margin-top: 1rem;
+	}
+
+	.content-grid--two {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.content-card ul {
+		margin: 0;
+		padding-left: 1.2rem;
+		color: var(--muted);
+	}
+
+	.content-card li + li {
+		margin-top: 0.55rem;
+	}
+
+	@media (max-width: 850px) {
+		.page-shell {
+			width: min(100% - 1.25rem, var(--max-width));
+		}
+
+		.site-header,
+		.site-footer {
+			border-radius: 1.25rem;
+			flex-direction: column;
+		}
+
+		.site-footer {
+			align-items: flex-start;
+		}
+
+		.brand {
+			width: 100%;
+		}
+
+		.brand img {
+			width: min(100%, 18rem);
+		}
+
+		.nav a,
+		.site-footer nav a {
+			padding: 0.5rem 0.7rem;
+		}
+
+		.hero {
+			min-height: auto;
+		}
+
+		.grid,
+		.product-grid,
+		.roadmap-grid,
+		.content-grid,
+		.content-grid--two,
+		.product-hero {
+			grid-template-columns: 1fr;
+		}
+
+		.product-hero__mark {
+			min-height: 12rem;
+		}
+	}
+
+	@media (max-width: 560px) {
+		h1 {
+			font-size: 2.45rem;
+		}
+
+		.actions,
+		.button {
+			width: 100%;
+		}
+
+		.product-card__topline {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.product-card__topline img {
+			width: min(100%, 12rem);
+		}
+	}
+</style>
