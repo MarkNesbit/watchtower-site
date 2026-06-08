@@ -27,4 +27,4 @@ The platform is intended for professional delivery and technology audiences, inc
 
 ## Design direction
 
-The website should feel professional, modern and credible for an enterprise audience. The visual direction uses a dark theme, restrained interactions, clean typography and the WatchTower accent colour `#7FB000`.
+The website should feel professional, modern and credible for an enterprise audience. The visual direction uses a dark theme, restrained interactions, clean typography and the light blue from the WatchTower logo as the site accent colour (`#00A0FF`).

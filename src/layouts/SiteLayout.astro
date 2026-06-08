@@ -39,8 +39,8 @@ const {
 <style is:global>
 	:root {
 		color-scheme: dark;
-		--accent: #7fb000;
-		--accent-strong: #9bd218;
+		--accent: #00a0ff;
+		--accent-strong: #52c7ff;
 		--bg: #070b0e;
 		--bg-soft: #0d1418;
 		--panel: #111b20;
@@ -67,7 +67,7 @@ const {
 		min-width: 320px;
 		margin: 0;
 		background:
-			radial-gradient(circle at top left, rgba(127, 176, 0, 0.16), transparent 34rem),
+			radial-gradient(circle at top left, rgba(0, 160, 255, 0.16), transparent 34rem),
 			linear-gradient(180deg, #081014 0%, var(--bg) 42%, #050809 100%);
 		color: var(--text);
 		font-size: 16px;
@@ -161,10 +161,8 @@ const {
 		position: sticky;
 		top: 1rem;
 		z-index: 10;
-		flex-direction: column;
-		justify-content: center;
 		margin-top: 1rem;
-		padding: 1.2rem clamp(1rem, 3vw, 2rem) 0.95rem;
+		padding: 0.9rem clamp(1rem, 3vw, 1.6rem);
 		border: 1px solid var(--border);
 		border-radius: 1.6rem;
 		background: rgba(9, 15, 18, 0.88);
@@ -175,24 +173,29 @@ const {
 	.brand {
 		display: inline-flex;
 		align-items: center;
-		justify-content: center;
-		width: min(100%, 26rem);
+		justify-content: flex-start;
+		flex: 0 0 auto;
+		min-width: min(48vw, 19rem);
 	}
 
 	.brand img {
-		width: min(100%, clamp(16rem, 30vw, 22rem));
-		max-height: 5.25rem;
+		width: min(48vw, 18rem);
+		max-height: 5rem;
 		object-fit: contain;
-		object-position: center;
+		object-position: left center;
 	}
 
 	.nav,
 	.site-footer nav {
 		display: flex;
 		align-items: center;
-		justify-content: center;
+		justify-content: flex-end;
 		gap: 0.35rem;
 		flex-wrap: wrap;
+	}
+
+	.nav {
+		margin-left: auto;
 	}
 
 	.nav a,
@@ -208,7 +211,7 @@ const {
 	.nav a:hover,
 	.nav a:focus-visible,
 	.nav a[aria-current="page"] {
-		background: rgba(127, 176, 0, 0.16);
+		background: rgba(0, 160, 255, 0.16);
 		color: var(--text);
 		outline: none;
 	}
@@ -377,10 +380,10 @@ const {
 	.roadmap-card strong {
 		display: inline-flex;
 		width: fit-content;
-		border: 1px solid rgba(127, 176, 0, 0.28);
+		border: 1px solid rgba(0, 160, 255, 0.3);
 		border-radius: 999px;
 		padding: 0.3rem 0.65rem;
-		background: rgba(127, 176, 0, 0.1);
+		background: rgba(0, 160, 255, 0.1);
 		color: var(--accent-strong);
 		font-size: 0.75rem;
 		font-weight: 800;
@@ -429,7 +432,7 @@ const {
 		place-items: center;
 		border: 1px solid var(--border);
 		border-radius: 2rem;
-		background: radial-gradient(circle, rgba(127, 176, 0, 0.18), transparent 62%), var(--panel);
+		background: radial-gradient(circle, rgba(0, 160, 255, 0.18), transparent 62%), var(--panel);
 	}
 
 	.product-hero__mark img {
@@ -492,16 +495,23 @@ const {
 			flex-direction: column;
 		}
 
+		.site-header,
 		.site-footer {
 			align-items: flex-start;
 		}
 
 		.brand {
 			width: 100%;
+			min-width: 0;
 		}
 
 		.brand img {
 			width: min(100%, 18rem);
+		}
+
+		.nav {
+			justify-content: flex-start;
+			margin-left: 0;
 		}
 
 		.nav a,
