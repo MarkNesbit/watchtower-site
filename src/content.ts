@@ -1,7 +1,8 @@
 export type Product = {
 	name: string;
 	slug: string;
-	logo: string;
+	logo?: string;
+	label: string;
 	positioning: string;
 	summary: string;
 	status: string;
@@ -13,72 +14,96 @@ export type Product = {
 
 export const products: Product[] = [
 	{
-		name: 'Jektor',
-		slug: 'jektor',
-		logo: '/images/jektor-logo.png',
-		positioning: 'Forecast using evidence, not opinion.',
+		name: 'WatchTower Forecast',
+		slug: 'forecast',
+		logo: '/images/watchtower-logo.png',
+		label: 'Core product',
+		positioning: 'Monte Carlo forecasting based on delivery-period throughput.',
 		summary:
-			'Evidence-based delivery forecasting that helps teams and leaders understand likely outcomes using delivery signals, not optimism or pressure.',
-		status: 'Concept and MVP planning',
+			'Forecast delivery windows using real team throughput data, confidence ranges and clear assumptions rather than guesswork or status theatre.',
+		status: 'Forecasting MVP focus',
 		problem:
-			'Delivery forecasts are often shaped by confidence, status pressure and disconnected reporting cycles. Jektor exists to make forecasting more objective, traceable and useful for decision-making.',
+			'Delivery teams are often asked for dates before there is enough evidence to support a single answer. WatchTower Forecast is focused on helping leaders communicate likely delivery windows, confidence and risk using throughput data.',
 		vision:
-			'Jektor will help delivery organisations create transparent forecasts grounded in evidence, allowing teams to discuss risk earlier and leaders to make decisions with greater confidence.',
+			'WatchTower Forecast will provide a calm, evidence-led forecasting experience for teams and leaders who need to understand delivery probability without turning forecasting into a heavy governance exercise.',
 		approach: [
-			'Use delivery evidence as the basis for forecast conversations.',
-			'Surface assumptions, uncertainty and confidence clearly.',
-			'Create a shared language between teams, programmes and portfolios.',
+			'Use delivery-period throughput as the primary forecasting input.',
+			'Present forecast windows, confidence levels and assumptions clearly.',
+			'Help delivery leaders explain uncertainty without losing stakeholder trust.',
 		],
 		future: [
-			'MVP exploration for evidence models and forecast communication.',
-			'Practical views for delivery teams and leadership audiences.',
-			'Integration opportunities with existing delivery data sources.',
+			'Monte Carlo forecast views for team-level delivery windows.',
+			'Confidence and risk summaries that can be used in delivery conversations.',
+			'Workspace foundations for teams managing scope, throughput and reliability.',
 		],
 	},
 	{
-		name: 'Sentinel',
-		slug: 'sentinel',
-		logo: '/images/sentinel-logo.png',
-		positioning: 'Visibility, governance and confidence at every level of delivery.',
+		name: 'WatchTower Narrative',
+		slug: 'narrative',
+		label: 'Future product',
+		positioning: 'Evidence-based delivery narrative for clearer stakeholder communication.',
 		summary:
-			'Governance intelligence for delivery environments where visibility, consistency and confidence matter across teams, programmes and portfolios.',
-		status: 'Product direction defined',
+			'Future narrative intelligence to help teams explain progress, risk and confidence in plain language grounded in delivery evidence.',
+		status: 'Future direction',
 		problem:
-			'Governance can become fragmented across tools, meetings and reports. Sentinel is intended to support clearer oversight without adding unnecessary process burden.',
+			'Delivery updates often drift into subjective commentary. WatchTower Narrative is intended to help teams communicate delivery reality in a consistent, evidence-led way.',
 		vision:
-			'Sentinel will provide a practical governance intelligence layer that helps delivery leaders understand where attention is needed and why it matters.',
+			'WatchTower Narrative will support clearer reporting and stakeholder communication by turning delivery signals into concise, understandable narratives.',
 		approach: [
-			'Focus governance conversations on evidence, risk and outcomes.',
-			'Provide portfolio-level visibility without losing delivery context.',
-			'Support consistent decision-making across levels of delivery.',
+			'Keep communication grounded in delivery evidence.',
+			'Help teams explain risk and confidence without ambiguity.',
+			'Create reusable language for delivery updates and decision forums.',
 		],
 		future: [
-			'Define governance intelligence patterns for programmes and portfolios.',
-			'Explore lightweight oversight models for delivery leadership.',
-			'Connect governance signals with forecasting and narrative intelligence.',
+			'Delivery update drafting support.',
+			'Risk and confidence narrative patterns.',
+			'Connections to forecasting and portfolio signals.',
 		],
 	},
 	{
-		name: 'TorchLite',
-		slug: 'torchlite',
-		logo: '/images/torchlite-logo.png',
-		positioning: 'Delivery clarity without the complexity.',
+		name: 'WatchTower Signals',
+		slug: 'signals',
+		label: 'Future product',
+		positioning: 'Early-warning indicators for delivery risk and reliability.',
 		summary:
-			'Narrative intelligence that helps delivery teams communicate progress, risk and confidence in language that is clear, consistent and useful.',
-		status: 'MVP candidate',
+			'Future signal intelligence to highlight changes in volatility, reliability and delivery risk before they become delivery surprises.',
+		status: 'Future direction',
 		problem:
-			'Delivery reporting can be time-consuming, inconsistent and difficult to interpret. TorchLite is intended to help teams communicate what matters without creating more reporting overhead.',
+			'Delivery risk is often recognised too late. WatchTower Signals is intended to surface early indicators that deserve attention before a forecast becomes unreliable.',
 		vision:
-			'TorchLite will help turn delivery signals into clear narratives that support alignment between teams, stakeholders and leadership.',
+			'WatchTower Signals will act as an early-warning layer for delivery teams and leaders, making risk patterns easier to identify and discuss.',
 		approach: [
-			'Prioritise plain-language delivery communication.',
-			'Help teams explain progress, risk and confidence consistently.',
-			'Support narrative clarity without replacing delivery judgement.',
+			'Monitor delivery indicators that affect forecast confidence.',
+			'Show risk signals in a calm, prioritised way.',
+			'Connect signal trends to practical delivery conversations.',
 		],
 		future: [
-			'MVP exploration for delivery narrative workflows.',
-			'Guidance for consistent progress and risk communication.',
-			'Connections to evidence and governance intelligence over time.',
+			'Scope volatility and throughput stability indicators.',
+			'Reliability and confidence trend summaries.',
+			'Portfolio-level risk signal aggregation.',
+		],
+	},
+	{
+		name: 'WatchTower Portfolio',
+		slug: 'portfolio',
+		label: 'Future product',
+		positioning: 'Portfolio-level delivery intelligence for senior leaders.',
+		summary:
+			'Future portfolio intelligence to help senior delivery leaders compare confidence, risk and reliability across teams and initiatives.',
+		status: 'Future direction',
+		problem:
+			'Portfolio conversations often depend on inconsistent reporting from multiple teams. WatchTower Portfolio is intended to create a clearer view of delivery confidence across initiatives.',
+		vision:
+			'WatchTower Portfolio will help delivery and technology leaders understand where confidence is strong, where risk is rising and where support is needed.',
+		approach: [
+			'Aggregate delivery intelligence without hiding team context.',
+			'Prioritise confidence, risk and reliability over vanity reporting.',
+			'Support portfolio decisions with comparable evidence.',
+		],
+		future: [
+			'Portfolio confidence and risk summaries.',
+			'Cross-team reliability and volatility views.',
+			'Leadership-ready delivery intelligence snapshots.',
 		],
 	},
 ];
@@ -86,30 +111,23 @@ export const products: Product[] = [
 export const roadmapPhases = [
 	{
 		phase: 'Phase 1',
-		title: 'Platform Website',
+		title: 'Forecasting MVP',
 		description:
-			'Establish the WatchTower public presence, product positioning and foundational marketing structure.',
-		status: 'Current foundation',
+			'Build the first WatchTower Forecast experience around delivery-period throughput, Monte Carlo forecast windows and confidence communication.',
+		status: 'Current focus',
 	},
 	{
 		phase: 'Phase 2',
-		title: 'Jektor MVP',
+		title: 'Team Workspace',
 		description:
-			'Explore an evidence-based delivery forecasting MVP focused on clear assumptions, confidence and forecast conversations.',
-		status: 'Directional',
+			'Create workspace foundations for teams to manage delivery data, assumptions, scope movement and forecast conversations in one place.',
+		status: 'Next direction',
 	},
 	{
 		phase: 'Phase 3',
-		title: 'TorchLite MVP',
+		title: 'Delivery Intelligence Platform',
 		description:
-			'Develop narrative intelligence concepts that help teams communicate delivery progress and risk with clarity.',
-		status: 'Directional',
-	},
-	{
-		phase: 'Phase 4',
-		title: 'Sentinel MVP',
-		description:
-			'Shape governance intelligence capabilities for teams, programmes and portfolios.',
-		status: 'Directional',
+			'Expand WatchTower into a broader delivery intelligence platform spanning forecasting, signals, narrative and portfolio insight.',
+		status: 'Future direction',
 	},
 ];

@@ -1,18 +1,18 @@
 # WatchTower Platform
 
-WatchTower is a Delivery Intelligence Platform for teams, programmes and portfolios.
+WatchTower is an emerging SaaS delivery intelligence platform for teams and leaders who need clearer evidence-based forecasts.
 
-The public website establishes the foundation for the WatchTower product presence. It explains the platform vision, introduces the product suite and provides a professional home for future product marketing at `https://watch-tower.co.uk`.
+The public website establishes the foundation for the WatchTower product presence. It explains the platform vision, introduces the emerging product suite and provides a professional home for future product marketing at `https://watch-tower.co.uk`.
 
 ## Platform vision
 
-WatchTower exists to help delivery organisations make clearer decisions using delivery intelligence. The platform direction is centred on three ideas:
+WatchTower exists to help delivery organisations move away from delivery theatre and towards clearer delivery intelligence. The platform direction is centred on three ideas:
 
-- evidence-based delivery forecasting;
-- plain-language delivery communication;
-- practical governance visibility across teams, programmes and portfolios.
+- Monte Carlo forecasting using delivery-period throughput;
+- confidence and risk communication that leaders can explain;
+- early-warning signals for volatility, reliability and portfolio risk.
 
-WatchTower is not positioned as a SaaS application in this foundation phase. It is not a forecasting engine, governance engine, narrative reporting tool or dashboard product. The current website is a product positioning and marketing foundation.
+The first product focus is WatchTower Forecast. Future products extend the platform into narrative, signal and portfolio intelligence.
 
 ## Intended audience
 
@@ -23,8 +23,9 @@ The platform is intended for professional delivery and technology audiences, inc
 - Programme Managers and PMO teams;
 - Heads of Delivery;
 - Technology Leaders;
-- Transformation Leaders.
+- Transformation Leaders;
+- Product teams, portfolio managers and delivery consultants.
 
 ## Design direction
 
-The website should feel professional, modern and credible for an enterprise audience. The visual direction uses a dark theme, restrained interactions, clean typography and the light blue from the WatchTower logo as the site accent colour (`#00A0FF`).
+The website should feel credible, calm, data-led and professional for a senior delivery audience. The visual direction blends a dark navy / charcoal command-centre feel with clean light content sections, subtle beacon and early-warning motifs, rounded dashboard cards and the light blue from the WatchTower logo as the site accent colour (`#00A0FF`).

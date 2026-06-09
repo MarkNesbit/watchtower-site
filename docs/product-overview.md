@@ -1,34 +1,42 @@
 # WatchTower Product Overview
 
-WatchTower consists of three products: Jektor, TorchLite and Sentinel. Each product has a distinct role in the delivery intelligence platform.
+WatchTower is an emerging delivery intelligence suite, starting with forecasting and expanding into narrative, signal and portfolio intelligence.
 
-## Jektor
+## WatchTower Forecast
 
-**Positioning:** Forecast using evidence, not opinion.
+**Positioning:** Monte Carlo forecasting based on delivery-period throughput.
 
-Jektor is focused on evidence-based delivery forecasting. It is intended to help delivery teams and leaders discuss likely outcomes using delivery signals rather than subjective confidence alone.
+WatchTower Forecast is the first product focus. It is intended to help delivery leaders forecast delivery windows using real throughput data, assess confidence and explain delivery risk without relying on guesswork.
 
-**Current status:** Concept and MVP planning.
+**Current status:** Forecasting MVP focus.
 
-## TorchLite
+## WatchTower Narrative
 
-**Positioning:** Delivery clarity without the complexity.
+**Positioning:** Evidence-based delivery narrative for clearer stakeholder communication.
 
-TorchLite is focused on narrative intelligence. It is intended to help delivery teams communicate progress, risk and confidence in language that is clear, consistent and useful.
+WatchTower Narrative is a future product direction focused on helping teams explain progress, risk and confidence in plain language grounded in delivery evidence.
 
-**Current status:** MVP candidate.
+**Current status:** Future direction.
 
-## Sentinel
+## WatchTower Signals
 
-**Positioning:** Visibility, governance and confidence at every level of delivery.
+**Positioning:** Early-warning indicators for delivery risk and reliability.
 
-Sentinel is focused on governance intelligence. It is intended to support clearer oversight across teams, programmes and portfolios without adding unnecessary process burden.
+WatchTower Signals is a future product direction focused on surfacing changes in volatility, reliability and delivery risk before they become delivery surprises.
 
-**Current status:** Product direction defined.
+**Current status:** Future direction.
+
+## WatchTower Portfolio
+
+**Positioning:** Portfolio-level delivery intelligence for senior leaders.
+
+WatchTower Portfolio is a future product direction focused on helping senior delivery leaders compare confidence, risk and reliability across teams and initiatives.
+
+**Current status:** Future direction.
 
 ## Product suite principles
 
-- Product-led, professional positioning.
-- Evidence and clarity over subjective reporting.
-- Support for delivery conversations rather than replacement of delivery judgement.
-- Directional roadmap communication without committed delivery dates.
+- Forecasting starts with real delivery-period throughput data.
+- Confidence, risk and uncertainty should be visible and explainable.
+- Delivery intelligence should reduce theatre rather than create new reporting overhead.
+- The roadmap is directional and does not represent committed delivery dates.

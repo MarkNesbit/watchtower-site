@@ -13,19 +13,22 @@ const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/';
 	<a class="brand" href="/" aria-label="WatchTower home">
 		<img src="/images/watchtower-logo.png" alt="WatchTower" />
 	</a>
-	<nav class="nav" aria-label="Primary navigation">
-		{navItems.map((item) => {
-			const normalizedHref = item.href.replace(/\/$/, '') || '/';
-			const isActive =
-				normalizedHref === '/'
-					? currentPath === '/'
-					: currentPath === normalizedHref || currentPath.startsWith(`${normalizedHref}/`);
+	<div class="header-actions">
+		<nav class="nav" aria-label="Primary navigation">
+			{navItems.map((item) => {
+				const normalizedHref = item.href.replace(/\/$/, '') || '/';
+				const isActive =
+					normalizedHref === '/'
+						? currentPath === '/'
+						: currentPath === normalizedHref || currentPath.startsWith(`${normalizedHref}/`);
 
-			return (
-				<a href={item.href} aria-current={isActive ? 'page' : undefined}>
-					{item.label}
-				</a>
-			);
-		})}
-	</nav>
+				return (
+					<a href={item.href} aria-current={isActive ? 'page' : undefined}>
+						{item.label}
+					</a>
+				);
+			})}
+		</nav>
+		<span class="login-slot" aria-disabled="true">Login</span>
+	</div>
 </header>

@@ -1,21 +1,23 @@
 # WatchTower Site
 
-Public-facing website foundation for the WatchTower Delivery Intelligence Platform.
+Public-facing website foundation for WatchTower, an emerging SaaS delivery intelligence platform.
 
-WatchTower is positioned around three products:
+WatchTower is positioned around evidence-based forecasting and a future delivery intelligence suite:
 
-- **Jektor** — evidence-based delivery forecasting.
-- **TorchLite** — narrative intelligence.
-- **Sentinel** — governance intelligence.
+- **WatchTower Forecast** — Monte Carlo forecasting based on delivery-period throughput.
+- **WatchTower Narrative** — evidence-based delivery narrative for stakeholder communication.
+- **WatchTower Signals** — early-warning indicators for delivery risk and reliability.
+- **WatchTower Portfolio** — portfolio-level delivery intelligence for senior leaders.
 
 ## Routes
 
 - `/`
 - `/about`
 - `/products`
-- `/products/jektor`
-- `/products/sentinel`
-- `/products/torchlite`
+- `/products/forecast`
+- `/products/narrative`
+- `/products/signals`
+- `/products/portfolio`
 - `/roadmap`
 
 ## Development

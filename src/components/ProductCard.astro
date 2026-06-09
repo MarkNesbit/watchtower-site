@@ -11,10 +11,12 @@ const { product, featured = false } = Astro.props;
 
 <article class:list={["product-card", { "product-card--featured": featured }]}>
 	<div class="product-card__topline">
-		<img src={product.logo} alt={`${product.name} logo`} loading="lazy" />
-		<span>{product.status}</span>
+		{product.logo ? <img src={product.logo} alt={`${product.name} logo`} loading="lazy" /> : <span class="product-card__monogram" aria-hidden="true">WT</span>}
+		<span>{product.label}</span>
 	</div>
+	<h3>{product.name}</h3>
 	<p class="product-card__positioning">{product.positioning}</p>
 	<p>{product.summary}</p>
+	<strong>{product.status}</strong>
 	<a href={`/products/${product.slug}`} aria-label={`Learn more about ${product.name}`}>Explore {product.name}</a>
 </article>

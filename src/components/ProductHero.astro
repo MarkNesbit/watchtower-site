@@ -8,7 +8,7 @@ type Props = {
 const { product } = Astro.props;
 ---
 
-<section class="product-hero section">
+<section class="product-hero section dark-section">
 	<div>
 		<p class="eyebrow">WatchTower product</p>
 		<h1>{product.name}</h1>
@@ -16,6 +16,6 @@ const { product } = Astro.props;
 		<p>{product.summary}</p>
 	</div>
 	<div class="product-hero__mark" aria-hidden="true">
-		<img src={product.logo} alt="" />
+		<img src={product.logo ?? '/images/watchtower-logo.png'} alt="" />
 	</div>
 </section>
