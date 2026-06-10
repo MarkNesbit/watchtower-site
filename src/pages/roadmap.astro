@@ -1,0 +1,18 @@
+---
+import Hero from '../components/Hero.astro';
+import RoadmapSection from '../components/RoadmapSection.astro';
+import SiteLayout from '../layouts/SiteLayout.astro';
+---
+
+<SiteLayout
+	title="Roadmap | WatchTower"
+	description="A directional roadmap for the WatchTower forecasting MVP, team workspace and delivery intelligence platform."
+>
+	<Hero
+		eyebrow="Roadmap"
+		title="A focused path from forecasting MVP to delivery intelligence platform."
+		text="The roadmap is directional: it shows the intended product sequence without committing to release dates or fixed scope."
+	/>
+
+	<RoadmapSection />
+</SiteLayout>

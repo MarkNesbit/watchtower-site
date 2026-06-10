@@ -1,0 +1,32 @@
+---
+import { roadmapPhases } from '../content';
+
+type Props = {
+	preview?: boolean;
+};
+
+const { preview = false } = Astro.props;
+const phases = preview ? roadmapPhases.slice(0, 3) : roadmapPhases;
+---
+
+<section class="section roadmap-section" aria-labelledby="roadmap-title">
+	<div class="section-heading">
+		<p class="eyebrow">Roadmap</p>
+		<h2 id="roadmap-title">A directional product roadmap</h2>
+		<p>
+			The roadmap describes intended areas of focus. It is not a commitment to delivery dates or
+			release scope.
+		</p>
+	</div>
+	<div class="roadmap-grid">
+		{phases.map((phase) => (
+			<article class="roadmap-card">
+				<span>{phase.phase}</span>
+				<h3>{phase.title}</h3>
+				<p>{phase.description}</p>
+				<strong>{phase.status}</strong>
+			</article>
+		))}
+	</div>
+	{preview && <a class="text-link" href="/roadmap">View the full roadmap</a>}
+</section>

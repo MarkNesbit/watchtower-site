@@ -1,11 +1,104 @@
 ---
-import Welcome from '../components/Welcome.astro';
-import Layout from '../layouts/Layout.astro';
+import ProductCard from '../components/ProductCard.astro';
+import RoadmapSection from '../components/RoadmapSection.astro';
+import SiteLayout from '../layouts/SiteLayout.astro';
+import { products } from '../content';
 
-// Welcome to Astro! Wondering what to do next? Check out the Astro documentation at https://docs.astro.build
-// Don't want to use any of this? Delete everything in this file, the `assets`, `components`, and `layouts` directories, and start fresh.
+const dashboardCards = [
+	{ label: 'Forecast confidence', value: '78%', note: 'Stable range' },
+	{ label: 'Delivery window', value: '8–11 weeks', note: 'P50 to P85' },
+	{ label: 'Scope volatility', value: 'Moderate', note: '+6 items / period' },
+	{ label: 'Throughput trend', value: '14.2', note: 'Items per period' },
+	{ label: 'Reliability rating', value: 'B+', note: 'Improving' },
+];
 ---
 
-<Layout>
-	<Welcome />
-</Layout>
+<SiteLayout
+	title="WatchTower | Delivery Intelligence Forecasting"
+	description="WatchTower helps delivery leaders use real throughput data to forecast delivery windows, assess confidence and explain delivery risk."
+>
+	<section class="home-hero" aria-labelledby="home-hero-title">
+		<div class="home-hero__content">
+			<p class="eyebrow">Delivery intelligence platform</p>
+			<img class="home-hero__logo" src="/images/watchtower-logo.png" alt="WatchTower logo" />
+			<h1 id="home-hero-title">Delivery intelligence for teams that need clearer forecasts.</h1>
+			<p class="home-hero__text">
+				WatchTower helps delivery leaders use real throughput data to forecast delivery windows,
+				assess confidence and explain delivery risk without relying on guesswork.
+			</p>
+			<div class="actions">
+				<a class="button button--primary" href="/products">Explore Products</a>
+				<a class="button button--secondary" href="/roadmap">View Roadmap</a>
+			</div>
+		</div>
+
+		<div class="dashboard-preview" aria-label="Example delivery intelligence dashboard">
+			<div class="dashboard-preview__header">
+				<div>
+					<span class="beacon" aria-hidden="true"></span>
+					<p>Early-warning delivery view</p>
+				</div>
+				<strong>Live example</strong>
+			</div>
+			<div class="dashboard-preview__grid">
+				{dashboardCards.map((card) => (
+					<article class="metric-card">
+						<span>{card.label}</span>
+						<strong>{card.value}</strong>
+						<p>{card.note}</p>
+					</article>
+				))}
+			</div>
+		</div>
+	</section>
+
+	<section class="section light-section" aria-labelledby="platform-overview">
+		<div class="section-heading">
+			<p class="eyebrow">Command-centre clarity</p>
+			<h2 id="platform-overview">Forecasting, confidence and risk in one calm operating picture</h2>
+			<p>
+				WatchTower is being designed for senior delivery leaders, product teams, portfolio managers
+				and consultants who need evidence-led forecasts that can stand up to scrutiny.
+			</p>
+		</div>
+		<div class="content-grid content-grid--three">
+			<article class="content-card">
+				<h3>Real throughput data</h3>
+				<p>
+					Use observed delivery-period throughput as the basis for forecast conversations, not single
+					date guesses or optimism bias.
+				</p>
+			</article>
+			<article class="content-card">
+				<h3>Clear confidence ranges</h3>
+				<p>
+					Explain delivery windows and uncertainty in a way that helps stakeholders understand what is
+					likely and where confidence changes.
+				</p>
+			</article>
+			<article class="content-card">
+				<h3>Early-warning signals</h3>
+				<p>
+					Highlight volatility, reliability and trend changes before they become missed expectations
+					or delivery surprises.
+				</p>
+			</article>
+		</div>
+	</section>
+
+	<section class="section" aria-labelledby="product-overview">
+		<div class="section-heading">
+			<p class="eyebrow">Emerging suite</p>
+			<h2 id="product-overview">Starting with forecasting. Built for delivery intelligence.</h2>
+			<p>
+				WatchTower starts with Monte Carlo forecasting and grows towards a broader suite for
+				narrative, signal and portfolio intelligence.
+			</p>
+		</div>
+		<div class="product-grid">
+			{products.map((product, index) => <ProductCard product={product} featured={index === 0} />)}
+		</div>
+	</section>
+
+	<RoadmapSection preview />
+</SiteLayout>

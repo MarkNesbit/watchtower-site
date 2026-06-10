@@ -1,0 +1,23 @@
+---
+import type { Product } from '../content';
+
+type Props = {
+	product: Product;
+	featured?: boolean;
+};
+
+const { product, featured = false } = Astro.props;
+const logoAlt = product.logo?.includes('watchtower-logo') ? 'WatchTower logo' : `${product.name} logo`;
+---
+
+<article class:list={["product-card", { "product-card--featured": featured }]}>
+	<div class="product-card__topline">
+		{product.logo ? <img src={product.logo} alt={logoAlt} loading="lazy" /> : <span class="product-card__monogram" aria-hidden="true">WT</span>}
+		<span>{product.label}</span>
+	</div>
+	<h3>{product.name}</h3>
+	<p class="product-card__positioning">{product.positioning}</p>
+	<p>{product.summary}</p>
+	<strong>{product.status}</strong>
+	<a href={`/products/${product.slug}`} aria-label={`Learn more about ${product.name}`}>Explore {product.name}</a>
+</article>
