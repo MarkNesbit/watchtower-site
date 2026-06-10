@@ -1,0 +1,59 @@
+---
+import Hero from '../components/Hero.astro';
+import SiteLayout from '../layouts/SiteLayout.astro';
+import { products } from '../content';
+---
+
+<SiteLayout
+	title="About | WatchTower"
+	description="Learn why WatchTower is being developed from real delivery leadership experience."
+>
+	<Hero
+		eyebrow="About WatchTower"
+		title="Built from delivery leadership experience, not reporting theatre."
+		text="WatchTower is being developed to help teams move away from delivery theatre and towards clearer evidence-based forecasting."
+	/>
+
+	<section class="section light-section" aria-labelledby="why-title">
+		<div class="content-grid content-grid--two">
+			<article class="content-card">
+				<p class="eyebrow">Why WatchTower exists</p>
+				<h2 id="why-title">Delivery leaders need evidence they can explain</h2>
+				<p>
+					WatchTower is shaped by real delivery leadership experience: the pressure to provide dates,
+					the difficulty of explaining uncertainty and the frustration of status reporting that hides
+					rather than clarifies delivery risk.
+				</p>
+			</article>
+			<article class="content-card">
+				<p class="eyebrow">Philosophy</p>
+				<h2>Move from theatre to forecasting clarity</h2>
+				<p>
+					The platform is intended to support calmer delivery conversations using throughput data,
+					forecast windows, confidence and early warning indicators. It helps leaders explain risk
+					without pretending uncertainty does not exist.
+				</p>
+			</article>
+		</div>
+	</section>
+
+	<section class="section" aria-labelledby="suite-title">
+		<div class="section-heading">
+			<p class="eyebrow">Product suite overview</p>
+			<h2 id="suite-title">A practical suite for delivery intelligence</h2>
+			<p>
+				WatchTower begins with forecasting and is designed to expand into narrative, signal and
+				portfolio intelligence for senior delivery leaders and product organisations.
+			</p>
+		</div>
+		<div class="content-grid content-grid--two">
+			{products.map((product) => (
+				<article class="content-card">
+					<h3>{product.name}</h3>
+					<p><strong>{product.positioning}</strong></p>
+					<p>{product.summary}</p>
+				</article>
+			))}
+		</div>
+	</section>
+</SiteLayout>

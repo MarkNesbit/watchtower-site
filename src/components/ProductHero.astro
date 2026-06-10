@@ -1,0 +1,21 @@
+---
+import type { Product } from '../content';
+
+type Props = {
+	product: Product;
+};
+
+const { product } = Astro.props;
+---
+
+<section class="product-hero section dark-section">
+	<div>
+		<p class="eyebrow">WatchTower product</p>
+		<h1>{product.name}</h1>
+		<p class="product-hero__positioning">{product.positioning}</p>
+		<p>{product.summary}</p>
+	</div>
+	<div class="product-hero__mark" aria-hidden="true">
+		<img src={product.logo ?? '/images/watchtower-logo.svg'} alt="" />
+	</div>
+</section>

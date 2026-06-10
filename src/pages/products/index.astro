@@ -1,0 +1,47 @@
+---
+import Hero from '../../components/Hero.astro';
+import ProductCard from '../../components/ProductCard.astro';
+import SiteLayout from '../../layouts/SiteLayout.astro';
+import { products } from '../../content';
+
+const [mainProduct, ...futureProducts] = products;
+---
+
+<SiteLayout
+	title="Products | WatchTower"
+	description="Explore the emerging WatchTower delivery intelligence suite, starting with forecasting."
+>
+	<Hero
+		eyebrow="Products"
+		title="An emerging delivery intelligence suite, starting with forecasting."
+		text="WatchTower Forecast is the first product focus: Monte Carlo forecasting based on delivery-period throughput. Future products extend the same evidence-led approach into narrative, signals and portfolio intelligence."
+	/>
+
+	<section class="section light-section" aria-labelledby="main-product">
+		<div class="section-heading">
+			<p class="eyebrow">Main product</p>
+			<h2 id="main-product">WatchTower Forecast</h2>
+			<p>
+				The first WatchTower product is focused on clearer forecasting: using delivery-period
+				throughput to produce Monte Carlo delivery windows, confidence ranges and risk context.
+			</p>
+		</div>
+		<div class="product-grid product-grid--single">
+			<ProductCard product={mainProduct} featured />
+		</div>
+	</section>
+
+	<section class="section" aria-labelledby="future-products">
+		<div class="section-heading">
+			<p class="eyebrow">Future products</p>
+			<h2 id="future-products">Narrative, signals and portfolio intelligence</h2>
+			<p>
+				The wider suite is directional. These products show how WatchTower may expand from team
+				forecasting into a broader delivery intelligence platform.
+			</p>
+		</div>
+		<div class="product-grid">
+			{futureProducts.map((product) => <ProductCard product={product} />)}
+		</div>
+	</section>
+</SiteLayout>
