@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 180" role="img" aria-labelledby="title desc">
+  <title id="title">WatchTower logo</title>
+  <desc id="desc">WatchTower wordmark with a beacon tower mark</desc>
+  <defs>
+    <linearGradient id="towerGradient" x1="38" x2="142" y1="154" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00A0FF"/>
+      <stop offset="1" stop-color="#6DDBFF"/>
+    </linearGradient>
+    <linearGradient id="wordGradient" x1="176" x2="610" y1="48" y2="126" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F6FBFF"/>
+      <stop offset="1" stop-color="#BFD6E8"/>
+    </linearGradient>
+    <filter id="beaconGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0 0 0 0 0 0.627 0 0 0 0 1 0 0 0 0.65 0"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g fill="none" fill-rule="evenodd">
+    <path d="M90 25 34 154h29l10-25h62l10 25h29L118 25H90Zm-7 79 21-52 21 52H83Z" fill="url(#towerGradient)"/>
+    <path d="M104 55v92" stroke="#E7F7FF" stroke-width="10" stroke-linecap="round" opacity=".92"/>
+    <path d="M58 146h92" stroke="#00A0FF" stroke-width="10" stroke-linecap="round"/>
+    <circle cx="104" cy="43" r="11" fill="#6DDBFF" filter="url(#beaconGlow)"/>
+    <path d="M68 51c18-20 54-20 72 0M47 34c29-32 85-32 114 0" stroke="#39C2FF" stroke-width="8" stroke-linecap="round" opacity=".65"/>
+    <text x="192" y="106" fill="url(#wordGradient)" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="58" font-weight="800" letter-spacing="-2.4">WatchTower</text>
+    <text x="196" y="136" fill="#69CFFF" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="3.2">DELIVERY INTELLIGENCE</text>
+  </g>
+</svg>
