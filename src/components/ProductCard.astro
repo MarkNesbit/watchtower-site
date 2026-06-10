@@ -7,7 +7,7 @@ type Props = {
 };
 
 const { product, featured = false } = Astro.props;
-const logoAlt = product.logo?.includes('watchtower-logo.svg') ? 'WatchTower logo' : `${product.name} logo`;
+const logoAlt = product.logo?.includes('watchtower-logo') ? 'WatchTower logo' : `${product.name} logo`;
 ---
 
 <article class:list={["product-card", { "product-card--featured": featured }]}>

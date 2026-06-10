@@ -16,7 +16,7 @@ export const products: Product[] = [
 	{
 		name: 'WatchTower Forecast',
 		slug: 'forecast',
-		logo: '/images/watchtower-logo.svg',
+		logo: '/images/watchtower-logo.png',
 		label: 'Core product',
 		positioning: 'Monte Carlo forecasting based on delivery-period throughput.',
 		summary:
