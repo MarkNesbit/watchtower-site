@@ -15,9 +15,9 @@ to authenticated;
 
 grant update (
   name,
-  updated_at,
-  archived_at,
-  deleted_at
+  slug,
+  type,
+  updated_at
 ) on public.organisations to authenticated;
 
 grant update (
