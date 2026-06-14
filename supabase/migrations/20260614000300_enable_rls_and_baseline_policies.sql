@@ -44,6 +44,30 @@ as $$
   );
 $$;
 
+
+create or replace function public.prevent_non_owner_organisation_destructive_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (old.archived_at is distinct from new.archived_at
+      or old.deleted_at is distinct from new.deleted_at)
+     and coalesce(auth.role(), '') <> 'service_role'
+     and not public.has_active_organisation_role(old.id, array['owner']) then
+    raise exception 'Only organisation owners may archive or delete organisations.'
+      using errcode = '42501';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger prevent_non_owner_organisation_destructive_update
+  before update on public.organisations
+  for each row execute function public.prevent_non_owner_organisation_destructive_update();
+
 create policy "Users can read their own profile"
   on public.profiles for select
   to authenticated

@@ -15,8 +15,6 @@ to authenticated;
 
 grant update (
   name,
-  slug,
-  type,
   updated_at,
   archived_at,
   deleted_at
@@ -53,5 +51,6 @@ to service_role;
 
 revoke all on function public.is_active_organisation_member(uuid, uuid) from public;
 revoke all on function public.has_active_organisation_role(uuid, text[], uuid) from public;
+revoke all on function public.prevent_non_owner_organisation_destructive_update() from public;
 grant execute on function public.is_active_organisation_member(uuid, uuid) to authenticated, service_role;
 grant execute on function public.has_active_organisation_role(uuid, text[], uuid) to authenticated, service_role;
