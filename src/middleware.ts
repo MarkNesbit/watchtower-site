@@ -1,20 +1,7 @@
 import { defineMiddleware } from 'astro:middleware';
-import { AUTH_SESSION_COOKIE } from './lib/authConstants';
 
-const protectedPrefixes = ['/app'];
-const guestOnlyPaths = ['/login', '/register'];
-
-export const onRequest = defineMiddleware((context, next) => {
-	const path = context.url.pathname.replace(/\/$/, '') || '/';
-	const hasSessionCookie = context.cookies.get(AUTH_SESSION_COOKIE)?.value === 'signed-in';
-
-	if (protectedPrefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`)) && !hasSessionCookie) {
-		return context.redirect(`/login?redirectTo=${encodeURIComponent(context.url.pathname)}`);
-	}
-
-	if (guestOnlyPaths.includes(path) && hasSessionCookie) {
-		return context.redirect('/app');
-	}
-
-	return next();
-});
+// This site currently builds as static output, so middleware cannot prove a
+// Supabase session at the edge/server. Do not treat client-written marker
+// cookies as authentication; protected pages perform a real Supabase session
+// check in the browser before revealing placeholder app content.
+export const onRequest = defineMiddleware((_context, next) => next());

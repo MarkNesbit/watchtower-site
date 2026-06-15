@@ -1,11 +1,10 @@
 <button class="button button--secondary" type="button" data-sign-out>Sign out</button>
 <script>
-	import { recordAuthAuditEvent, setSessionCookie } from '../../lib/authClient';
+	import { recordAuthAuditEvent } from '../../lib/authClient';
 	import { supabase } from '../../lib/supabaseClient';
 	document.querySelector('[data-sign-out]')?.addEventListener('click', async () => {
 		await recordAuthAuditEvent('user.logged_out');
 		await supabase.auth.signOut();
-		setSessionCookie(false);
 		window.location.assign('/login');
 	});
 </script>

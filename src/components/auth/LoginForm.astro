@@ -8,7 +8,8 @@
 	<p><a href="/forgot-password">Forgot your password?</a> · <a href="/register">Create an account</a></p>
 </form>
 <script>
-	import { recordAuthAuditEvent, setSessionCookie } from '../../lib/authClient';
+	import { recordAuthAuditEvent } from '../../lib/authClient';
+	import { getSafeRedirectPath } from '../../lib/redirect';
 	import { supabase } from '../../lib/supabaseClient';
 	const form = document.querySelector('[data-login-form]');
 	const message = form?.querySelector('[data-message]');
@@ -23,9 +24,8 @@
 			if (message) message.textContent = 'Unable to sign in. Check your email, password, and email verification status.';
 			return;
 		}
-		setSessionCookie(true);
 		await recordAuthAuditEvent('user.logged_in');
-		const redirectTo = new URLSearchParams(window.location.search).get('redirectTo') || '/app';
+		const redirectTo = getSafeRedirectPath(new URLSearchParams(window.location.search).get('redirectTo'));
 		window.location.assign(redirectTo);
 	});
 </script>
