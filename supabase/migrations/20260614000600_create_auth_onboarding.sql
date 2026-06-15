@@ -69,36 +69,84 @@ begin
     return new;
   end if;
 
-  if tg_op = 'UPDATE' and old.email_confirmed_at is not null then
-    return new;
-  end if;
-
-  if exists (select 1 from public.profiles where id = new.id) then
-    return new;
-  end if;
-
   derived_display_name := public.derive_display_name_from_email(new.email);
   workspace_name := derived_display_name || ' Workspace';
 
   insert into public.profiles (id, email, display_name, created_by, updated_by)
-  values (new.id, new.email, derived_display_name, new.id, new.id);
+  values (new.id, new.email, derived_display_name, new.id, new.id)
+  on conflict (id) do update
+    set email = excluded.email,
+        updated_by = excluded.updated_by;
 
-  insert into public.organisations (name, slug, type, created_by)
-  values (workspace_name, public.unique_workspace_slug(workspace_name), 'personal', new.id)
-  returning id into workspace_id;
+  select organisations.id
+    into workspace_id
+  from public.organisations
+  where organisations.created_by = new.id
+    and organisations.type = 'personal'
+    and organisations.deleted_at is null
+  order by organisations.created_at asc
+  limit 1;
+
+  if workspace_id is null then
+    insert into public.organisations (name, slug, type, created_by)
+    values (workspace_name, public.unique_workspace_slug(workspace_name), 'personal', new.id)
+    returning id into workspace_id;
+  end if;
 
   insert into public.organisation_members (organisation_id, user_id, role, status, joined_at)
-  values (workspace_id, new.id, 'owner', 'active', now());
+  values (workspace_id, new.id, 'owner', 'active', now())
+  on conflict (organisation_id, user_id) do update
+    set role = 'owner',
+        status = 'active',
+        joined_at = coalesce(public.organisation_members.joined_at, excluded.joined_at);
 
   insert into public.organisation_settings (organisation_id)
-  values (workspace_id);
+  values (workspace_id)
+  on conflict (organisation_id) do nothing;
 
   insert into public.audit_log (organisation_id, actor_user_id, action, entity_type, entity_id, new_values)
-  values
-    (null, new.id, 'user.registered', 'profile', new.id, jsonb_build_object('email', new.email, 'display_name', derived_display_name)),
-    (null, new.id, 'user.email_verified', 'profile', new.id, jsonb_build_object('email_confirmed_at', new.email_confirmed_at)),
-    (workspace_id, new.id, 'workspace.created', 'organisation', workspace_id, jsonb_build_object('name', workspace_name, 'type', 'personal')),
-    (workspace_id, new.id, 'member.joined', 'member', new.id, jsonb_build_object('role', 'owner', 'status', 'active'));
+  select null, new.id, 'user.registered', 'profile', new.id, jsonb_build_object('email', new.email, 'display_name', derived_display_name)
+  where not exists (
+    select 1 from public.audit_log
+    where actor_user_id = new.id
+      and action = 'user.registered'
+      and entity_type = 'profile'
+      and entity_id = new.id
+      and organisation_id is null
+  );
+
+  insert into public.audit_log (organisation_id, actor_user_id, action, entity_type, entity_id, new_values)
+  select null, new.id, 'user.email_verified', 'profile', new.id, jsonb_build_object('email_confirmed_at', new.email_confirmed_at)
+  where not exists (
+    select 1 from public.audit_log
+    where actor_user_id = new.id
+      and action = 'user.email_verified'
+      and entity_type = 'profile'
+      and entity_id = new.id
+      and organisation_id is null
+  );
+
+  insert into public.audit_log (organisation_id, actor_user_id, action, entity_type, entity_id, new_values)
+  select workspace_id, new.id, 'workspace.created', 'organisation', workspace_id, jsonb_build_object('name', workspace_name, 'type', 'personal')
+  where not exists (
+    select 1 from public.audit_log
+    where organisation_id = workspace_id
+      and actor_user_id = new.id
+      and action = 'workspace.created'
+      and entity_type = 'organisation'
+      and entity_id = workspace_id
+  );
+
+  insert into public.audit_log (organisation_id, actor_user_id, action, entity_type, entity_id, new_values)
+  select workspace_id, new.id, 'member.joined', 'member', new.id, jsonb_build_object('role', 'owner', 'status', 'active')
+  where not exists (
+    select 1 from public.audit_log
+    where organisation_id = workspace_id
+      and actor_user_id = new.id
+      and action = 'member.joined'
+      and entity_type = 'member'
+      and entity_id = new.id
+  );
 
   return new;
 end;
