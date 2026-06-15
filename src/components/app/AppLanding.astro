@@ -1,0 +1,16 @@
+<section class="section light-section" data-app-landing>
+	<div class="content-card">
+		<p class="eyebrow">Authenticated area</p>
+		<h1>Welcome to WatchTower</h1>
+		<p data-welcome-message>Your personal workspace is being prepared.</p>
+	</div>
+</section>
+<script>
+	import { supabase } from '../../lib/supabaseClient';
+	const message = document.querySelector('[data-welcome-message]');
+	const { data } = await supabase.auth.getUser();
+	if (data.user && message) {
+		const { data: profile } = await supabase.from('profiles').select('display_name').eq('id', data.user.id).maybeSingle();
+		message.textContent = `Signed in as ${profile?.display_name ?? data.user.email}. Your workspace foundation is ready.`;
+	}
+</script>
