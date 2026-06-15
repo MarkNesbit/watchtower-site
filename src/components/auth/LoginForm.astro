@@ -1,0 +1,31 @@
+<form class="auth-card" data-login-form>
+	<p class="eyebrow">Sign in</p>
+	<h1>Log in to WatchTower</h1>
+	<label>Email<input name="email" type="email" autocomplete="email" required /></label>
+	<label>Password<input name="password" type="password" autocomplete="current-password" required minlength="15" maxlength="128" /></label>
+	<button class="button button--primary" type="submit">Log in</button>
+	<p class="form-message" data-message></p>
+	<p><a href="/forgot-password">Forgot your password?</a> · <a href="/register">Create an account</a></p>
+</form>
+<script>
+	import { recordAuthAuditEvent, setSessionCookie } from '../../lib/authClient';
+	import { supabase } from '../../lib/supabaseClient';
+	const form = document.querySelector('[data-login-form]');
+	const message = form?.querySelector('[data-message]');
+	form?.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		const data = new FormData(form);
+		const email = String(data.get('email') ?? '');
+		const password = String(data.get('password') ?? '');
+		if (message) message.textContent = 'Signing in…';
+		const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password });
+		if (error || !authData.session) {
+			if (message) message.textContent = 'Unable to sign in. Check your email, password, and email verification status.';
+			return;
+		}
+		setSessionCookie(true);
+		await recordAuthAuditEvent('user.logged_in');
+		const redirectTo = new URLSearchParams(window.location.search).get('redirectTo') || '/app';
+		window.location.assign(redirectTo);
+	});
+</script>

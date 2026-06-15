@@ -1,0 +1,38 @@
+<div class="auth-status" data-auth-status hidden></div>
+<script>
+	import { refreshSessionCookie, setSessionCookie } from '../../lib/authClient';
+	import { supabase } from '../../lib/supabaseClient';
+
+	const status = document.querySelector('[data-auth-status]');
+	const publicAuthPaths = ['/login', '/register'];
+	const protectedPrefixes = ['/app'];
+	const path = window.location.pathname.replace(/\/$/, '') || '/';
+
+	async function syncAuthState() {
+		const session = await refreshSessionCookie();
+		const isProtected = protectedPrefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+
+		if (!session && isProtected) {
+			window.location.replace(`/login?redirectTo=${encodeURIComponent(window.location.pathname)}`);
+			return;
+		}
+
+		if (session && publicAuthPaths.includes(path)) {
+			window.location.replace('/app');
+			return;
+		}
+
+		if (status) {
+			status.toggleAttribute('hidden', true);
+		}
+	}
+
+	supabase.auth.onAuthStateChange((event, session) => {
+		setSessionCookie(Boolean(session));
+		if (event === 'SIGNED_OUT' && protectedPrefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))) {
+			window.location.replace('/login');
+		}
+	});
+
+	syncAuthState();
+</script>

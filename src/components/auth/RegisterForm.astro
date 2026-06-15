@@ -1,0 +1,36 @@
+<form class="auth-card" data-register-form>
+	<p class="eyebrow">Create account</p>
+	<h1>Register for WatchTower</h1>
+	<label>Email<input name="email" type="email" autocomplete="email" required /></label>
+	<label>Password<input name="password" type="password" autocomplete="new-password" required minlength="15" maxlength="128" /></label>
+	<button class="button button--primary" type="submit">Create account</button>
+	<p class="form-message" data-message></p>
+	<p>Already registered? <a href="/login">Log in</a></p>
+</form>
+<script>
+	import { deriveDisplayName } from '../../lib/authClient';
+	import { supabase } from '../../lib/supabaseClient';
+	const form = document.querySelector('[data-register-form]');
+	const message = form?.querySelector('[data-message]');
+	form?.addEventListener('submit', async (event) => {
+		event.preventDefault();
+		const data = new FormData(form);
+		const email = String(data.get('email') ?? '');
+		const password = String(data.get('password') ?? '');
+		if (message) message.textContent = 'Creating account…';
+		const { error } = await supabase.auth.signUp({
+			email,
+			password,
+			options: {
+				emailRedirectTo: `${window.location.origin}/login`,
+				data: { display_name: deriveDisplayName(email) },
+			},
+		});
+		if (error) {
+			if (message) message.textContent = error.message;
+			return;
+		}
+		if (message) message.textContent = 'Registration submitted. Check your email to verify your account before logging in.';
+		form.reset();
+	});
+</script>
