@@ -19,10 +19,18 @@ test('Safe unique slug handling appends the next available suffix', () => {
 	);
 });
 
-test('Viewer cannot create projects while owner admin and member can', async () => {
+test('Viewer cannot create projects while owner admin and permitted members can', async () => {
 	const sql = await readFile(migrationPath, 'utf8');
-	assert.match(sql, /array\['owner', 'admin', 'member'\]/);
+	assert.match(sql, /array\['owner', 'admin'\]/);
+	assert.match(sql, /array\['member'\]/);
 	assert.doesNotMatch(sql, /array\['owner', 'admin', 'member', 'viewer'\]/);
+});
+
+test('Members can create projects only when workspace settings allow it', async () => {
+	const sql = await readFile(migrationPath, 'utf8');
+	assert.match(sql, /from public\.organisation_settings os/);
+	assert.match(sql, /os\.organisation_id = projects\.organisation_id/);
+	assert.match(sql, /os\.allow_member_project_creation = true/);
 });
 
 test('Project records are scoped by organisation_id', async () => {
@@ -47,4 +55,24 @@ test('No out-of-scope tables are created', async () => {
 	for (const table of forbiddenTables) {
 		assert.doesNotMatch(sql, new RegExp(`create\\s+table\\s+(public\\.)?${table}\\b`, 'i'));
 	}
+});
+
+
+test('Current workspace lookup is scoped to the signed-in user membership', async () => {
+	const source = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
+	assert.match(source, /supabase\.auth\.getUser\(\)/);
+	assert.match(source, /\.eq\('user_id', userData\.user\.id\)/);
+});
+
+test('Project list and detail render database values with safe DOM text APIs', async () => {
+	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
+	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
+	for (const source of [listSource, detailSource]) {
+		assert.doesNotMatch(source, /innerHTML\s*=/);
+		assert.match(source, /textContent/);
+		assert.match(source, /createElement/);
+	}
+	assert.match(listSource, /link\.textContent = project\.name/);
+	assert.match(detailSource, /heading\.textContent = project\.name/);
+	assert.match(detailSource, /description\.textContent = project\.description/);
 });

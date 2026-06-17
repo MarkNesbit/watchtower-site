@@ -83,12 +83,23 @@ create policy "Active members can read projects"
   to authenticated
   using (public.is_active_organisation_member(projects.organisation_id));
 
-create policy "Owners admins and members can create projects"
+create policy "Owners admins and permitted members can create projects"
   on public.projects for insert
   to authenticated
   with check (
     created_by = auth.uid()
-    and public.has_active_organisation_role(projects.organisation_id, array['owner', 'admin', 'member'])
+    and (
+      public.has_active_organisation_role(projects.organisation_id, array['owner', 'admin'])
+      or (
+        public.has_active_organisation_role(projects.organisation_id, array['member'])
+        and exists (
+          select 1
+          from public.organisation_settings os
+          where os.organisation_id = projects.organisation_id
+            and os.allow_member_project_creation = true
+        )
+      )
+    )
   );
 
 create policy "Owners admins and members can update projects"

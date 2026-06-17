@@ -7,9 +7,14 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 export { buildUniqueSlug, slugifyProjectName };
 
 export async function getCurrentWorkspace() {
+	const { data: userData, error: userError } = await supabase.auth.getUser();
+	if (userError) throw userError;
+	if (!userData.user) throw new Error('You must be signed in to access a workspace.');
+
 	const { data, error } = await supabase
 		.from('organisation_members')
 		.select('role, joined_at, created_at, organisations(id, name)')
+		.eq('user_id', userData.user.id)
 		.eq('status', 'active')
 		.order('joined_at', { ascending: true, nullsFirst: false })
 		.order('created_at', { ascending: true })
@@ -28,6 +33,17 @@ export async function createProject(input: { name: string; description?: string;
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation) throw new Error('No active workspace is available.');
 	if (workspace.role === 'viewer') throw new Error('Your workspace role does not permit project creation.');
+	if (workspace.role === 'member') {
+		const { data: settings, error: settingsError } = await supabase
+			.from('organisation_settings')
+			.select('allow_member_project_creation')
+			.eq('organisation_id', organisation.id)
+			.maybeSingle();
+		if (settingsError) throw settingsError;
+		if (!settings?.allow_member_project_creation) {
+			throw new Error('Members cannot create projects in this workspace.');
+		}
+	}
 
 	const status = input.status && PROJECT_STATUSES.includes(input.status) ? input.status : 'proposed';
 	const baseSlug = slugifyProjectName(name);

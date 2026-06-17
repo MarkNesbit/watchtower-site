@@ -12,6 +12,15 @@ const projectId = Astro.params.projectId;
 	import { supabase } from '../../../lib/supabaseClient';
 	import { getCurrentWorkspace } from '../../../lib/projects';
 	const content = document.querySelector('[data-project-content]');
+
+	function appendDefinition(list, termText, descriptionText) {
+		const term = document.createElement('dt');
+		term.textContent = termText;
+		const description = document.createElement('dd');
+		description.textContent = descriptionText;
+		list.append(term, description);
+	}
+
 	const workspace = await getCurrentWorkspace();
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	const { data: project, error } = organisation
@@ -30,7 +39,29 @@ const projectId = Astro.params.projectId;
 	} else if (content && !project) {
 		content.textContent = 'Project not found or you do not have access.';
 	} else if (content && project) {
-		const comingSoon = ['Risks', 'Issues', 'Decisions', 'Actions', 'Timeline', 'Forecasting'];
-		content.innerHTML = `<h1>${project.name}</h1><p>${project.description ?? 'No description provided.'}</p><dl><dt>Status</dt><dd>${project.status}</dd><dt>Health</dt><dd>${project.health}</dd><dt>Created</dt><dd>${new Date(project.created_at).toLocaleString()}</dd><dt>Last updated</dt><dd>${new Date(project.updated_at).toLocaleString()}</dd></dl><div class="placeholder-grid">${comingSoon.map((title) => `<section class="content-card"><h2>${title}</h2><p>Coming soon</p></section>`).join('')}</div>`;
+		const heading = document.createElement('h1');
+		heading.textContent = project.name;
+		const description = document.createElement('p');
+		description.textContent = project.description ?? 'No description provided.';
+		const metadata = document.createElement('dl');
+		appendDefinition(metadata, 'Status', project.status);
+		appendDefinition(metadata, 'Health', project.health);
+		appendDefinition(metadata, 'Created', new Date(project.created_at).toLocaleString());
+		appendDefinition(metadata, 'Last updated', new Date(project.updated_at).toLocaleString());
+
+		const placeholderGrid = document.createElement('div');
+		placeholderGrid.className = 'placeholder-grid';
+		for (const title of ['Risks', 'Issues', 'Decisions', 'Actions', 'Timeline', 'Forecasting']) {
+			const section = document.createElement('section');
+			section.className = 'content-card';
+			const sectionHeading = document.createElement('h2');
+			sectionHeading.textContent = title;
+			const sectionText = document.createElement('p');
+			sectionText.textContent = 'Coming soon';
+			section.append(sectionHeading, sectionText);
+			placeholderGrid.append(section);
+		}
+
+		content.replaceChildren(heading, description, metadata, placeholderGrid);
 	}
 </script>

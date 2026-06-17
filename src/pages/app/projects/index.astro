@@ -20,12 +20,20 @@ import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
 
 	const message = document.querySelector('[data-workspace-message]');
 	const content = document.querySelector('[data-projects-content]');
+
+	function appendCell(row, value) {
+		const cell = document.createElement('td');
+		cell.textContent = value;
+		row.append(cell);
+		return cell;
+	}
+
 	const workspace = await getCurrentWorkspace();
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 
 	if (!workspace || !organisation) {
 		if (message) message.textContent = 'No active workspace is available for your account.';
-		if (content) content.innerHTML = '';
+		if (content) content.replaceChildren();
 	} else {
 		if (message) message.textContent = `Current workspace: ${organisation.name}`;
 		const { data: projects, error } = await supabase
@@ -39,9 +47,40 @@ import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
 		if (content && error) {
 			content.textContent = `Unable to load projects: ${error.message}`;
 		} else if (content && (!projects || projects.length === 0)) {
-			content.innerHTML = '<p>No projects yet. <a href="/app/projects/new">Create the first project</a>.</p>';
+			const empty = document.createElement('p');
+			empty.append('No projects yet. ');
+			const link = document.createElement('a');
+			link.href = '/app/projects/new';
+			link.textContent = 'Create the first project';
+			empty.append(link, '.');
+			content.replaceChildren(empty);
 		} else if (content && projects) {
-			content.innerHTML = `<table class="simple-table"><thead><tr><th>Name</th><th>Status</th><th>Health</th><th>Last updated</th></tr></thead><tbody>${projects.map((project) => `<tr><td><a href="/app/projects/${project.id}">${project.name}</a></td><td>${project.status}</td><td>${project.health}</td><td>${new Date(project.updated_at).toLocaleString()}</td></tr>`).join('')}</tbody></table>`;
+			const table = document.createElement('table');
+			table.className = 'simple-table';
+			const thead = document.createElement('thead');
+			const headerRow = document.createElement('tr');
+			for (const heading of ['Name', 'Status', 'Health', 'Last updated']) {
+				const cell = document.createElement('th');
+				cell.textContent = heading;
+				headerRow.append(cell);
+			}
+			thead.append(headerRow);
+			const tbody = document.createElement('tbody');
+			for (const project of projects) {
+				const row = document.createElement('tr');
+				const nameCell = document.createElement('td');
+				const link = document.createElement('a');
+				link.href = `/app/projects/${project.id}`;
+				link.textContent = project.name;
+				nameCell.append(link);
+				row.append(nameCell);
+				appendCell(row, project.status);
+				appendCell(row, project.health);
+				appendCell(row, new Date(project.updated_at).toLocaleString());
+				tbody.append(row);
+			}
+			table.append(thead, tbody);
+			content.replaceChildren(table);
 		}
 	}
 </script>
