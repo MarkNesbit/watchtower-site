@@ -4,6 +4,10 @@ import test from 'node:test';
 import { buildUniqueSlug, slugifyProjectName } from '../src/lib/projectSlugs.ts';
 
 const migrationPath = new URL('../supabase/migrations/20260617000100_create_projects.sql', import.meta.url);
+const projectPolicyFixMigrationPath = new URL(
+	'../supabase/migrations/20260617000200_fix_project_creation_policy_member_setting.sql',
+	import.meta.url,
+);
 
 test('Project slug generation creates URL-safe slugs', () => {
 	assert.equal(slugifyProjectName(' Watchtower Test Project '), 'watchtower-test-project');
@@ -28,9 +32,19 @@ test('Viewer cannot create projects while owner admin and permitted members can'
 
 test('Members can create projects only when workspace settings allow it', async () => {
 	const sql = await readFile(migrationPath, 'utf8');
-	assert.match(sql, /from public\.organisation_settings os/);
-	assert.match(sql, /os\.organisation_id = projects\.organisation_id/);
-	assert.match(sql, /os\.allow_member_project_creation = true/);
+	const followUpSql = await readFile(projectPolicyFixMigrationPath, 'utf8');
+	for (const source of [sql, followUpSql]) {
+		assert.match(source, /from public\.organisation_settings os/);
+		assert.match(source, /os\.organisation_id = projects\.organisation_id/);
+		assert.match(source, /os\.allow_member_project_creation = true/);
+	}
+});
+
+test('Follow-up migration updates an already-applied project creation policy', async () => {
+	const followUpSql = await readFile(projectPolicyFixMigrationPath, 'utf8');
+	assert.match(followUpSql, /drop policy if exists "Owners admins and members can create projects"/);
+	assert.match(followUpSql, /drop policy if exists "Owners admins and permitted members can create projects"/);
+	assert.match(followUpSql, /create policy "Owners admins and permitted members can create projects"/);
 });
 
 test('Project records are scoped by organisation_id', async () => {
