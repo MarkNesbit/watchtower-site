@@ -104,3 +104,12 @@ test('Project pages do not use client-side imports for project flow', async () =
 		assert.doesNotMatch(renderedMarkup, /import \{.*\} from/);
 	}
 });
+
+test('Project detail dashboard includes planned placeholder structure only', async () => {
+	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
+	for (const title of ['Risks', 'Assumptions', 'Issues', 'Dependencies', 'Decisions', 'Actions', 'Timeline', 'Forecasting']) {
+		assert.match(detailSource, new RegExp(`title: '${title}'`));
+	}
+	assert.match(detailSource, /data-future-route/);
+	assert.doesNotMatch(detailSource, /from\('risks'\)|from\('issues'\)|from\('dependencies'\)/);
+});

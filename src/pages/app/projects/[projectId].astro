@@ -5,7 +5,16 @@ import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/s
 
 const projectId = Astro.params.projectId;
 const accessToken = getServerAccessToken(Astro.cookies);
-const placeholderSections = ['Risks', 'Issues', 'Decisions', 'Actions', 'Timeline', 'Forecasting'];
+const placeholderSections = [
+	{ title: 'Risks', path: 'risks' },
+	{ title: 'Assumptions', path: 'assumptions' },
+	{ title: 'Issues', path: 'issues' },
+	{ title: 'Dependencies', path: 'dependencies' },
+	{ title: 'Decisions', path: 'decisions' },
+	{ title: 'Actions', path: 'actions' },
+	{ title: 'Timeline', path: 'timeline' },
+	{ title: 'Forecasting', path: 'forecasting' },
+];
 let project = null;
 let message = '';
 
@@ -44,10 +53,11 @@ try {
 					<dt>Last updated</dt><dd>{new Date(project.updated_at).toLocaleString()}</dd>
 				</dl>
 				<div class="placeholder-grid">
-					{placeholderSections.map((title) => (
-						<section class="content-card">
-							<h2>{title}</h2>
+					{placeholderSections.map((section) => (
+						<section class="content-card placeholder-card" data-future-route={`/app/projects/${projectId}/${section.path}`}>
+							<h2>{section.title}</h2>
 							<p>Coming soon</p>
+							<p class="placeholder-route">Future route: /app/projects/{projectId}/{section.path}</p>
 						</section>
 					))}
 				</div>
