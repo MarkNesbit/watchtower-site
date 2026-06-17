@@ -6,5 +6,10 @@ import cloudflare from '@astrojs/cloudflare';
 // /app/projects/{uuid} resolve in development and production on Cloudflare.
 export default defineConfig({
 	output: 'server',
-	adapter: cloudflare(),
+	session: {
+		driver: 'unstorage/drivers/null',
+	},
+	adapter: cloudflare({
+		imageService: 'compile',
+	}),
 });
