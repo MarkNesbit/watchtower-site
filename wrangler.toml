@@ -1,0 +1,7 @@
+name = "watchtower-site"
+main = "@astrojs/cloudflare/entrypoints/server"
+compatibility_date = "2026-06-17"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
