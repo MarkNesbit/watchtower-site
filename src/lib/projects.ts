@@ -1,4 +1,3 @@
-import { supabase } from './supabaseClient';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
 
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
@@ -6,13 +5,15 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 export { buildUniqueSlug, slugifyProjectName };
 
-export async function getCurrentWorkspace() {
-	const { data: userData, error: userError } = await supabase.auth.getUser();
+export async function getCurrentWorkspace(client, accessToken?: string) {
+	const { data: userData, error: userError } = accessToken
+		? await client.auth.getUser(accessToken)
+		: await client.auth.getUser();
 	if (userError) throw userError;
 	const user = userData.user;
 	if (!user) return null;
 
-	const { data, error } = await supabase
+	const { data, error } = await client
 		.from('organisation_members')
 		.select('role, joined_at, created_at, organisations(id, name)')
 		.eq('status', 'active')
@@ -26,16 +27,20 @@ export async function getCurrentWorkspace() {
 	return data;
 }
 
-export async function createProject(input: { name: string; description?: string; status?: ProjectStatus }) {
+export async function createProject(
+	input: { name: string; description?: string; status?: ProjectStatus },
+	client,
+	accessToken?: string,
+) {
 	const name = input.name.trim();
 	if (!name) throw new Error('Project name is required.');
 
-	const workspace = await getCurrentWorkspace();
+	const workspace = await getCurrentWorkspace(client, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation) throw new Error('No active workspace is available.');
 	if (workspace.role === 'viewer') throw new Error('Your workspace role does not permit project creation.');
 	if (workspace.role === 'member') {
-		const { data: settings, error: settingsError } = await supabase
+		const { data: settings, error: settingsError } = await client
 			.from('organisation_settings')
 			.select('allow_member_project_creation')
 			.eq('organisation_id', organisation.id)
@@ -48,7 +53,7 @@ export async function createProject(input: { name: string; description?: string;
 
 	const status = input.status && PROJECT_STATUSES.includes(input.status) ? input.status : 'proposed';
 	const baseSlug = slugifyProjectName(name);
-	const { data: slugRows, error: slugError } = await supabase
+	const { data: slugRows, error: slugError } = await client
 		.from('projects')
 		.select('slug')
 		.eq('organisation_id', organisation.id)
@@ -56,11 +61,13 @@ export async function createProject(input: { name: string; description?: string;
 	if (slugError) throw slugError;
 
 	const slug = buildUniqueSlug(baseSlug, (slugRows ?? []).map((project) => project.slug));
-	const { data: userData, error: userError } = await supabase.auth.getUser();
+	const { data: userData, error: userError } = accessToken
+		? await client.auth.getUser(accessToken)
+		: await client.auth.getUser();
 	if (userError) throw userError;
 	if (!userData.user) throw new Error('You must be signed in to create a project.');
 
-	const { data: project, error: projectError } = await supabase
+	const { data: project, error: projectError } = await client
 		.from('projects')
 		.insert({
 			organisation_id: organisation.id,
@@ -75,7 +82,7 @@ export async function createProject(input: { name: string; description?: string;
 		.single();
 	if (projectError) throw projectError;
 
-	const { error: auditError } = await supabase.from('audit_log').insert({
+	const { error: auditError } = await client.from('audit_log').insert({
 		organisation_id: project.organisation_id,
 		actor_user_id: userData.user.id,
 		action: 'project.created',

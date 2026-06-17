@@ -74,21 +74,33 @@ test('No out-of-scope tables are created', async () => {
 
 test('Current workspace lookup is scoped to the signed-in user membership', async () => {
 	const source = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
-	assert.match(source, /supabase\.auth\.getUser\(\)/);
+	assert.match(source, /client\.auth\.getUser\(/);
 	assert.match(source, /const user = userData\.user/);
 	assert.match(source, /if \(!user\) return null/);
 	assert.match(source, /\.eq\('status', 'active'\)\s*\n\s*\.eq\('user_id', user\.id\)/);
 });
 
-test('Project list and detail render database values with safe DOM text APIs', async () => {
+test('Project list and detail render database values with safe Astro templates', async () => {
 	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
 	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
 	for (const source of [listSource, detailSource]) {
 		assert.doesNotMatch(source, /innerHTML\s*=/);
-		assert.match(source, /textContent/);
-		assert.match(source, /createElement/);
+		assert.doesNotMatch(source, /<script[\s>]/);
 	}
-	assert.match(listSource, /link\.textContent = project\.name/);
-	assert.match(detailSource, /heading\.textContent = project\.name/);
-	assert.match(detailSource, /description\.textContent = project\.description/);
+	assert.match(listSource, /{project\.name}/);
+	assert.match(detailSource, /{project\.name}/);
+	assert.match(detailSource, /{project\.description \?\? 'No description provided\.'}/);
+});
+
+test('Project pages do not use client-side imports for project flow', async () => {
+	const pagePaths = [
+		'../src/pages/app/projects/index.astro',
+		'../src/pages/app/projects/[projectId].astro',
+		'../src/pages/app/projects/new.astro',
+	];
+	for (const pagePath of pagePaths) {
+		const source = await readFile(new URL(pagePath, import.meta.url), 'utf8');
+		const renderedMarkup = source.replace(/^---[\s\S]*?---/, '');
+		assert.doesNotMatch(renderedMarkup, /import \{.*\} from/);
+	}
 });

@@ -1,67 +1,59 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
+import { getCurrentWorkspace } from '../../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
+
 const projectId = Astro.params.projectId;
----
-<AuthenticatedLayout title="Project | WatchTower">
-	<section class="content-card" data-project-detail data-project-id={projectId ?? ''}>
-		<p class="eyebrow">Project</p>
-		<div data-project-content>Loading project…</div>
-	</section>
-</AuthenticatedLayout>
-<script define:vars={{ projectId: projectId ?? '' }}>
-	import { supabase } from '../../../lib/supabaseClient';
-	import { getCurrentWorkspace } from '../../../lib/projects';
-	const content = document.querySelector('[data-project-content]');
+const accessToken = getServerAccessToken(Astro.cookies);
+const placeholderSections = ['Risks', 'Issues', 'Decisions', 'Actions', 'Timeline', 'Forecasting'];
+let project = null;
+let message = '';
 
-	function appendDefinition(list, termText, descriptionText) {
-		const term = document.createElement('dt');
-		term.textContent = termText;
-		const description = document.createElement('dd');
-		description.textContent = descriptionText;
-		list.append(term, description);
-	}
-
-	const workspace = await getCurrentWorkspace();
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
-	const { data: project, error } = organisation
-		? await supabase
+	if (!workspace || !organisation) {
+		message = 'No active workspace is available for your account.';
+	} else {
+		const { data, error } = await serverSupabase
 			.from('projects')
 			.select('name, description, status, health, created_at, updated_at')
 			.eq('id', projectId)
 			.eq('organisation_id', organisation.id)
-			.maybeSingle()
-		: { data: null, error: null };
-
-	if (content && !organisation) {
-		content.textContent = 'No active workspace is available for your account.';
-	} else if (content && error) {
-		content.textContent = `Unable to load project: ${error.message}`;
-	} else if (content && !project) {
-		content.textContent = 'Project not found or you do not have access.';
-	} else if (content && project) {
-		const heading = document.createElement('h1');
-		heading.textContent = project.name;
-		const description = document.createElement('p');
-		description.textContent = project.description ?? 'No description provided.';
-		const metadata = document.createElement('dl');
-		appendDefinition(metadata, 'Status', project.status);
-		appendDefinition(metadata, 'Health', project.health);
-		appendDefinition(metadata, 'Created', new Date(project.created_at).toLocaleString());
-		appendDefinition(metadata, 'Last updated', new Date(project.updated_at).toLocaleString());
-
-		const placeholderGrid = document.createElement('div');
-		placeholderGrid.className = 'placeholder-grid';
-		for (const title of ['Risks', 'Issues', 'Decisions', 'Actions', 'Timeline', 'Forecasting']) {
-			const section = document.createElement('section');
-			section.className = 'content-card';
-			const sectionHeading = document.createElement('h2');
-			sectionHeading.textContent = title;
-			const sectionText = document.createElement('p');
-			sectionText.textContent = 'Coming soon';
-			section.append(sectionHeading, sectionText);
-			placeholderGrid.append(section);
-		}
-
-		content.replaceChildren(heading, description, metadata, placeholderGrid);
+			.maybeSingle();
+		if (error) throw error;
+		project = data;
+		if (!project) message = 'Project not found or you do not have access.';
 	}
-</script>
+} catch (error) {
+	message = error instanceof Error ? error.message : 'Unable to load project.';
+}
+---
+<AuthenticatedLayout title="Project | WatchTower">
+	<section class="content-card" data-project-detail data-project-id={projectId ?? ''}>
+		<p class="eyebrow">Project</p>
+		{project ? (
+			<>
+				<h1>{project.name}</h1>
+				<p>{project.description ?? 'No description provided.'}</p>
+				<dl>
+					<dt>Status</dt><dd>{project.status}</dd>
+					<dt>Health</dt><dd>{project.health}</dd>
+					<dt>Created</dt><dd>{new Date(project.created_at).toLocaleString()}</dd>
+					<dt>Last updated</dt><dd>{new Date(project.updated_at).toLocaleString()}</dd>
+				</dl>
+				<div class="placeholder-grid">
+					{placeholderSections.map((title) => (
+						<section class="content-card">
+							<h2>{title}</h2>
+							<p>Coming soon</p>
+						</section>
+					))}
+				</div>
+			</>
+		) : (
+			<p>{message}</p>
+		)}
+	</section>
+</AuthenticatedLayout>

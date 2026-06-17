@@ -1,43 +1,44 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
+import { createProject, PROJECT_STATUSES } from '../../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
+
+let message = '';
+const accessToken = getServerAccessToken(Astro.cookies);
+
+if (Astro.request.method === 'POST') {
+	const formData = await Astro.request.formData();
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	try {
+		const project = await createProject(
+			{
+				name: String(formData.get('name') ?? ''),
+				description: String(formData.get('description') ?? ''),
+				status: String(formData.get('status') ?? 'proposed'),
+			},
+			serverSupabase,
+			accessToken,
+		);
+		return Astro.redirect(`/app/projects/${project.id}`);
+	} catch (error) {
+		message = error instanceof Error ? error.message : 'Unable to create project.';
+	}
+}
 ---
 <AuthenticatedLayout title="Create Project | WatchTower">
 	<section class="content-card">
 		<p class="eyebrow">Projects</p>
 		<h1>Create Project</h1>
-		<form class="auth-card" data-project-form>
+		<form class="auth-card" method="post">
 			<label>Name <input name="name" required autocomplete="off" /></label>
 			<label>Description <textarea name="description" rows="4"></textarea></label>
 			<label>Status
 				<select name="status">
-					<option value="proposed" selected>proposed</option>
-					<option value="active">active</option>
-					<option value="paused">paused</option>
-					<option value="completed">completed</option>
-					<option value="cancelled">cancelled</option>
+					{PROJECT_STATUSES.map((status) => <option value={status} selected={status === 'proposed'}>{status}</option>)}
 				</select>
 			</label>
 			<button class="button button--primary" type="submit">Create Project</button>
-			<p class="form-message" data-message></p>
+			<p class="form-message">{message}</p>
 		</form>
 	</section>
 </AuthenticatedLayout>
-<script>
-	import { createProject } from '../../../lib/projects';
-	const form = document.querySelector('[data-project-form]');
-	const message = form?.querySelector('[data-message]');
-	form?.addEventListener('submit', async (event) => {
-		event.preventDefault();
-		const data = new FormData(form);
-		try {
-			const project = await createProject({
-				name: String(data.get('name') ?? ''),
-				description: String(data.get('description') ?? ''),
-				status: String(data.get('status') ?? 'proposed'),
-			});
-			window.location.assign(`/app/projects/${project.id}`);
-		} catch (error) {
-			if (message) message.textContent = error instanceof Error ? error.message : 'Unable to create project.';
-		}
-	});
-</script>
