@@ -817,6 +817,48 @@ const {
 			width: min(100%, 12rem);
 		}
 	}
+	.auth-card textarea,
+	.auth-card select {
+		width: 100%;
+		border: 1px solid var(--border);
+		border-radius: 0.85rem;
+		padding: 0.85rem 1rem;
+		background: #07111d;
+		color: var(--text);
+		font: inherit;
+	}
+
+	.app-shell__nav a {
+		color: var(--text);
+		font-weight: 700;
+	}
+
+	.app-page-header {
+		display: flex;
+		align-items: start;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.simple-table {
+		width: 100%;
+		border-collapse: collapse;
+	}
+
+	.simple-table th,
+	.simple-table td {
+		padding: 0.75rem;
+		border-bottom: 1px solid var(--border);
+		text-align: left;
+	}
+
+	.placeholder-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+		gap: 1rem;
+		margin-top: 1.5rem;
+	}
+
 </style>
 <style is:global>
 	.auth-page {
@@ -877,4 +919,46 @@ const {
 		border-radius: 1.2rem;
 		background: rgba(18, 31, 42, 0.9);
 	}
+	.auth-card textarea,
+	.auth-card select {
+		width: 100%;
+		border: 1px solid var(--border);
+		border-radius: 0.85rem;
+		padding: 0.85rem 1rem;
+		background: #07111d;
+		color: var(--text);
+		font: inherit;
+	}
+
+	.app-shell__nav a {
+		color: var(--text);
+		font-weight: 700;
+	}
+
+	.app-page-header {
+		display: flex;
+		align-items: start;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.simple-table {
+		width: 100%;
+		border-collapse: collapse;
+	}
+
+	.simple-table th,
+	.simple-table td {
+		padding: 0.75rem;
+		border-bottom: 1px solid var(--border);
+		text-align: left;
+	}
+
+	.placeholder-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+		gap: 1rem;
+		margin-top: 1.5rem;
+	}
+
 </style>

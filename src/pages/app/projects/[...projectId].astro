@@ -1,0 +1,31 @@
+---
+import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
+export function getStaticPaths() {
+	return [{ params: { projectId: undefined } }];
+}
+const projectId = Astro.params.projectId;
+---
+<AuthenticatedLayout title="Project | WatchTower">
+	<section class="content-card" data-project-detail data-project-id={projectId ?? ''}>
+		<p class="eyebrow">Project</p>
+		<div data-project-content>Loading project…</div>
+	</section>
+</AuthenticatedLayout>
+<script define:vars={{ projectId: projectId ?? '' }}>
+	import { supabase } from '../../../lib/supabaseClient';
+	const content = document.querySelector('[data-project-content]');
+	const { data: project, error } = await supabase
+		.from('projects')
+		.select('name, description, status, health, created_at, updated_at')
+		.eq('id', projectId)
+		.maybeSingle();
+
+	if (content && error) {
+		content.textContent = `Unable to load project: ${error.message}`;
+	} else if (content && !project) {
+		content.textContent = 'Project not found or you do not have access.';
+	} else if (content && project) {
+		const comingSoon = ['Risks', 'Issues', 'Decisions', 'Actions', 'Timeline', 'Forecasting'];
+		content.innerHTML = `<h1>${project.name}</h1><p>${project.description ?? 'No description provided.'}</p><dl><dt>Status</dt><dd>${project.status}</dd><dt>Health</dt><dd>${project.health}</dd><dt>Created</dt><dd>${new Date(project.created_at).toLocaleString()}</dd><dt>Last updated</dt><dd>${new Date(project.updated_at).toLocaleString()}</dd></dl><div class="placeholder-grid">${comingSoon.map((title) => `<section class="content-card"><h2>${title}</h2><p>Coming soon</p></section>`).join('')}</div>`;
+	}
+</script>

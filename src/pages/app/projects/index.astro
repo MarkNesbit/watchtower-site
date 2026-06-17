@@ -1,0 +1,47 @@
+---
+import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
+---
+<AuthenticatedLayout title="Projects | WatchTower">
+	<section class="content-card" data-projects-page>
+		<div class="app-page-header">
+			<div>
+				<p class="eyebrow">Projects</p>
+				<h1>Projects</h1>
+				<p data-workspace-message>Loading your current workspace…</p>
+			</div>
+			<a class="button button--primary" href="/app/projects/new">Create Project</a>
+		</div>
+		<div data-projects-content></div>
+	</section>
+</AuthenticatedLayout>
+<script>
+	import { supabase } from '../../../lib/supabaseClient';
+	import { getCurrentWorkspace } from '../../../lib/projects';
+
+	const message = document.querySelector('[data-workspace-message]');
+	const content = document.querySelector('[data-projects-content]');
+	const workspace = await getCurrentWorkspace();
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+
+	if (!workspace || !organisation) {
+		if (message) message.textContent = 'No active workspace is available for your account.';
+		if (content) content.innerHTML = '';
+	} else {
+		if (message) message.textContent = `Current workspace: ${organisation.name}`;
+		const { data: projects, error } = await supabase
+			.from('projects')
+			.select('id, name, status, health, updated_at')
+			.eq('organisation_id', organisation.id)
+			.is('deleted_at', null)
+			.is('archived_at', null)
+			.order('updated_at', { ascending: false });
+
+		if (content && error) {
+			content.textContent = `Unable to load projects: ${error.message}`;
+		} else if (content && (!projects || projects.length === 0)) {
+			content.innerHTML = '<p>No projects yet. <a href="/app/projects/new">Create the first project</a>.</p>';
+		} else if (content && projects) {
+			content.innerHTML = `<table class="simple-table"><thead><tr><th>Name</th><th>Status</th><th>Health</th><th>Last updated</th></tr></thead><tbody>${projects.map((project) => `<tr><td><a href="/app/projects/${project.id}">${project.name}</a></td><td>${project.status}</td><td>${project.health}</td><td>${new Date(project.updated_at).toLocaleString()}</td></tr>`).join('')}</tbody></table>`;
+		}
+	}
+</script>
