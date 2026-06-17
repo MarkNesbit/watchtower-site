@@ -75,7 +75,9 @@ test('No out-of-scope tables are created', async () => {
 test('Current workspace lookup is scoped to the signed-in user membership', async () => {
 	const source = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
 	assert.match(source, /supabase\.auth\.getUser\(\)/);
-	assert.match(source, /\.eq\('user_id', userData\.user\.id\)/);
+	assert.match(source, /const user = userData\.user/);
+	assert.match(source, /if \(!user\) return null/);
+	assert.match(source, /\.eq\('status', 'active'\)\s*\n\s*\.eq\('user_id', user\.id\)/);
 });
 
 test('Project list and detail render database values with safe DOM text APIs', async () => {

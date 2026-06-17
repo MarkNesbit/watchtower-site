@@ -9,13 +9,14 @@ export { buildUniqueSlug, slugifyProjectName };
 export async function getCurrentWorkspace() {
 	const { data: userData, error: userError } = await supabase.auth.getUser();
 	if (userError) throw userError;
-	if (!userData.user) throw new Error('You must be signed in to access a workspace.');
+	const user = userData.user;
+	if (!user) return null;
 
 	const { data, error } = await supabase
 		.from('organisation_members')
 		.select('role, joined_at, created_at, organisations(id, name)')
-		.eq('user_id', userData.user.id)
 		.eq('status', 'active')
+		.eq('user_id', user.id)
 		.order('joined_at', { ascending: true, nullsFirst: false })
 		.order('created_at', { ascending: true })
 		.limit(1)
