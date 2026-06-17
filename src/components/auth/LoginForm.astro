@@ -24,6 +24,9 @@
 			if (message) message.textContent = 'Unable to sign in. Check your email, password, and email verification status.';
 			return;
 		}
+		const cookieOptions = `path=/; SameSite=Lax; max-age=${authData.session.expires_in}`;
+		document.cookie = `wt-access-token=${authData.session.access_token}; ${cookieOptions}`;
+		document.cookie = `wt-refresh-token=${authData.session.refresh_token}; ${cookieOptions}`;
 		await recordAuthAuditEvent('user.logged_in');
 		const redirectTo = getSafeRedirectPath(new URLSearchParams(window.location.search).get('redirectTo'));
 		window.location.assign(redirectTo);

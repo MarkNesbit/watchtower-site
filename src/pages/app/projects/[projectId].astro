@@ -1,0 +1,69 @@
+---
+import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
+import { getCurrentWorkspace } from '../../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
+
+const projectId = Astro.params.projectId;
+const accessToken = getServerAccessToken(Astro.cookies);
+const placeholderSections = [
+	{ title: 'Risks', path: 'risks' },
+	{ title: 'Assumptions', path: 'assumptions' },
+	{ title: 'Issues', path: 'issues' },
+	{ title: 'Dependencies', path: 'dependencies' },
+	{ title: 'Decisions', path: 'decisions' },
+	{ title: 'Actions', path: 'actions' },
+	{ title: 'Timeline', path: 'timeline' },
+	{ title: 'Forecasting', path: 'forecasting' },
+];
+let project = null;
+let message = '';
+
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+	if (!workspace || !organisation) {
+		message = 'No active workspace is available for your account.';
+	} else {
+		const { data, error } = await serverSupabase
+			.from('projects')
+			.select('name, description, status, health, created_at, updated_at')
+			.eq('id', projectId)
+			.eq('organisation_id', organisation.id)
+			.maybeSingle();
+		if (error) throw error;
+		project = data;
+		if (!project) message = 'Project not found or you do not have access.';
+	}
+} catch (error) {
+	message = error instanceof Error ? error.message : 'Unable to load project.';
+}
+---
+<AuthenticatedLayout title="Project | WatchTower">
+	<section class="content-card" data-project-detail data-project-id={projectId ?? ''}>
+		<p class="eyebrow">Project</p>
+		{project ? (
+			<>
+				<h1>{project.name}</h1>
+				<p>{project.description ?? 'No description provided.'}</p>
+				<dl>
+					<dt>Status</dt><dd>{project.status}</dd>
+					<dt>Health</dt><dd>{project.health}</dd>
+					<dt>Created</dt><dd>{new Date(project.created_at).toLocaleString()}</dd>
+					<dt>Last updated</dt><dd>{new Date(project.updated_at).toLocaleString()}</dd>
+				</dl>
+				<div class="placeholder-grid">
+					{placeholderSections.map((section) => (
+						<section class="content-card placeholder-card" data-future-route={`/app/projects/${projectId}/${section.path}`}>
+							<h2>{section.title}</h2>
+							<p>Coming soon</p>
+							<p class="placeholder-route">Future route: /app/projects/{projectId}/{section.path}</p>
+						</section>
+					))}
+				</div>
+			</>
+		) : (
+			<p>{message}</p>
+		)}
+	</section>
+</AuthenticatedLayout>

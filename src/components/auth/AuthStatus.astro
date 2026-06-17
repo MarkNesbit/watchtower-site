@@ -18,6 +18,12 @@
 			return;
 		}
 
+		if (session) {
+			const cookieOptions = `path=/; SameSite=Lax; max-age=${session.expires_in ?? 3600}`;
+			document.cookie = `wt-access-token=${session.access_token}; ${cookieOptions}`;
+			document.cookie = `wt-refresh-token=${session.refresh_token}; ${cookieOptions}`;
+		}
+
 		if (session && publicAuthPaths.includes(path)) {
 			window.location.replace('/app');
 			return;

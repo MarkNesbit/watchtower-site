@@ -5,6 +5,8 @@
 	document.querySelector('[data-sign-out]')?.addEventListener('click', async () => {
 		await recordAuthAuditEvent('user.logged_out');
 		await supabase.auth.signOut();
+		document.cookie = 'wt-access-token=; path=/; max-age=0; SameSite=Lax';
+		document.cookie = 'wt-refresh-token=; path=/; max-age=0; SameSite=Lax';
 		window.location.assign('/login');
 	});
 </script>
