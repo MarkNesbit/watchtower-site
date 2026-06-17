@@ -1,9 +1,10 @@
 import { supabase } from './supabaseClient';
+import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
 
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
-export { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
+export { buildUniqueSlug, slugifyProjectName };
 
 export async function getCurrentWorkspace() {
 	const { data, error } = await supabase

@@ -1,8 +1,5 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
-export function getStaticPaths() {
-	return [{ params: { projectId: undefined } }];
-}
 const projectId = Astro.params.projectId;
 ---
 <AuthenticatedLayout title="Project | WatchTower">
@@ -13,14 +10,22 @@ const projectId = Astro.params.projectId;
 </AuthenticatedLayout>
 <script define:vars={{ projectId: projectId ?? '' }}>
 	import { supabase } from '../../../lib/supabaseClient';
+	import { getCurrentWorkspace } from '../../../lib/projects';
 	const content = document.querySelector('[data-project-content]');
-	const { data: project, error } = await supabase
-		.from('projects')
-		.select('name, description, status, health, created_at, updated_at')
-		.eq('id', projectId)
-		.maybeSingle();
+	const workspace = await getCurrentWorkspace();
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+	const { data: project, error } = organisation
+		? await supabase
+			.from('projects')
+			.select('name, description, status, health, created_at, updated_at')
+			.eq('id', projectId)
+			.eq('organisation_id', organisation.id)
+			.maybeSingle()
+		: { data: null, error: null };
 
-	if (content && error) {
+	if (content && !organisation) {
+		content.textContent = 'No active workspace is available for your account.';
+	} else if (content && error) {
 		content.textContent = `Unable to load project: ${error.message}`;
 	} else if (content && !project) {
 		content.textContent = 'Project not found or you do not have access.';
