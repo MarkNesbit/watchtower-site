@@ -40,3 +40,9 @@ WatchTower Portfolio is a future product direction focused on helping senior del
 - Confidence, risk and uncertainty should be visible and explainable.
 - Delivery intelligence should reduce theatre rather than create new reporting overhead.
 - The roadmap is directional and does not represent committed delivery dates.
+
+## Workspace and project model
+
+WatchTower is built around workspaces. Projects belong to workspaces, and every user starts with a default personal workspace created during onboarding.
+
+Projects are the core objects users navigate, review and progressively enrich. Future project intelligence should help users understand project risk, dependencies, delivery confidence and governance clarity. Project health will eventually use both explicit data and missing or uncertain data as signals; optional project fields should therefore not be treated as unimportant.

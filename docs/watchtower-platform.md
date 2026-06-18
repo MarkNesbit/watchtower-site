@@ -29,3 +29,9 @@ The platform is intended for professional delivery and technology audiences, inc
 ## Design direction
 
 The website should feel credible, calm, data-led and professional for a senior delivery audience. The visual direction blends a dark navy / charcoal command-centre feel with clean light content sections, subtle beacon and early-warning motifs, rounded dashboard cards and the light blue from the WatchTower logo as the site accent colour (`#00A0FF`).
+
+## Workspace foundation
+
+WatchTower is built around workspaces. The database and internal implementation use the term `organisation`, while user-facing language should normally use `Workspace`. Every user starts with a default personal workspace, and projects belong to workspaces rather than directly to users.
+
+This workspace foundation supports future project intelligence across risk, dependencies, delivery confidence and governance clarity. Future project health should use both explicit data and missing or uncertain data as signals, with expectations that vary by lifecycle stage and commitment level.
