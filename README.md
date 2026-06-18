@@ -74,3 +74,5 @@ Database schema changes must be handled through migrations only. Do not make man
 ## Documentation
 
 Platform and product positioning notes are available in the `docs/` directory. Architecture Decision Records in `docs/architecture/` are the source of truth for implementation decisions.
+
+Before changing project functionality, read `docs/project-model.md` for the product-level project field model and `AGENTS.md` for Codex/developer working rules.
