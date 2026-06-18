@@ -7,6 +7,7 @@ const projectSlug = Astro.params.projectId;
 const accessToken = getServerAccessToken(Astro.cookies);
 let project = null;
 let workspaceName = '';
+let canEditProject = false;
 let message = '';
 let saveMessage = '';
 let creatorDisplayName = '';
@@ -41,9 +42,10 @@ try {
 		message = 'No active workspace is available for your account.';
 	} else {
 		workspaceName = organisation.name;
+		canEditProject = workspace.role !== 'viewer';
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('name, slug, status, health, created_at, updated_at, created_by')
+			.select('name, description, slug, status, health, created_at, updated_at, created_by')
 			.eq('slug', projectSlug)
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
@@ -83,6 +85,7 @@ try {
 					<h2 id="project-details-heading">Project details</h2>
 					<dl>
 						<dt>Project name</dt><dd>{formatValue(project.name)}</dd>
+						<dt>Description</dt><dd>{formatValue(project.description)}</dd>
 						<dt>Status</dt><dd>{formatValue(project.status, 'Unknown')}</dd>
 						<dt>Health</dt><dd>{formatValue(project.health, 'Not assessed')}</dd>
 						<dt>Workspace</dt><dd>{formatValue(workspaceName)}</dd>
@@ -92,20 +95,28 @@ try {
 					</dl>
 				</section>
 
-				<section class="content-card">
-					<p class="eyebrow">Edit core details</p>
-					<h2>Edit project</h2>
-					<form class="auth-card" method="post">
-						<label>Name <input name="name" value={project.name} required autocomplete="off" /></label>
-						<label>Status
-							<select name="status">
-								{PROJECT_STATUSES.map((status) => <option value={status} selected={status === project.status}>{status}</option>)}
-							</select>
-						</label>
-						<button class="button button--primary" type="submit">Save project</button>
-						{saveMessage && <p class="form-message">{saveMessage}</p>}
-					</form>
-				</section>
+				{canEditProject ? (
+					<section class="content-card">
+						<p class="eyebrow">Edit core details</p>
+						<h2>Edit project</h2>
+						<form class="auth-card" method="post">
+							<label>Name <input name="name" value={project.name} required autocomplete="off" /></label>
+							<label>Status
+								<select name="status">
+									{PROJECT_STATUSES.map((status) => <option value={status} selected={status === project.status}>{status}</option>)}
+								</select>
+							</label>
+							<button class="button button--primary" type="submit">Save project</button>
+							{saveMessage && <p class="form-message">{saveMessage}</p>}
+						</form>
+					</section>
+				) : (
+					<section class="content-card" data-view-only-project>
+						<p class="eyebrow">View-only access</p>
+						<h2>Project editing unavailable</h2>
+						<p>Your workspace role can view this project but cannot edit core project details.</p>
+					</section>
+				)}
 			</>
 		) : (
 			<p>{message}</p>
