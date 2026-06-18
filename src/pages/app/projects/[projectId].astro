@@ -1,66 +1,104 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
-import { getCurrentWorkspace } from '../../../lib/projects';
+import { getCurrentWorkspace, PROJECT_STATUSES, updateProjectCore } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
-const projectId = Astro.params.projectId;
+const projectSlug = Astro.params.projectId;
 const accessToken = getServerAccessToken(Astro.cookies);
-const placeholderSections = [
-	{ title: 'Risks', path: 'risks' },
-	{ title: 'Assumptions', path: 'assumptions' },
-	{ title: 'Issues', path: 'issues' },
-	{ title: 'Dependencies', path: 'dependencies' },
-	{ title: 'Decisions', path: 'decisions' },
-	{ title: 'Actions', path: 'actions' },
-	{ title: 'Timeline', path: 'timeline' },
-	{ title: 'Forecasting', path: 'forecasting' },
-];
 let project = null;
+let workspaceName = '';
 let message = '';
+let saveMessage = '';
+let creatorDisplayName = '';
+
+const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not recorded';
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
+
+	if (Astro.request.method === 'POST') {
+		const formData = await Astro.request.formData();
+		try {
+			await updateProjectCore(
+				projectSlug ?? '',
+				{
+					name: String(formData.get('name') ?? ''),
+					status: String(formData.get('status') ?? 'proposed'),
+				},
+				serverSupabase,
+				accessToken,
+			);
+			saveMessage = 'Project saved.';
+		} catch (error) {
+			saveMessage = error instanceof Error ? error.message : 'Unable to save project.';
+		}
+	}
+
 	const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation) {
 		message = 'No active workspace is available for your account.';
 	} else {
+		workspaceName = organisation.name;
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('name, description, status, health, created_at, updated_at')
-			.eq('id', projectId)
+			.select('name, slug, status, health, created_at, updated_at, created_by')
+			.eq('slug', projectSlug)
 			.eq('organisation_id', organisation.id)
+			.is('deleted_at', null)
+			.is('archived_at', null)
 			.maybeSingle();
 		if (error) throw error;
 		project = data;
-		if (!project) message = 'Project not found or you do not have access.';
+		if (!project) {
+			message = 'Project not found or you do not have access.';
+		} else if (project.created_by) {
+			const { data: creator, error: creatorError } = await serverSupabase
+				.from('profiles')
+				.select('display_name, email')
+				.eq('id', project.created_by)
+				.maybeSingle();
+			if (!creatorError && creator) creatorDisplayName = creator.display_name || creator.email || '';
+		}
 	}
 } catch (error) {
 	message = error instanceof Error ? error.message : 'Unable to load project.';
 }
 ---
-<AuthenticatedLayout title="Project | WatchTower">
-	<section class="content-card" data-project-detail data-project-id={projectId ?? ''}>
-		<p class="eyebrow">Project</p>
+<AuthenticatedLayout title={project ? `${project.name} | WatchTower` : 'Project | WatchTower'}>
+	<section class="content-card" data-project-detail>
+		<div class="app-page-header">
+			<div>
+				<p class="eyebrow">Project</p>
+				{project ? <h1>{project.name}</h1> : <h1>Project unavailable</h1>}
+				{workspaceName && <p>Workspace: {workspaceName}</p>}
+			</div>
+			<a class="button" href="/app/projects">Back to projects</a>
+		</div>
 		{project ? (
 			<>
-				<h1>{project.name}</h1>
-				<p>{project.description ?? 'No description provided.'}</p>
 				<dl>
 					<dt>Status</dt><dd>{project.status}</dd>
 					<dt>Health</dt><dd>{project.health}</dd>
-					<dt>Created</dt><dd>{new Date(project.created_at).toLocaleString()}</dd>
-					<dt>Last updated</dt><dd>{new Date(project.updated_at).toLocaleString()}</dd>
+					<dt>Created</dt><dd>{formatDate(project.created_at)}</dd>
+					<dt>Last updated</dt><dd>{formatDate(project.updated_at)}</dd>
+					{creatorDisplayName && <><dt>Created by</dt><dd>{creatorDisplayName}</dd></>}
 				</dl>
-				<div class="placeholder-grid">
-					{placeholderSections.map((section) => (
-						<section class="content-card placeholder-card" data-future-route={`/app/projects/${projectId}/${section.path}`}>
-							<h2>{section.title}</h2>
-							<p>Coming soon</p>
-							<p class="placeholder-route">Future route: /app/projects/{projectId}/{section.path}</p>
-						</section>
-					))}
-				</div>
+
+				<section class="content-card">
+					<p class="eyebrow">Edit core details</p>
+					<h2>Edit project</h2>
+					<form class="auth-card" method="post">
+						<label>Name <input name="name" value={project.name} required autocomplete="off" /></label>
+						<label>Status
+							<select name="status">
+								{PROJECT_STATUSES.map((status) => <option value={status} selected={status === project.status}>{status}</option>)}
+							</select>
+						</label>
+						<button class="button button--primary" type="submit">Save project</button>
+						{saveMessage && <p class="form-message">{saveMessage}</p>}
+					</form>
+				</section>
 			</>
 		) : (
 			<p>{message}</p>
