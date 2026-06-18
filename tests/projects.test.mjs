@@ -89,7 +89,9 @@ test('Project list and detail render database values with safe Astro templates',
 	}
 	assert.match(listSource, /{project\.name}/);
 	assert.match(detailSource, /{project\.name}/);
-	assert.match(detailSource, /{project\.description \?\? 'No description provided\.'}/);
+	assert.match(listSource, /href={`\/app\/projects\/\$\{project\.slug\}`}/);
+	assert.match(detailSource, /\.eq\('slug', projectSlug\)/);
+	assert.match(detailSource, /{project\.health}/);
 });
 
 test('Project pages do not use client-side imports for project flow', async () => {
@@ -105,11 +107,13 @@ test('Project pages do not use client-side imports for project flow', async () =
 	}
 });
 
-test('Project detail dashboard includes planned placeholder structure only', async () => {
+test('Project detail edit foundation keeps RAID and dependency modelling out of scope', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
-	for (const title of ['Risks', 'Assumptions', 'Issues', 'Dependencies', 'Decisions', 'Actions', 'Timeline', 'Forecasting']) {
-		assert.match(detailSource, new RegExp(`title: '${title}'`));
-	}
-	assert.match(detailSource, /data-future-route/);
-	assert.doesNotMatch(detailSource, /from\('risks'\)|from\('issues'\)|from\('dependencies'\)/);
+	const projectLibrarySource = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
+	assert.match(detailSource, /Edit core details/);
+	assert.match(detailSource, /name="name"/);
+	assert.match(detailSource, /name="status"/);
+	assert.doesNotMatch(detailSource, /name="health"|name="created_by"|name="organisation_id"|name="slug"/);
+	assert.doesNotMatch(detailSource, /data-future-route/);
+	assert.doesNotMatch(projectLibrarySource, /from\('risks'\)|from\('issues'\)|from\('dependencies'\)/);
 });

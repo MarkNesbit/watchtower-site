@@ -19,7 +19,7 @@ if (Astro.request.method === 'POST') {
 			serverSupabase,
 			accessToken,
 		);
-		return Astro.redirect(`/app/projects/${project.id}`);
+		return Astro.redirect(`/app/projects/${project.slug}`);
 	} catch (error) {
 		message = error instanceof Error ? error.message : 'Unable to create project.';
 	}
