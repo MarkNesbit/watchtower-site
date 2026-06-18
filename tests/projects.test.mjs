@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { buildUniqueSlug, slugifyProjectName } from '../src/lib/projectSlugs.ts';
 
@@ -91,6 +91,7 @@ test('Project list and detail render database values with safe Astro templates',
 	assert.match(detailSource, /{project\.name}/);
 	assert.match(listSource, /href={`\/app\/projects\/\$\{project\.slug\}`}/);
 	assert.match(detailSource, /\.eq\('slug', projectSlug\)/);
+	assert.match(detailSource, /formatValue\(project\.health/);
 	assert.match(detailSource, /{project\.health}/);
 });
 
@@ -107,13 +108,33 @@ test('Project pages do not use client-side imports for project flow', async () =
 	}
 });
 
+test('Project detail displays read-only metadata while keeping editing narrow', async () => {
+	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
+	const labels = ['Project name', 'Description', 'Status', 'Health', 'Workspace', 'Created', 'Last updated', 'Created by'];
+	for (const label of labels) {
+		assert.match(detailSource, new RegExp(`<dt>${label}</dt>`));
+	}
+	assert.match(detailSource, /Read-only metadata/);
+	assert.match(detailSource, /description, slug/);
+	assert.match(detailSource, /formatValue\(project\.description\)/);
+	assert.match(detailSource, /formatDate\(project\.created_at\)/);
+	assert.match(detailSource, /formatDate\(project\.updated_at\)/);
+	assert.match(detailSource, /formatValue\(creatorDisplayName\)/);
+	assert.doesNotMatch(detailSource, /<dd>{project\.created_by}<\/dd>|<dd>{project\.organisation_id}<\/dd>|data-project-id/);
+});
+
 test('Project detail edit foundation keeps RAID and dependency modelling out of scope', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
 	const projectLibrarySource = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
+	const migrationFiles = await readdir(new URL('../supabase/migrations/', import.meta.url));
+	assert.match(detailSource, /canEditProject = workspace\.role !== 'viewer'/);
+	assert.match(detailSource, /data-view-only-project/);
 	assert.match(detailSource, /Edit core details/);
 	assert.match(detailSource, /name="name"/);
 	assert.match(detailSource, /name="status"/);
-	assert.doesNotMatch(detailSource, /name="health"|name="created_by"|name="organisation_id"|name="slug"/);
+	assert.doesNotMatch(detailSource, /name="description"|name="health"|name="created_by"|name="updated_by"|name="organisation_id"|name="slug"/);
 	assert.doesNotMatch(detailSource, /data-future-route/);
 	assert.doesNotMatch(projectLibrarySource, /from\('risks'\)|from\('issues'\)|from\('dependencies'\)/);
+	assert.match(projectLibrarySource, /if \(workspace\.role === 'viewer'\) throw new Error\('Your workspace role does not permit project editing\.'\)/);
+	assert.deepEqual(migrationFiles.filter((file) => file.includes('wt_002b') || file.includes('metadata')), []);
 });
