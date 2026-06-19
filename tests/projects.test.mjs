@@ -91,8 +91,7 @@ test('Project list and detail render database values with safe Astro templates',
 	assert.match(detailSource, /{project\.name}/);
 	assert.match(listSource, /href={`\/app\/projects\/\$\{project\.slug\}`}/);
 	assert.match(detailSource, /\.eq\('slug', projectSlug\)/);
-	assert.match(detailSource, /formatValue\(project\.health/);
-	assert.match(detailSource, /{project\.health}/);
+	assert.match(detailSource, /formatValue\(project\.health,\s*'Not assessed'\)/);
 });
 
 test('Project pages do not use client-side imports for project flow', async () => {
