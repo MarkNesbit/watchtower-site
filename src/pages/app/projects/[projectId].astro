@@ -1,6 +1,7 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
-import { getCurrentWorkspace, PROJECT_STATUSES, updateProjectCore } from '../../../lib/projects';
+import { can } from '../../../lib/permissions';
+import { getCurrentWorkspace } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -9,7 +10,6 @@ let project = null;
 let workspaceName = '';
 let canEditProject = false;
 let message = '';
-let saveMessage = '';
 let creatorDisplayName = '';
 
 const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not available';
@@ -17,32 +17,15 @@ const formatValue = (value, fallback = 'Not available') => value || fallback;
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
-
-	if (Astro.request.method === 'POST') {
-		const formData = await Astro.request.formData();
-		try {
-			await updateProjectCore(
-				projectSlug ?? '',
-				{
-					name: String(formData.get('name') ?? ''),
-					status: String(formData.get('status') ?? 'proposed'),
-				},
-				serverSupabase,
-				accessToken,
-			);
-			saveMessage = 'Project saved.';
-		} catch (error) {
-			saveMessage = error instanceof Error ? error.message : 'Unable to save project.';
-		}
-	}
-
 	const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation) {
 		message = 'No active workspace is available for your account.';
+	} else if (!can(workspace.role, 'project.viewDashboard')) {
+		message = 'Your workspace role does not permit project dashboard access.';
 	} else {
 		workspaceName = organisation.name;
-		canEditProject = workspace.role !== 'viewer';
+		canEditProject = can(workspace.role, 'project.editDetails');
 		const { data, error } = await serverSupabase
 			.from('projects')
 			.select('name, description, slug, status, health, created_at, updated_at, created_by')
@@ -69,10 +52,10 @@ try {
 }
 ---
 <AuthenticatedLayout title={project ? `${project.name} | WatchTower` : 'Project | WatchTower'}>
-	<section class="content-card" data-project-detail>
+	<section class="content-card" data-project-dashboard>
 		<div class="app-page-header">
 			<div>
-				<p class="eyebrow">Project</p>
+				<p class="eyebrow">Project dashboard</p>
 				{project ? <h1>{project.name}</h1> : <h1>Project unavailable</h1>}
 				{workspaceName && <p>Workspace: {workspaceName}</p>}
 			</div>
@@ -82,7 +65,7 @@ try {
 			<>
 				<section class="content-card" aria-labelledby="project-details-heading">
 					<p class="eyebrow">Read-only metadata</p>
-					<h2 id="project-details-heading">Project details</h2>
+					<h2 id="project-details-heading">Project overview</h2>
 					<dl>
 						<dt>Project name</dt><dd>{formatValue(project.name)}</dd>
 						<dt>Description</dt><dd>{formatValue(project.description)}</dd>
@@ -95,28 +78,18 @@ try {
 					</dl>
 				</section>
 
-				{canEditProject ? (
-					<section class="content-card">
-						<p class="eyebrow">Edit core details</p>
-						<h2>Edit project</h2>
-						<form class="auth-card" method="post">
-							<label>Name <input name="name" value={project.name} required autocomplete="off" /></label>
-							<label>Status
-								<select name="status">
-									{PROJECT_STATUSES.map((status) => <option value={status} selected={status === project.status}>{status}</option>)}
-								</select>
-							</label>
-							<button class="button button--primary" type="submit">Save project</button>
-							{saveMessage && <p class="form-message">{saveMessage}</p>}
-						</form>
-					</section>
-				) : (
-					<section class="content-card" data-view-only-project>
-						<p class="eyebrow">View-only access</p>
-						<h2>Project editing unavailable</h2>
-						<p>Your workspace role can view this project but cannot edit core project details.</p>
-					</section>
-				)}
+				<section class="content-card" data-edit-project-action>
+					<p class="eyebrow">Project details</p>
+					<h2>Edit project details</h2>
+					{canEditProject ? (
+						<a class="button button--primary" href={`/app/projects/${project.slug}/edit`}>Edit project details</a>
+					) : (
+						<>
+							<span class="button" aria-disabled="true" data-disabled-edit-action>Edit project details</span>
+							<p data-edit-permission-message>You do not have permission to edit project details.</p>
+						</>
+					)}
+				</section>
 			</>
 		) : (
 			<p>{message}</p>
