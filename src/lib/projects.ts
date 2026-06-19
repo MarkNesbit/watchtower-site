@@ -1,9 +1,14 @@
+import { can } from './permissions';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
 
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 export { buildUniqueSlug, slugifyProjectName };
+
+export function isProjectStatus(value: unknown): value is ProjectStatus {
+	return typeof value === 'string' && PROJECT_STATUSES.includes(value as ProjectStatus);
+}
 
 export async function getCurrentWorkspace(client, accessToken?: string) {
 	const { data: userData, error: userError } = accessToken
@@ -38,7 +43,7 @@ export async function createProject(
 	const workspace = await getCurrentWorkspace(client, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation) throw new Error('No active workspace is available.');
-	if (workspace.role === 'viewer') throw new Error('Your workspace role does not permit project creation.');
+	if (!can(workspace.role, 'project.create')) throw new Error('Your workspace role does not permit project creation.');
 	if (workspace.role === 'member') {
 		const { data: settings, error: settingsError } = await client
 			.from('organisation_settings')
@@ -78,7 +83,7 @@ export async function createProject(
 			health: 'unknown',
 			created_by: userData.user.id,
 		})
-		.select('id, name, status, health, organisation_id')
+		.select('id, name, slug, status, health, organisation_id')
 		.single();
 	if (projectError) throw projectError;
 
@@ -92,5 +97,35 @@ export async function createProject(
 	});
 	if (auditError) throw auditError;
 
+	return project;
+}
+
+export async function updateProjectCore(
+	projectSlug: string,
+	input: { name: string; description?: string; status?: ProjectStatus },
+	client,
+	accessToken?: string,
+) {
+	const name = input.name.trim();
+	if (!name) throw new Error('Project name is required.');
+	if (!isProjectStatus(input.status)) throw new Error('Select a valid project status.');
+
+	const workspace = await getCurrentWorkspace(client, accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+	if (!workspace || !organisation) throw new Error('No active workspace is available.');
+	if (!can(workspace.role, 'project.editDetails')) throw new Error('Your workspace role does not permit project editing.');
+
+	const { data: project, error } = await client
+		.from('projects')
+		.update({ name, description: input.description?.trim() || null, status: input.status })
+		.eq('slug', projectSlug)
+		.eq('organisation_id', organisation.id)
+		.is('deleted_at', null)
+		.is('archived_at', null)
+		.select('slug, name, description, status')
+		.maybeSingle();
+
+	if (error) throw error;
+	if (!project) throw new Error('Project not found or you do not have access.');
 	return project;
 }

@@ -16,7 +16,7 @@ try {
 		workspaceMessage = `Current workspace: ${organisation.name}`;
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('id, name, status, health, updated_at')
+			.select('name, slug, status, health, updated_at')
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
 			.is('archived_at', null)
@@ -50,7 +50,7 @@ try {
 				<tbody>
 					{projects.map((project) => (
 						<tr>
-							<td><a href={`/app/projects/${project.id}`}>{project.name}</a></td>
+							<td><a href={`/app/projects/${project.slug}`}>{project.name}</a></td>
 							<td>{project.status}</td>
 							<td>{project.health}</td>
 							<td>{new Date(project.updated_at).toLocaleString()}</td>
