@@ -1,3 +1,4 @@
+import { assertCan } from './permissions';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
 
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
@@ -42,7 +43,7 @@ export async function createProject(
 	const workspace = await getCurrentWorkspace(client, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation) throw new Error('No active workspace is available.');
-	if (workspace.role === 'viewer') throw new Error('Your workspace role does not permit project creation.');
+	assertCan(workspace.role, 'project.create', 'Your workspace role does not permit project creation.');
 	if (workspace.role === 'member') {
 		const { data: settings, error: settingsError } = await client
 			.from('organisation_settings')
@@ -101,7 +102,7 @@ export async function createProject(
 
 export async function updateProjectCore(
 	projectSlug: string,
-	input: { name: string; status?: ProjectStatus },
+	input: { name: string; description?: string; status?: ProjectStatus },
 	client,
 	accessToken?: string,
 ) {
@@ -112,16 +113,21 @@ export async function updateProjectCore(
 	const workspace = await getCurrentWorkspace(client, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation) throw new Error('No active workspace is available.');
-	if (workspace.role === 'viewer') throw new Error('Your workspace role does not permit project editing.');
+	assertCan(workspace.role, 'project.editDetails', 'Your workspace role does not permit project editing.');
+
+	const updatePayload: { name: string; status: ProjectStatus; description?: string | null } = { name, status: input.status };
+	if (Object.prototype.hasOwnProperty.call(input, 'description')) {
+		updatePayload.description = input.description?.trim() || null;
+	}
 
 	const { data: project, error } = await client
 		.from('projects')
-		.update({ name, status: input.status })
+		.update(updatePayload)
 		.eq('slug', projectSlug)
 		.eq('organisation_id', organisation.id)
 		.is('deleted_at', null)
 		.is('archived_at', null)
-		.select('slug, name, status')
+		.select('slug, name, description, status, health')
 		.maybeSingle();
 
 	if (error) throw error;
