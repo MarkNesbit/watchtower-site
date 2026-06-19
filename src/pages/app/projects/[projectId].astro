@@ -1,7 +1,7 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
 import { can } from '../../../lib/permissions';
-import { getCurrentWorkspace } from '../../../lib/projects';
+import { getCurrentWorkspace, PROJECT_STATUSES, updateProjectCore } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -17,6 +17,25 @@ const formatValue = (value, fallback = 'Not available') => value || fallback;
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
+
+	if (Astro.request.method === 'POST') {
+		const formData = await Astro.request.formData();
+		try {
+			await updateProjectCore(
+				projectSlug ?? '',
+				{
+					name: String(formData.get('name') ?? ''),
+					status: String(formData.get('status') ?? 'proposed'),
+				},
+				serverSupabase,
+				accessToken,
+			);
+			saveMessage = 'Project saved.';
+		} catch (error) {
+			saveMessage = error instanceof Error ? error.message : 'Unable to save project.';
+		}
+	}
+
 	const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation) {
