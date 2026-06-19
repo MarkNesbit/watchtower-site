@@ -145,3 +145,13 @@ WT-002B should:
 - Avoid implementing full Red/Amber/Green scoring yet.
 - Avoid implementing dependency modelling yet.
 - Keep workspace isolation and Row Level Security intact.
+
+## WT-002B implemented foundation
+
+WT-002B adds the first project detail and edit foundation without broadening the project schema. The project list links to project detail pages by the existing workspace-scoped `slug`. The detail page displays the project name, workspace context, status, health, created timestamp, updated timestamp, and a resolved creator display value only when the profile can be read safely.
+
+Editable project fields are limited to the existing core fields `name` and `status`. The `status` field remains constrained to the existing values `proposed`, `active`, `paused`, `completed`, and `cancelled`. Health, slug, workspace/organisation ownership, creator identity, and timestamps are display-only or internal implementation fields and are not exposed as editable form fields.
+
+Project creation remains lightweight. `created_by` continues to be populated automatically from the authenticated Supabase user when a project is created. The current schema does not include `updated_by`; WT-002B therefore does not add it and recommends a later small audit migration when the surrounding profile/audit display pattern is ready.
+
+WT-002B does not implement Red/Amber/Green scoring, RAID tables, dependency modelling, programme/portfolio modelling, or additional optional project fields.
