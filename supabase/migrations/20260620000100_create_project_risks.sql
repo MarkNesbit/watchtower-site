@@ -57,7 +57,7 @@ create table public.project_risks (
   contingency_plan text,
   review_date date,
   due_date date,
-  created_by uuid references public.profiles(id),
+  created_by uuid not null references public.profiles(id),
   updated_by uuid references public.profiles(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -93,7 +93,7 @@ create table public.project_risk_notes (
   parent_risk_note_id uuid references public.project_risk_notes(risk_note_id) on delete cascade,
   note text not null,
   attention_level text not null default 'green',
-  created_by uuid references public.profiles(id),
+  created_by uuid not null references public.profiles(id),
   updated_by uuid references public.profiles(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz,
@@ -103,13 +103,66 @@ create table public.project_risk_notes (
   constraint project_risk_notes_risk_scope_fk foreign key (risk_id, project_id, organisation_id)
     references public.project_risks(risk_id, project_id, organisation_id) on delete cascade,
   constraint project_risk_notes_note_not_empty check (length(btrim(note)) > 0),
-  constraint project_risk_notes_attention_level_check check (attention_level in ('green', 'amber', 'red'))
+  constraint project_risk_notes_attention_level_check check (attention_level in ('green', 'amber', 'red')),
+  constraint project_risk_notes_id_risk_project_organisation_key unique (risk_note_id, risk_id, project_id, organisation_id),
+  constraint project_risk_notes_parent_scope_fk foreign key (parent_risk_note_id, risk_id, project_id, organisation_id)
+    references public.project_risk_notes(risk_note_id, risk_id, project_id, organisation_id) on delete cascade
 );
 
 comment on table public.project_risk_notes is
   'Threaded audit notes and replies for project risks. parent_risk_note_id is null for top-level notes and populated for replies. Attention levels support future notification behaviour only; delivery is not implemented here.';
 comment on column public.project_risk_notes.attention_level is
   'green = routine/informational; amber = needs awareness/review; red = urgent/rapid interaction likely required. Future scope: red immediate owner email, amber/green daily digest.';
+
+create or replace function public.set_project_risk_audit_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Authenticated user is required for risk audit fields.' using errcode = '42501';
+  end if;
+
+  if tg_op = 'INSERT' then
+    new.created_by = auth.uid();
+  elsif tg_op = 'UPDATE' then
+    new.updated_by = auth.uid();
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger set_project_risk_audit_fields
+  before insert or update on public.project_risks
+  for each row execute function public.set_project_risk_audit_fields();
+
+create or replace function public.set_project_risk_note_audit_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Authenticated user is required for risk note audit fields.' using errcode = '42501';
+  end if;
+
+  if tg_op = 'INSERT' then
+    new.created_by = auth.uid();
+  elsif tg_op = 'UPDATE' then
+    new.updated_by = auth.uid();
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger set_project_risk_note_audit_fields
+  before insert or update on public.project_risk_notes
+  for each row execute function public.set_project_risk_note_audit_fields();
 
 create trigger set_project_risks_updated_at
   before update on public.project_risks
@@ -237,5 +290,7 @@ grant update on table public.project_risks, public.project_risk_notes to authent
 grant all privileges on table public.project_risks, public.project_risk_notes to service_role;
 
 revoke all on function public.normalise_project_ref() from public;
+revoke all on function public.set_project_risk_audit_fields() from public;
+revoke all on function public.set_project_risk_note_audit_fields() from public;
 revoke all on function public.prevent_project_risk_scope_update() from public;
 revoke all on function public.prevent_project_risk_note_scope_update() from public;

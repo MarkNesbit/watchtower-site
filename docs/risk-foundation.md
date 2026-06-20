@@ -1,6 +1,6 @@
 # Watchtower Risk Foundation
 
-**Status:** WT-RISK-001 schema foundation
+**Status:** WT-RISK-001 schema foundation  
 **Scope:** Database, Row Level Security, constraints, indexes, and migration tests only
 
 ## Purpose

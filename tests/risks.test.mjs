@@ -44,7 +44,7 @@ test('Project risks include required MVP fields and exclude actioners', async ()
 		"impact text not null default 'medium'",
 		"rag_status text not null default 'blue'",
 		'owner_id uuid references public.profiles(id)',
-		'created_by uuid references public.profiles(id)',
+		'created_by uuid not null references public.profiles(id)',
 		'updated_by uuid references public.profiles(id)',
 		'archived_at timestamptz',
 		'deleted_at timestamptz',
@@ -72,10 +72,31 @@ test('Risk notes support threaded replies and audit fields', async () => {
 	assert.match(sql, /risk_id uuid not null references public\.project_risks\(risk_id\) on delete cascade/);
 	assert.match(sql, /note text not null/);
 	assert.match(sql, /attention_level text not null default 'green'/);
-	assert.match(sql, /created_by uuid references public\.profiles\(id\)/);
+	assert.match(sql, /created_by uuid not null references public\.profiles\(id\)/);
 	assert.match(sql, /created_at timestamptz not null default now\(\)/);
 	assert.match(sql, /updated_at timestamptz/);
 	assert.match(sql, /deleted_at timestamptz/);
+});
+
+test('Risk and note audit triggers bind created_by to auth.uid and prevent unattributed inserts', async () => {
+	const sql = await migrationSql();
+	assert.match(sql, /create or replace function public\.set_project_risk_audit_fields\(\)/);
+	assert.match(sql, /create trigger set_project_risk_audit_fields/);
+	assert.match(sql, /before insert or update on public\.project_risks/);
+	assert.match(sql, /new\.created_by = auth\.uid\(\)/);
+	assert.match(sql, /Authenticated user is required for risk audit fields/);
+	assert.match(sql, /create or replace function public\.set_project_risk_note_audit_fields\(\)/);
+	assert.match(sql, /create trigger set_project_risk_note_audit_fields/);
+	assert.match(sql, /before insert or update on public\.project_risk_notes/);
+	assert.match(sql, /Authenticated user is required for risk note audit fields/);
+	assert.match(sql, /new\.updated_by = auth\.uid\(\)/);
+});
+
+test('Risk note parent links are constrained to the same risk project and organisation', async () => {
+	const sql = await migrationSql();
+	assert.match(sql, /project_risk_notes_id_risk_project_organisation_key unique \(risk_note_id, risk_id, project_id, organisation_id\)/);
+	assert.match(sql, /project_risk_notes_parent_scope_fk foreign key \(parent_risk_note_id, risk_id, project_id, organisation_id\)/);
+	assert.match(sql, /references public\.project_risk_notes\(risk_note_id, risk_id, project_id, organisation_id\) on delete cascade/);
 });
 
 test('Risk tables have RLS and role policies matching workspace membership model', async () => {
