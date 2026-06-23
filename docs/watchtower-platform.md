@@ -26,6 +26,13 @@ The platform is intended for professional delivery and technology audiences, inc
 - Transformation Leaders;
 - Product teams, portfolio managers and delivery consultants.
 
+
+## User profile and access foundation
+
+Supabase Auth owns authenticated accounts. Watchtower mirrors each verified account into a lightweight profile for identity, display and audit metadata only. Profiles are not permission stores and must not contain global customer roles, recovery email addresses, delivery personas or platform superuser flags.
+
+Workspace access is derived from active organisation membership and the fixed MVP roles `owner`, `admin`, `member` and `viewer`. The database stores these roles on `organisation_members`, allowing a user to hold different roles in different workspaces. See `docs/access-foundation.md` for the full account/profile/membership/role model and future permission-readiness notes.
+
 ## Design direction
 
 The website should feel credible, calm, data-led and professional for a senior delivery audience. The visual direction blends a dark navy / charcoal command-centre feel with clean light content sections, subtle beacon and early-warning motifs, rounded dashboard cards and the light blue from the WatchTower logo as the site accent colour (`#00A0FF`).

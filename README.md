@@ -30,7 +30,7 @@ npm run build
 
 ## Supabase foundation setup
 
-This repository includes a Supabase CLI configuration at `supabase/config.toml`. The current foundation is limited to project configuration, public environment-variable documentation and a lightweight application client module. It intentionally does not add database tables, migrations, Row Level Security policies, authentication UI, onboarding logic or workspace creation logic.
+This repository includes a Supabase CLI configuration at `supabase/config.toml`, migrations for the current profile/workspace/project/risk foundation, public environment-variable documentation and lightweight Supabase client modules. The authentication foundation uses Supabase Auth, creates application profile/workspace records through migrations and preserves Row Level Security as the database access boundary.
 
 ### Local environment variables
 
@@ -75,4 +75,4 @@ Database schema changes must be handled through migrations only. Do not make man
 
 Platform and product positioning notes are available in the `docs/` directory. Architecture Decision Records in `docs/architecture/` are the source of truth for implementation decisions.
 
-Before changing project functionality, read `docs/project-model.md` for the product-level project field model and `AGENTS.md` for Codex/developer working rules.
+Before changing project functionality, read `docs/project-model.md` for the product-level project field model, `docs/access-foundation.md` for the account/profile/membership/role model and `AGENTS.md` for Codex/developer working rules.
