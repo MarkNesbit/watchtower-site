@@ -57,7 +57,9 @@ User-facing delivery records should use `projects.project_ref`, a short 3-4 char
 
 The project dashboard presents the main operating areas without exposing the underlying data model. **Project Narrative** is the user-facing event and history layer for understanding what happened, what changed and why it matters. **Timeline** remains a separate date, milestone and key-stage view.
 
-Project Narrative currently uses the internal `projectDiary` feature flag. WT-US-0207 adds only the dashboard tile and shared feature-gated tile handling; it does not add Narrative storage, automation or a destination page. Until a guarded workspace-scoped route is implemented, the tile is shown as unavailable whenever its feature state would otherwise allow access rather than linking to a missing page.
+Project Narrative currently uses the internal `projectDiary` feature flag. WT-US-0207 added only the dashboard tile and shared feature-gated tile handling. WT-NARRATIVE-002 now adds structured, workspace-isolated `project_narrative_entries` storage and server-side data-access helpers, including immutable `NAR-{PROJECT_REF}-{NNN}` references, source-link readiness, audit fields, UTC-compatible timestamps, IANA timezone context, and role-based RLS. It does not add Narrative automation or a destination page. Until a guarded workspace-scoped route is implemented, the tile is shown as unavailable whenever its feature state would otherwise allow access rather than linking to a missing page.
+
+Risk, Issue, Dependency, and Assumption records remain authoritative. Future source-generated Narrative entries may reference them for assurance history, but must not become an alternative editing surface. The full schema and permission boundary are documented in `docs/project-narrative.md`.
 
 ## Project relationship readiness
 

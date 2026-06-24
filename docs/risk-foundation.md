@@ -82,6 +82,12 @@ Future notification rules are expected to be:
 
 Notification delivery, notification event tables, email sending, and daily digest generation are future scope and are not implemented in WT-RISK-001.
 
+## Project Narrative source-of-truth boundary
+
+WT-NARRATIVE-002 adds `project_narrative_entries` with source metadata ready for a later Risk-to-Narrative workflow. That foundation does not generate Narrative entries from Risks and does not change Risk behaviour.
+
+When the integration is implemented, a Narrative entry may retain the authoritative `project_risks.risk_id` as `source_record_id` and a display value such as `Risk-HHH-003` as `source_ref`. Its own `NAR-{PROJECT_REF}-{NNN}` identity is still retained. The Risk record remains the source of truth and must be edited in Risk Management rather than through Project Narrative.
+
 ## Dashboard and RAID future scope
 
 The project dashboard Risk tile remains a navigation/signal placeholder in this foundation slice. It is not connected to live `project_risks` data.
