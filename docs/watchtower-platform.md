@@ -52,3 +52,9 @@ This workspace foundation supports future project intelligence across risk, depe
 Project slugs are URL-safe routing identifiers only and are unique within a workspace rather than globally. Canonical project URLs therefore use `/app/workspaces/{workspaceSlug}/projects/{projectSlug}`, with `/edit` and `/risks` suffixes for those destinations. Scoped lookups require the signed-in user's active workspace membership and match both workspace and project slug; visible URLs do not contain raw UUIDs. The older `/app/projects/{projectSlug}` family is transitional and redirects only for one accessible match, presenting a workspace choice when the same slug is accessible in more than one workspace.
 
 User-facing delivery records should use `projects.project_ref`, a short 3-4 character uppercase code generated and collision-resolved by Watchtower within the workspace/organisation. The create flow displays the expected reference as fixed and read-only; users cannot supply or override it, and it remains immutable after creation for MVP. A future admin-only override is outside the current scope. Future risk references will combine this code with a project-specific sequence, for example `Risk-HHH-003`.
+
+## Project dashboard capabilities
+
+The project dashboard presents the main operating areas without exposing the underlying data model. **Project Narrative** is the user-facing event and history layer for understanding what happened, what changed and why it matters. **Timeline** remains a separate date, milestone and key-stage view.
+
+Project Narrative currently uses the internal `projectDiary` feature flag. WT-US-0207 adds only the dashboard tile and shared feature-gated tile handling; it does not add Narrative storage, automation or a destination page. Until a guarded workspace-scoped route is implemented, the tile is shown as unavailable whenever its feature state would otherwise allow access rather than linking to a missing page.

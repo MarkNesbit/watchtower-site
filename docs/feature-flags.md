@@ -25,6 +25,8 @@ Unknown keys, missing rows and malformed states resolve to `hidden`. This is the
 
 The first end-to-end integration is `riskManagement`. Its project dashboard tile uses the central helper and `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks` repeats the check on direct access. The guarded route also requires an active membership in the workspace named by the route and the `risk.view` permission. Viewers may view an available placeholder but remain unable to create or edit risks.
 
+The project dashboard also uses `projectDiary` for the user-facing **Project Narrative** tile. Project Narrative is the project event/history/story layer and is separate from the date-and-milestone **Timeline** tile. Feature-gated tile handling is shared across both capability keys. WT-US-0207 does not add a Project Narrative route, so a visible tile stays inactive with the normal capability-unavailable treatment even when its flag would otherwise permit access; it never links to a missing destination.
+
 ## Initial feature keys
 
 - `projectDiary`

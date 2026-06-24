@@ -186,3 +186,7 @@ Every scoped page first requires an active membership in the workspace identifie
 ## Feature-gated project capabilities
 
 WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and the direct `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks` route. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. The route is a release-control placeholder and does not expand the risk UI scope described in `docs/risk-foundation.md`.
+
+WT-US-0207 adds **Project Narrative** near the start of the dashboard capability tiles. Project Narrative is the user-facing project event, update, decision and history layer: it explains what happened, what changed and why it matters. It remains distinct from **Timeline**, which represents dates, milestones and key project stages.
+
+Project Narrative uses the existing internal `projectDiary` feature key. The dashboard applies the same `hidden`, `disabled`, `preview` and `enabled` access model to all feature-gated tiles rather than treating Risk Management as a one-off. No Project Narrative route or data model is included in WT-US-0207, so the tile remains safely unavailable even for an otherwise accessible flag state until a guarded workspace-scoped route exists. Risk Management routing and RBAC behaviour are unchanged.
