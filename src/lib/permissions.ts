@@ -11,13 +11,20 @@ export type ProjectPermission = (typeof PROJECT_PERMISSIONS)[number];
 
 export const RISK_PERMISSIONS = ['risk.view', 'risk.create', 'risk.edit'] as const;
 export type RiskPermission = (typeof RISK_PERMISSIONS)[number];
-export type Permission = ProjectPermission | RiskPermission;
+export const NARRATIVE_PERMISSIONS = [
+	'narrative.view',
+	'narrative.create',
+	'narrative.edit',
+	'narrative.delete',
+] as const;
+export type NarrativePermission = (typeof NARRATIVE_PERMISSIONS)[number];
+export type Permission = ProjectPermission | RiskPermission | NarrativePermission;
 
 const ROLE_PERMISSIONS: Record<WorkspaceRole, ReadonlySet<Permission>> = {
-	owner: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS]),
-	admin: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS]),
-	member: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS]),
-	viewer: new Set(['project.view', 'project.viewDashboard', 'risk.view']),
+	owner: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS]),
+	admin: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS]),
+	member: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS]),
+	viewer: new Set(['project.view', 'project.viewDashboard', 'risk.view', 'narrative.view']),
 };
 
 export function isWorkspaceRole(role: unknown): role is WorkspaceRole {

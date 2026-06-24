@@ -1,10 +1,10 @@
 # Watchtower Project Model
 
-**Status:** Product working reference through WT-US-0208
+**Status:** Product working reference through WT-NARRATIVE-002
 
 **Last updated:** 24 June 2026
 
-**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`
+**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`
 
 ## Purpose of a project in Watchtower
 
@@ -144,6 +144,16 @@ All active Workspace members can read relationship records under Row Level Secur
 A `relates_to` relationship is intentionally ambiguous. The helper `isAmbiguousProjectRelationshipType` makes it available to future project health/risk logic as a possible uncertainty signal, but it does not create a risk or alter health scoring in this slice.
 
 Relationship records use UUIDs internally for referential integrity. Any future user-facing relationship view should identify projects with the human-readable `projects.project_ref` (and project name where useful), not expose or substitute raw UUIDs. Project references remain display identifiers and do not replace UUID foreign keys.
+
+## WT-NARRATIVE-002 Project Narrative foundation
+
+Project Narrative is the structured project assurance and history layer. `project_narrative_entries` links every event to both its workspace and project, assigns an immutable project-scoped entry number, and generates references such as `NAR-HHH-001` from the authoritative project reference. An internal atomic counter prevents concurrent collisions and prevents deleted references from being reused.
+
+Entries may be manual or prepared for future Risk, Issue, Dependency, Assumption, and system sources. Optional source UUID/reference fields preserve traceability, but the source RAID module remains authoritative: Project Narrative does not become an editable substitute for a Risk or other delivery concern.
+
+Owners, admins, and members can read and mutate Narrative entries for projects in an active workspace; viewers are read-only. Composite foreign keys and Row Level Security preserve workspace isolation. Audit timestamps use UTC-compatible `timestamptz`; optional context accepts validated IANA timezone names for later display/audit use.
+
+WT-NARRATIVE-002 adds no Project Narrative page, form, table, modal, filters, RAID integration, notifications, export, or AI. See `docs/project-narrative.md` for the schema, reference, DTS, permission, and validation details.
 
 ## WT-002B implementation guidance
 
