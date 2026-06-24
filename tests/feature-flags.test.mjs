@@ -97,12 +97,17 @@ test('Migration adds account preview access and stateful fail-closed flags', asy
 	assert.doesNotMatch(sql, /PREVIEW_FEATURE_USER_EMAILS|is_platform_admin|service_role key/i);
 });
 
-test('Risk tile and direct route both use central feature access', async () => {
+test('Feature-gated project tiles use central access generically and keep the Risk route guarded', async () => {
 	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	const route = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
 
-	assert.match(dashboard, /loadFeatureAccess\(serverSupabase, 'riskManagement', accessToken\)/);
-	assert.match(dashboard, /riskManagementAccess\.isVisible/);
+	assert.match(dashboard, /featureKey: 'projectDiary'/);
+	assert.match(dashboard, /featureKey: 'riskManagement'/);
+	assert.match(dashboard, /gatedFeatureKeys\.map\(async \(featureKey\)/);
+	assert.match(dashboard, /loadFeatureAccess\(serverSupabase, featureKey, accessToken\)/);
+	assert.match(dashboard, /featureAccessByKey\[tile\.featureKey\]/);
+	assert.match(dashboard, /featureAccess && !featureAccess\.isVisible/);
+	assert.doesNotMatch(dashboard, /riskManagementAccess/);
 	assert.match(dashboard, /data-feature-unavailable/);
 	assert.match(dashboard, /buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\)/);
 

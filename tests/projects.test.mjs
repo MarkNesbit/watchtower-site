@@ -147,6 +147,21 @@ test('Project dashboard is read-only and displays metadata including description
 	assert.doesNotMatch(detailSource, /<dd>{project\.created_by}<\/dd>|<dd>{project\.organisation_id}<\/dd>|data-project-id/);
 });
 
+test('Project dashboard capability tiles lead with Project Narrative while keeping Timeline separate', async () => {
+	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+	const narrativeIndex = detailSource.indexOf("title: 'Project Narrative'");
+	const timelineIndex = detailSource.indexOf("title: 'Timeline'");
+	const risksIndex = detailSource.indexOf("title: 'Risks'");
+
+	assert.notEqual(narrativeIndex, -1);
+	assert.match(detailSource, /line: 'View key project events, updates, decisions and history\.'/);
+	assert.match(detailSource, /title: 'Project Narrative'[\s\S]*?href: null,[\s\S]*?featureKey: 'projectDiary'/);
+	assert.ok(narrativeIndex < timelineIndex);
+	assert.ok(timelineIndex < risksIndex);
+	assert.match(detailSource, /title: 'Timeline'.*href: '#timeline'/);
+	assert.doesNotMatch(detailSource, /href: ['"]\/app\/[^'"]*(?:narrative|diary)/i);
+});
+
 test('Project dashboard edit action is visible to all viewers and active only for permitted roles', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	assert.match(detailSource, /canEditProject = can\(workspace\.role, 'project\.editDetails'\)/);
