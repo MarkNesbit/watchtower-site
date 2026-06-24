@@ -1,92 +1,50 @@
 ---
 import AuthenticatedLayout from '../../../../layouts/AuthenticatedLayout.astro';
-import { can } from '../../../../lib/permissions';
-import { getCurrentWorkspace, PROJECT_STATUSES, updateProjectCore } from '../../../../lib/projects';
+import { buildProjectEditPath, getAccessibleProjectsBySlug } from '../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
 const accessToken = getServerAccessToken(Astro.cookies);
-let project = null;
-let workspaceName = '';
+let projects = [];
 let message = '';
-let saveMessage = '';
-let canEditProject = false;
-
-const formatValue = (value, fallback = 'Not available') => value || fallback;
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
-	const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
-	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
-	if (!workspace || !organisation) {
-		message = 'No active workspace is available for your account.';
-	} else {
-		workspaceName = organisation.name;
-		canEditProject = can(workspace.role, 'project.editDetails');
-		if (Astro.request.method === 'POST' && canEditProject) {
-			const formData = await Astro.request.formData();
-			try {
-				await updateProjectCore(projectSlug ?? '', {
-					name: String(formData.get('name') ?? ''),
-					description: String(formData.get('description') ?? ''),
-					status: String(formData.get('status') ?? 'proposed'),
-				}, serverSupabase, accessToken);
-				saveMessage = 'Project saved.';
-			} catch (error) {
-				saveMessage = error instanceof Error ? error.message : 'Unable to save project.';
-			}
-		} else if (Astro.request.method === 'POST') {
-			saveMessage = 'You do not have permission to edit project details.';
-		}
+	projects = projectSlug
+		? await getAccessibleProjectsBySlug(serverSupabase, projectSlug, accessToken)
+		: [];
 
-		const { data, error } = await serverSupabase
-			.from('projects')
-			.select('name, project_ref, description, slug, status, health')
-			.eq('slug', projectSlug)
-			.eq('organisation_id', organisation.id)
-			.is('deleted_at', null)
-			.is('archived_at', null)
-			.maybeSingle();
-		if (error) throw error;
-		project = data;
-		if (!project) message = 'Project not found or you do not have access.';
+	if (projects.length === 1) {
+		return Astro.redirect(buildProjectEditPath(projects[0].workspace.slug, projects[0].slug));
 	}
-} catch (error) {
-	message = error instanceof Error ? error.message : 'Unable to load project.';
+	if (projects.length === 0) {
+		message = 'Project not found or you do not have access.';
+		Astro.response.status = 404;
+	} else {
+		message = 'This edit link matches projects in more than one workspace. Choose the workspace you intended.';
+		Astro.response.status = 409;
+	}
+} catch {
+	message = 'Unable to resolve project.';
+	Astro.response.status = 500;
 }
 ---
-<AuthenticatedLayout title={project ? `Edit ${project.name} | WatchTower` : 'Edit Project | WatchTower'}>
-	<section class="content-card" data-project-edit>
-		<div class="app-page-header">
-			<div>
-				<p class="eyebrow">Edit project details</p>
-				{project ? <h1>{project.name}</h1> : <h1>Project unavailable</h1>}
-				{workspaceName && <p>Workspace: {workspaceName}</p>}
-			</div>
-			<a class="button" href={project ? `/app/projects/${project.slug}` : '/app/projects'}>Back to project</a>
-		</div>
-		{project && canEditProject ? (
-			<form class="auth-card" method="post" data-project-edit-form>
-				<label>Name <input name="name" value={project.name} required autocomplete="off" /></label>
-				<p>Project reference: <strong>{formatValue(project.project_ref)}</strong></p>
-				<p>This project reference is read-only and cannot be edited after creation in MVP.</p>
-				<label>Description <textarea name="description" rows="4">{project.description ?? ''}</textarea></label>
-				<label>Status
-					<select name="status">
-						{PROJECT_STATUSES.map((status) => <option value={status} selected={status === project.status}>{status}</option>)}
-					</select>
-				</label>
-				<p>Health: <strong>{formatValue(project.health, 'Not assessed')}</strong></p>
-				<button class="button button--primary" type="submit">Save project</button>
-				{saveMessage && <p class="form-message">{saveMessage}</p>}
-			</form>
-		) : project ? (
-			<section class="content-card" data-view-only-project>
-				<h2>Project editing unavailable</h2>
-				<p>You do not have permission to edit project details.</p>
-			</section>
-		) : (
-			<p>{message}</p>
+<AuthenticatedLayout title="Choose project workspace | WatchTower">
+	<section class="content-card" data-legacy-project-edit-route>
+		<p class="eyebrow">Project edit link</p>
+		<h1>{projects.length > 1 ? 'Choose a workspace' : 'Project unavailable'}</h1>
+		<p>{message}</p>
+		{projects.length > 1 && (
+			<ul>
+				{projects.map((project) => (
+					<li>
+						<a href={buildProjectEditPath(project.workspace.slug, project.slug)}>
+							{project.name} — {project.workspace.name}
+						</a>
+					</li>
+				))}
+			</ul>
 		)}
+		<a class="button button--secondary" href="/app/projects">Back to projects</a>
 	</section>
 </AuthenticatedLayout>

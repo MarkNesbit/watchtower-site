@@ -55,5 +55,6 @@ After deployment, test:
 - `/app`
 - `/app/projects`
 - `/app/projects/new`
+- `/app/workspaces/{workspaceSlug}/projects/{projectSlug}` for an accessible project
 
 Also confirm that `https://watch-tower.co.uk` resolves to the Worker deployment, not the old Cloudflare Pages deployment.
