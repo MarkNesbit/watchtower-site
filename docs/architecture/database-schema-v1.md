@@ -1,9 +1,10 @@
-# Watchtower Database Schema v1
+# Watchtower Database Schema v1.1
 
-**Document Version:** 1.0
-**Status:** Draft for WT-001B Database Foundation
-**Date:** 12 June 2026
+**Document Version:** 1.1
+**Status:** Updated schema reference — WT-001B foundation plus WT-US-0107 feature flag update
+**Date:** 24 June 2026
 **Related ADRs:** ADR-000, ADR-001, ADR-002, ADR-004, ADR-005
+**Related implementation updates:** WT-US-0107 Feature Flags and Preview/UAT Access
 
 ---
 
@@ -149,17 +150,18 @@ One profile maps to one Supabase Auth user.
 
 ## Fields
 
-| Field           | Type          | Nullable | Default            | Foreign Key     | Description                                                                  |
-| --------------- | ------------- | -------: | ------------------ | --------------- | ---------------------------------------------------------------------------- |
-| `id`            | `uuid`        |       No | None               | `auth.users.id` | Primary key. Same identifier as the Supabase Auth user.                      |
-| `email`         | `text`        |       No | None               | None            | User email address copied from Supabase Auth for display/search convenience. |
-| `display_name`  | `text`        |       No | Derived from email | None            | User-facing name. Initially generated from the email address.                |
-| `avatar_url`    | `text`        |      Yes | `null`             | None            | Optional profile image URL for future use.                                   |
-| `last_login_at` | `timestamptz` |      Yes | `null`             | None            | Last known successful login time. May be populated later.                    |
-| `created_at`    | `timestamptz` |       No | `now()`            | None            | Timestamp when the profile was created.                                      |
-| `updated_at`    | `timestamptz` |       No | `now()`            | None            | Timestamp when the profile was last updated.                                 |
-| `created_by`    | `uuid`        |      Yes | `null`             | `auth.users.id` | User or system actor that created the profile. Usually the same as `id`.     |
-| `updated_by`    | `uuid`        |      Yes | `null`             | `auth.users.id` | User who last updated the profile. Useful where admins manage display names. |
+| Field                         | Type          | Nullable | Default            | Foreign Key     | Description                                                                                                                                |
+| ----------------------------- | ------------- | -------- | ------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                          | `uuid`        | No       | None               | `auth.users.id` | Primary key. Same identifier as the Supabase Auth user.                                                                                    |
+| `email`                       | `text`        | No       | None               | None            | User email address copied from Supabase Auth for display/search convenience.                                                               |
+| `display_name`                | `text`        | No       | Derived from email | None            | User-facing name. Initially generated from the email address.                                                                              |
+| `avatar_url`                  | `text`        | Yes      | `null`             | None            | Optional profile image URL for future use.                                                                                                 |
+| `can_access_preview_features` | `boolean`     | No       | `false`            | None            | Narrow platform-level product preview eligibility flag. It does not grant workspace membership, bypass RBAC, or bypass Row Level Security. |
+| `last_login_at`               | `timestamptz` | Yes      | `null`             | None            | Last known successful login time. May be populated later.                                                                                  |
+| `created_at`                  | `timestamptz` | No       | `now()`            | None            | Timestamp when the profile was created.                                                                                                    |
+| `updated_at`                  | `timestamptz` | No       | `now()`            | None            | Timestamp when the profile was last updated.                                                                                               |
+| `created_by`                  | `uuid`        | Yes      | `null`             | `auth.users.id` | User or system actor that created the profile. Usually the same as `id`.                                                                   |
+| `updated_by`                  | `uuid`        | Yes      | `null`             | `auth.users.id` | User who last updated the profile. Useful where admins manage display names or preview eligibility.                                        |
 
 ## Constraints
 
@@ -167,6 +169,7 @@ One profile maps to one Supabase Auth user.
 * `id` references `auth.users.id`.
 * `email` must not be empty.
 * `display_name` must not be empty.
+* `can_access_preview_features` defaults to `false`.
 
 ## Notes
 
@@ -181,6 +184,8 @@ becomes:
 `Mark Nesbit`
 
 Display name editing is governed by workspace settings, not hardcoded user behaviour.
+
+The `can_access_preview_features` field was added by WT-US-0107. It is deliberately separate from workspace roles. It must not be used as a shortcut for workspace membership, Role-Based Access Control (RBAC), or Row Level Security (RLS). A preview-enabled account may enter product capabilities in `preview` state, but only where normal authentication, active workspace membership, and permission checks also pass.
 
 ---
 
@@ -203,16 +208,16 @@ One organisation may own many future business records such as projects, reports,
 ## Fields
 
 | Field         | Type          | Nullable | Default                  | Foreign Key     | Description                                                                 |
-| ------------- | ------------- | -------: | ------------------------ | --------------- | --------------------------------------------------------------------------- |
-| `id`          | `uuid`        |       No | `gen_random_uuid()`      | None            | Primary key for the workspace/organisation.                                 |
-| `name`        | `text`        |       No | None                     | None            | User-facing workspace name. Example: `Mark Nesbit Workspace`.               |
-| `slug`        | `text`        |       No | Generated by application | None            | URL-safe unique workspace identifier. Example: `mark-nesbit-workspace`.     |
-| `type`        | `text`        |       No | `personal`               | None            | Workspace type. Supported values: `personal`, `team`, `business`, `client`. |
-| `created_by`  | `uuid`        |       No | None                     | `auth.users.id` | User who created the workspace.                                             |
-| `created_at`  | `timestamptz` |       No | `now()`                  | None            | Timestamp when the workspace was created.                                   |
-| `updated_at`  | `timestamptz` |       No | `now()`                  | None            | Timestamp when the workspace was last updated.                              |
-| `archived_at` | `timestamptz` |      Yes | `null`                   | None            | Timestamp when the workspace was archived. Null means not archived.         |
-| `deleted_at`  | `timestamptz` |      Yes | `null`                   | None            | Soft deletion timestamp. Null means not deleted.                            |
+| ------------- | ------------- | -------- | ------------------------ | --------------- | --------------------------------------------------------------------------- |
+| `id`          | `uuid`        | No       | `gen_random_uuid()`      | None            | Primary key for the workspace/organisation.                                 |
+| `name`        | `text`        | No       | None                     | None            | User-facing workspace name. Example: `Mark Nesbit Workspace`.               |
+| `slug`        | `text`        | No       | Generated by application | None            | URL-safe unique workspace identifier. Example: `mark-nesbit-workspace`.     |
+| `type`        | `text`        | No       | `personal`               | None            | Workspace type. Supported values: `personal`, `team`, `business`, `client`. |
+| `created_by`  | `uuid`        | No       | None                     | `auth.users.id` | User who created the workspace.                                             |
+| `created_at`  | `timestamptz` | No       | `now()`                  | None            | Timestamp when the workspace was created.                                   |
+| `updated_at`  | `timestamptz` | No       | `now()`                  | None            | Timestamp when the workspace was last updated.                              |
+| `archived_at` | `timestamptz` | Yes      | `null`                   | None            | Timestamp when the workspace was archived. Null means not archived.         |
+| `deleted_at`  | `timestamptz` | Yes      | `null`                   | None            | Soft deletion timestamp. Null means not deleted.                            |
 
 ## Constraints
 
@@ -261,17 +266,17 @@ A workspace may have multiple users.
 ## Fields
 
 | Field             | Type          | Nullable | Default             | Foreign Key        | Description                                                                             |
-| ----------------- | ------------- | -------: | ------------------- | ------------------ | --------------------------------------------------------------------------------------- |
-| `id`              | `uuid`        |       No | `gen_random_uuid()` | None               | Primary key for the membership record.                                                  |
-| `organisation_id` | `uuid`        |       No | None                | `organisations.id` | Workspace the membership belongs to.                                                    |
-| `user_id`         | `uuid`        |       No | None                | `auth.users.id`    | User who is a member of the workspace.                                                  |
-| `role`            | `text`        |       No | `member`            | None               | User role within the workspace. Supported values: `owner`, `admin`, `member`, `viewer`. |
-| `status`          | `text`        |       No | `active`            | None               | Membership status. Supported values: `active`, `invited`, `suspended`, `removed`.       |
-| `invited_by`      | `uuid`        |      Yes | `null`              | `auth.users.id`    | User who invited this member. Null for automatically created owner membership.          |
-| `invited_at`      | `timestamptz` |      Yes | `null`              | None               | Timestamp when the invitation was created.                                              |
-| `joined_at`       | `timestamptz` |      Yes | `now()`             | None               | Timestamp when the user joined. For the original owner this may equal creation time.    |
-| `created_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the membership record was created.                                       |
-| `updated_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the membership record was last updated.                                  |
+| ----------------- | ------------- | -------- | ------------------- | ------------------ | --------------------------------------------------------------------------------------- |
+| `id`              | `uuid`        | No       | `gen_random_uuid()` | None               | Primary key for the membership record.                                                  |
+| `organisation_id` | `uuid`        | No       | None                | `organisations.id` | Workspace the membership belongs to.                                                    |
+| `user_id`         | `uuid`        | No       | None                | `auth.users.id`    | User who is a member of the workspace.                                                  |
+| `role`            | `text`        | No       | `member`            | None               | User role within the workspace. Supported values: `owner`, `admin`, `member`, `viewer`. |
+| `status`          | `text`        | No       | `active`            | None               | Membership status. Supported values: `active`, `invited`, `suspended`, `removed`.       |
+| `invited_by`      | `uuid`        | Yes      | `null`              | `auth.users.id`    | User who invited this member. Null for automatically created owner membership.          |
+| `invited_at`      | `timestamptz` | Yes      | `null`              | None               | Timestamp when the invitation was created.                                              |
+| `joined_at`       | `timestamptz` | Yes      | `now()`             | None               | Timestamp when the user joined. For the original owner this may equal creation time.    |
+| `created_at`      | `timestamptz` | No       | `now()`             | None               | Timestamp when the membership record was created.                                       |
+| `updated_at`      | `timestamptz` | No       | `now()`             | None               | Timestamp when the membership record was last updated.                                  |
 
 ## Constraints
 
@@ -310,15 +315,15 @@ One organisation has one settings record.
 ## Fields
 
 | Field                             | Type          | Nullable | Default  | Foreign Key        | Description                                                                               |
-| --------------------------------- | ------------- | -------: | -------- | ------------------ | ----------------------------------------------------------------------------------------- |
-| `organisation_id`                 | `uuid`        |       No | None     | `organisations.id` | Primary key. References the workspace these settings belong to.                           |
-| `allow_user_display_name_editing` | `boolean`     |       No | `false`  | None               | Controls whether users can edit their own display name.                                   |
-| `require_mfa`                     | `boolean`     |       No | `false`  | None               | Future policy controlling whether workspace members must use Multi-Factor Authentication. |
-| `default_member_role`             | `text`        |       No | `member` | None               | Default role assigned to invited users unless specified otherwise.                        |
-| `allow_member_project_creation`   | `boolean`     |       No | `true`   | None               | Controls whether members can create projects.                                             |
-| `allow_member_data_upload`        | `boolean`     |       No | `true`   | None               | Controls whether members can upload data files.                                           |
-| `created_at`                      | `timestamptz` |       No | `now()`  | None               | Timestamp when the settings record was created.                                           |
-| `updated_at`                      | `timestamptz` |       No | `now()`  | None               | Timestamp when the settings record was last updated.                                      |
+| --------------------------------- | ------------- | -------- | -------- | ------------------ | ----------------------------------------------------------------------------------------- |
+| `organisation_id`                 | `uuid`        | No       | None     | `organisations.id` | Primary key. References the workspace these settings belong to.                           |
+| `allow_user_display_name_editing` | `boolean`     | No       | `false`  | None               | Controls whether users can edit their own display name.                                   |
+| `require_mfa`                     | `boolean`     | No       | `false`  | None               | Future policy controlling whether workspace members must use Multi-Factor Authentication. |
+| `default_member_role`             | `text`        | No       | `member` | None               | Default role assigned to invited users unless specified otherwise.                        |
+| `allow_member_project_creation`   | `boolean`     | No       | `true`   | None               | Controls whether members can create projects.                                             |
+| `allow_member_data_upload`        | `boolean`     | No       | `true`   | None               | Controls whether members can upload data files.                                           |
+| `created_at`                      | `timestamptz` | No       | `now()`  | None               | Timestamp when the settings record was created.                                           |
+| `updated_at`                      | `timestamptz` | No       | `now()`  | None               | Timestamp when the settings record was last updated.                                      |
 
 ## Constraints
 
@@ -338,11 +343,11 @@ Owner assignment should be explicit.
 
 ## Purpose
 
-Controls whether platform features are visible or enabled.
+Controls whether platform features are hidden, disabled, preview-only, or enabled.
 
-Feature flags allow incomplete features to be deployed safely but hidden from users.
+Feature flags allow incomplete features to be deployed safely while preventing unfinished capability from being exposed to normal users.
 
-Feature flags are product controls, not security controls.
+Feature flags are product release controls, not security controls. They must never replace authentication, active workspace membership, Role-Based Access Control (RBAC), or Row Level Security (RLS).
 
 ## Relationship
 
@@ -352,38 +357,80 @@ If `organisation_id` is null, the flag is global.
 
 If `organisation_id` is populated, the flag applies to that workspace.
 
+The current WT-US-0107 implementation uses global product feature flags. Workspace-specific feature flag behaviour may be introduced later, but it must remain subject to workspace membership, RBAC and RLS.
+
 ## Fields
 
-| Field             | Type          | Nullable | Default             | Foreign Key        | Description                                                        |
-| ----------------- | ------------- | -------: | ------------------- | ------------------ | ------------------------------------------------------------------ |
-| `id`              | `uuid`        |       No | `gen_random_uuid()` | None               | Primary key for the feature flag.                                  |
-| `key`             | `text`        |       No | None                | None               | Machine-readable feature key. Example: `project_tracking_enabled`. |
-| `name`            | `text`        |       No | None                | None               | Human-readable feature name. Example: `Project Tracking`.          |
-| `description`     | `text`        |      Yes | `null`              | None               | Explanation of what the feature flag controls.                     |
-| `enabled`         | `boolean`     |       No | `false`             | None               | Whether the feature is enabled.                                    |
-| `organisation_id` | `uuid`        |      Yes | `null`              | `organisations.id` | Optional workspace-specific override. Null means global.           |
-| `created_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the flag was created.                               |
-| `updated_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the flag was last updated.                          |
+| Field             | Type          | Nullable | Default             | Foreign Key        | Description                                                                                                                                               |
+| ----------------- | ------------- | -------- | ------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | `uuid`        | No       | `gen_random_uuid()` | None               | Primary key for the feature flag.                                                                                                                         |
+| `key`             | `text`        | No       | None                | None               | Machine-readable feature key. Example: `riskManagement`.                                                                                                  |
+| `name`            | `text`        | No       | None                | None               | Human-readable feature name. Example: `Risk Management`.                                                                                                  |
+| `description`     | `text`        | Yes      | `null`              | None               | Explanation of what the feature flag controls.                                                                                                            |
+| `state`           | `text`        | No       | `'hidden'`          | None               | Current release state. Supported values: `hidden`, `disabled`, `preview`, `enabled`. Missing/malformed states fail closed as hidden in application logic. |
+| `organisation_id` | `uuid`        | Yes      | `null`              | `organisations.id` | Optional workspace-specific override. Null means global.                                                                                                  |
+| `created_at`      | `timestamptz` | No       | `now()`             | None               | Timestamp when the flag was created.                                                                                                                      |
+| `updated_at`      | `timestamptz` | No       | `now()`             | None               | Timestamp when the flag was last updated.                                                                                                                 |
 
 ## Constraints
 
 * `id` is the primary key.
 * `key` must not be empty.
+* `state` must be one of: `hidden`, `disabled`, `preview`, `enabled`.
 * Global flags should be unique by `key` where `organisation_id` is null.
 * Workspace-specific flags should be unique by `key` and `organisation_id`.
 
+## Feature States
+
+| State      | Normal account behaviour                                                                                                         | Approved preview account behaviour                                                          |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `hidden`   | Feature is not shown. Direct route access should be blocked.                                                                     | Feature is not shown unless deliberately configured later.                                  |
+| `disabled` | Feature may be shown as inactive with “This capability is not available yet.”                                                    | Same behaviour as a normal account.                                                         |
+| `preview`  | Feature may be shown as inactive with “This feature is not currently available to your account.” Direct route access is blocked. | Feature is available, subject to authentication, active workspace membership, RBAC and RLS. |
+| `enabled`  | Feature is available, subject to authentication, active workspace membership, RBAC and RLS.                                      | Same behaviour as a normal account.                                                         |
+
+Unknown keys, missing rows, and malformed states must be treated as `hidden` by the application.
+
+This fail-closed behaviour is required so missing or broken configuration does not accidentally expose incomplete functionality.
+
 ## Initial Feature Flags
 
-Suggested initial global flags:
+WT-US-0107 introduced the current stateful product feature flag model.
 
-| Key                          | Default | Description                                                          |
-| ---------------------------- | ------: | -------------------------------------------------------------------- |
-| `auth_enabled`               |  `true` | Enables authentication foundation behaviour once auth screens exist. |
-| `project_tracking_enabled`   | `false` | Controls project tracking features.                                  |
-| `programme_tracking_enabled` | `false` | Controls programme tracking features.                                |
-| `portfolio_tracking_enabled` | `false` | Controls portfolio tracking features.                                |
-| `monte_carlo_enabled`        | `false` | Controls Monte Carlo forecasting features.                           |
-| `ai_reports_enabled`         | `false` | Controls AI-generated reporting features.                            |
+Current global product feature keys include:
+
+| Key                      | Initial state | Description                                        |
+| ------------------------ | ------------- | -------------------------------------------------- |
+| `projectDiary`           | `hidden`      | Project diary and delivery narrative capability.   |
+| `riskManagement`         | `preview`     | Project risk management capability.                |
+| `riskToDiary`            | `hidden`      | Promotion of risk activity into the project diary. |
+| `attentionItems`         | `hidden`      | Cross-project attention item capability.           |
+| `healthDashboard`        | `hidden`      | Project health dashboard capability.               |
+| `manualHealthAdjustment` | `hidden`      | Manual project health adjustment capability.       |
+| `issues`                 | `hidden`      | Project issue management capability.               |
+| `dependencies`           | `hidden`      | Project dependency management capability.          |
+| `assumptions`            | `hidden`      | Project assumption management capability.          |
+| `forecasting`            | `hidden`      | Delivery forecasting capability.                   |
+
+Earlier boolean flags were created during the foundation build using an `enabled` column. WT-US-0107 migrates those records into the `state` model:
+
+* Previously `enabled = true` becomes `state = 'enabled'`.
+* Previously `enabled = false` becomes `state = 'hidden'`.
+
+Earlier seeded keys may therefore still exist in migrated environments, for example:
+
+| Earlier key                  | Migration behaviour                        |
+| ---------------------------- | ------------------------------------------ |
+| `auth_enabled`               | Previously enabled, migrated to `enabled`. |
+| `project_tracking_enabled`   | Previously disabled, migrated to `hidden`. |
+| `programme_tracking_enabled` | Previously disabled, migrated to `hidden`. |
+| `portfolio_tracking_enabled` | Previously disabled, migrated to `hidden`. |
+| `monte_carlo_enabled`        | Previously disabled, migrated to `hidden`. |
+| `ai_reports_enabled`         | Previously disabled, migrated to `hidden`. |
+
+These older keys should not be used as the preferred naming pattern for new feature flags. New capability keys should use the current camel-case product capability style unless a later naming standard supersedes this.
+
+For the current feature flag operating model, preview access rules, release-state behaviour and validation steps, see `docs/feature-flags.md`.
 
 ---
 
@@ -404,18 +451,18 @@ Audit records may relate to a workspace, user or entity.
 ## Fields
 
 | Field             | Type          | Nullable | Default             | Foreign Key        | Description                                                            |
-| ----------------- | ------------- | -------: | ------------------- | ------------------ | ---------------------------------------------------------------------- |
-| `id`              | `uuid`        |       No | `gen_random_uuid()` | None               | Primary key for the audit event.                                       |
-| `organisation_id` | `uuid`        |      Yes | `null`              | `organisations.id` | Workspace affected by the event. Null for account-level events.        |
-| `actor_user_id`   | `uuid`        |      Yes | `null`              | `auth.users.id`    | User who performed the action. Null for system-generated events.       |
-| `action`          | `text`        |       No | None                | None               | Machine-readable event name. Example: `workspace.created`.             |
-| `entity_type`     | `text`        |      Yes | `null`              | None               | Type of entity affected. Example: `profile`, `organisation`, `member`. |
-| `entity_id`       | `uuid`        |      Yes | `null`              | None               | Identifier of the affected entity where applicable.                    |
-| `old_values`      | `jsonb`       |      Yes | `null`              | None               | Previous values for changed fields.                                    |
-| `new_values`      | `jsonb`       |      Yes | `null`              | None               | New values for changed fields.                                         |
-| `ip_address`      | `text`        |      Yes | `null`              | None               | Optional IP address for security investigation.                        |
-| `user_agent`      | `text`        |      Yes | `null`              | None               | Optional browser/device information.                                   |
-| `created_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the audit event was recorded.                           |
+| ----------------- | ------------- | -------- | ------------------- | ------------------ | ---------------------------------------------------------------------- |
+| `id`              | `uuid`        | No       | `gen_random_uuid()` | None               | Primary key for the audit event.                                       |
+| `organisation_id` | `uuid`        | Yes      | `null`              | `organisations.id` | Workspace affected by the event. Null for account-level events.        |
+| `actor_user_id`   | `uuid`        | Yes      | `null`              | `auth.users.id`    | User who performed the action. Null for system-generated events.       |
+| `action`          | `text`        | No       | None                | None               | Machine-readable event name. Example: `workspace.created`.             |
+| `entity_type`     | `text`        | Yes      | `null`              | None               | Type of entity affected. Example: `profile`, `organisation`, `member`. |
+| `entity_id`       | `uuid`        | Yes      | `null`              | None               | Identifier of the affected entity where applicable.                    |
+| `old_values`      | `jsonb`       | Yes      | `null`              | None               | Previous values for changed fields.                                    |
+| `new_values`      | `jsonb`       | Yes      | `null`              | None               | New values for changed fields.                                         |
+| `ip_address`      | `text`        | Yes      | `null`              | None               | Optional IP address for security investigation.                        |
+| `user_agent`      | `text`        | Yes      | `null`              | None               | Optional browser/device information.                                   |
+| `created_at`      | `timestamptz` | No       | `now()`             | None               | Timestamp when the audit event was recorded.                           |
 
 ## Constraints
 
@@ -512,6 +559,8 @@ Users may read their own profile.
 
 Workspace owners/admins may later read or manage member profiles where required.
 
+Preview eligibility is stored on `profiles.can_access_preview_features`, but this is not a workspace permission source and must not be treated as an authorisation shortcut.
+
 ## `organisations`
 
 Users may read organisations where they have an active membership.
@@ -532,7 +581,13 @@ Owners/admins may update settings.
 
 ## `feature_flags`
 
-Users may read enabled global flags and applicable workspace flags.
+Authenticated users may read global feature flag rows.
+
+Users may read applicable workspace feature flag rows only where they have active membership for the relevant workspace.
+
+The application interprets feature availability through the central feature flag helper using the `state` field.
+
+Feature availability must not bypass authentication, active workspace membership, Role-Based Access Control (RBAC), or Row Level Security (RLS).
 
 Only administrative/system flows may update feature flags.
 
