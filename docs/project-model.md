@@ -1,10 +1,10 @@
 # Watchtower Project Model
 
-**Status:** Product working reference for WT-002B preparation
+**Status:** Product working reference through WT-US-0208
 
 **Last updated:** 24 June 2026
 
-**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `supabase/migrations/20260617000100_create_projects.sql`
+**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`
 
 ## Purpose of a project in Watchtower
 
@@ -123,19 +123,27 @@ Field expectations may vary depending on project stage. Possible future stages i
 
 Exact lifecycle values must remain aligned with the current schema and code until a dedicated lifecycle task changes them. The current implementation uses `status` values `proposed`, `active`, `paused`, `completed`, and `cancelled`.
 
-## Future relationship model note
+## WT-US-0208 project relationship readiness
 
-Future project intelligence may need explicit project relationship types. Do not implement these as part of WT-002B unless they already exist or the task explicitly asks for them.
+WT-US-0208 adds a database and helper-code foundation for future relationships between projects. It is deliberately a readiness slice: there is no relationship management UI, programme or portfolio dashboard, cross-project reporting, automatic risk creation, or project health scoring change.
 
-Possible future relationship types:
+`project_relationships` stores a directed relationship from `source_project_id` to `target_project_id`. Both are internal project UUIDs and both must belong to the record's `organisation_id`. Composite foreign keys enforce that workspace boundary at database level. A project cannot relate to itself, and a partial unique index prevents more than one active relationship with the same source, target, and type. An inactive historical relationship does not prevent a later active record from being created.
 
-- `relates to`: default non-specific relationship. This should add uncertainty/risk because it lacks clear meaning.
-- `dependent on`: this project depends on another project.
-- `required for`: this project is a prerequisite/enabler for another project.
-- `programme`: grouped under a programme.
-- `portfolio`: grouped under a portfolio.
+Supported relationship types are:
 
-This relationship model is future scope and is not part of WT-002B unless separately specified.
+- `relates_to`: a non-specific relationship whose meaning needs clarification;
+- `dependent_on`: the source project depends on the target project;
+- `required_for`: the source project is a prerequisite or enabler for the target project;
+- `programme`: readiness for future programme grouping or visibility;
+- `portfolio`: readiness for future portfolio grouping or visibility.
+
+The `programme` and `portfolio` values do not create programme or portfolio entities in this slice. They reserve explicit semantics for later model evolution and visibility work without forcing project relationship data into an undifferentiated field.
+
+All active Workspace members can read relationship records under Row Level Security. Owners, admins, and members can create, update, deactivate, or delete them; viewers are read-only. Feature flags do not replace these controls, and WT-US-0208 does not expose a user-facing route or tile.
+
+A `relates_to` relationship is intentionally ambiguous. The helper `isAmbiguousProjectRelationshipType` makes it available to future project health/risk logic as a possible uncertainty signal, but it does not create a risk or alter health scoring in this slice.
+
+Relationship records use UUIDs internally for referential integrity. Any future user-facing relationship view should identify projects with the human-readable `projects.project_ref` (and project name where useful), not expose or substitute raw UUIDs. Project references remain display identifiers and do not replace UUID foreign keys.
 
 ## WT-002B implementation guidance
 

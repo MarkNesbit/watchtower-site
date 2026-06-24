@@ -58,3 +58,9 @@ User-facing delivery records should use `projects.project_ref`, a short 3-4 char
 The project dashboard presents the main operating areas without exposing the underlying data model. **Project Narrative** is the user-facing event and history layer for understanding what happened, what changed and why it matters. **Timeline** remains a separate date, milestone and key-stage view.
 
 Project Narrative currently uses the internal `projectDiary` feature flag. WT-US-0207 adds only the dashboard tile and shared feature-gated tile handling; it does not add Narrative storage, automation or a destination page. Until a guarded workspace-scoped route is implemented, the tile is shown as unavailable whenever its feature state would otherwise allow access rather than linking to a missing page.
+
+## Project relationship readiness
+
+WT-US-0208 introduces a workspace-isolated `project_relationships` foundation for future cross-project visibility. It supports directed `relates_to`, `dependent_on`, `required_for`, `programme`, and `portfolio` relationship types while rejecting self-links, duplicate active links of the same type, and links whose projects do not belong to the relationship's workspace.
+
+This is model readiness only. No project relationship UI, programme/portfolio dashboard, cross-project report, automatic risk, health score change, or dashboard tile is exposed. A non-specific `relates_to` link is marked in helper code as a possible future ambiguity/risk signal, not as an automatically created risk. Database relationships use project UUIDs; future user-facing views should continue to show human-readable project references and names.

@@ -96,6 +96,12 @@ The following are also future scope and are not created by this foundation:
 - Timeline or milestone tables;
 - automatic RAG scoring or AI scoring.
 
+## Project relationship ambiguity readiness
+
+WT-US-0208 adds `project_relationships` as a separate project model foundation. A relationship whose type is `relates_to` is intentionally non-specific and should later be considered by project health/risk evaluation as a possible ambiguity signal: the relationship exists, but its dependency or enabling meaning is unclear.
+
+This signal does not create a `project_risks` record, change RAG status, or alter health scoring in WT-US-0208. Any later conversion into a managed risk must be an explicit product and audit workflow rather than an automatic side effect of storing the relationship.
+
 ## Project reference dependency for future Risk creation
 
 Future Risk creation must use `projects.project_ref` as the authoritative project code in references such as `Risk-{PROJECT_REF}-{NNN}`. The project slug is routing-only and must not be used in risk references.
