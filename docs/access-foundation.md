@@ -28,7 +28,7 @@ A profile is account identity and audit metadata only. The current profile table
 - `created_at` and `updated_at` timestamps.
 - `created_by` and `updated_by` audit references.
 
-Profiles deliberately do not store global roles, workspace roles, permissions, recovery email addresses, platform superuser flags or delivery personas. This keeps profiles safe to reference from audit-sensitive fields such as `created_by` and `updated_by` without turning the profile into a permission source.
+Profiles deliberately do not store global roles, workspace roles, workspace permissions, recovery email addresses, platform superuser roles or delivery personas. WT-US-0107 adds only `can_access_preview_features`, a narrow platform-level product eligibility flag. It does not make the profile a workspace permission source and cannot bypass membership, RBAC or RLS.
 
 ## Profile creation
 
@@ -85,6 +85,8 @@ The following concepts are recognised as possible future needs but are explicitl
 - custom permission builder;
 - Watchtower platform admin or global superuser;
 - delivery persona-driven permissions.
+
+Account-level preview eligibility is implemented as a product availability control and is documented separately in `docs/feature-flags.md`; a platform admin role or superuser permission remains out of scope.
 
 Delivery personas may later support onboarding, dashboards, templates or AI assistance. They must remain product metadata unless a future story intentionally changes the permission model.
 

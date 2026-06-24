@@ -32,6 +32,8 @@ npm run build
 
 This repository includes a Supabase CLI configuration at `supabase/config.toml`, migrations for the current profile/workspace/project/risk foundation, public environment-variable documentation and lightweight Supabase client modules. The authentication foundation uses Supabase Auth, creates application profile/workspace records through migrations and preserves Row Level Security as the database access boundary.
 
+Stateful product feature flags and account-level preview access are documented in `docs/feature-flags.md`. Preview access is stored on the profile and requires no additional environment variable; it does not replace workspace membership or RBAC.
+
 ### Local environment variables
 
 1. Copy the example file:
@@ -75,4 +77,4 @@ Database schema changes must be handled through migrations only. Do not make man
 
 Platform and product positioning notes are available in the `docs/` directory. Architecture Decision Records in `docs/architecture/` are the source of truth for implementation decisions.
 
-Before changing project functionality, read `docs/project-model.md` for the product-level project field model, `docs/access-foundation.md` for the account/profile/membership/role model and `AGENTS.md` for Codex/developer working rules.
+Before changing project functionality, read `docs/project-model.md` for the product-level project field model, `docs/access-foundation.md` for the account/profile/membership/role model, `docs/feature-flags.md` for product availability controls and `AGENTS.md` for Codex/developer working rules.

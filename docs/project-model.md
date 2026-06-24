@@ -170,3 +170,7 @@ Project references are unique within a workspace/organisation, but the same refe
 For MVP, `project_ref` is immutable after creation. The project edit page displays it read-only, but normal authenticated project update flows must not change it. A future admin-only override may be considered, but is deliberately outside this scope.
 
 Future risk references will use the authoritative project reference in the compound format `Risk-{PROJECT_REF}-{NNN}`, for example `Risk-HHH-003`. Existing early projects that do not yet have a valid project reference should be assigned one through a controlled future process or recreated before Risk records can be created against them.
+
+## Feature-gated project capabilities
+
+WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and the direct `/app/projects/{projectSlug}/risks` route. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. The route is a release-control placeholder and does not expand the risk UI scope described in `docs/risk-foundation.md`.

@@ -1,5 +1,7 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
+import { getFeatureAccess, loadFeatureAccess } from '../../../lib/featureFlags';
+import type { FeatureKey } from '../../../lib/featureFlags';
 import { can } from '../../../lib/permissions';
 import { getCurrentWorkspace } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
@@ -11,6 +13,7 @@ let workspaceName = '';
 let canEditProject = false;
 let message = '';
 let creatorDisplayName = '';
+let riskManagementAccess = getFeatureAccess('riskManagement');
 
 const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not available';
 const formatValue = (value, fallback = 'Not available') => value || fallback;
@@ -23,8 +26,8 @@ const healthTone = (value) => {
 	return 'blue';
 };
 
-const projectTiles = [
-	{ title: 'Risks', icon: '⚠', tone: 'blue', line: 'No data yet', href: '#risks' },
+const projectTiles: Array<{ title: string; icon: string; tone: string; line: string; href: string; featureKey?: FeatureKey }> = [
+	{ title: 'Risks', icon: '⚠', tone: 'blue', line: 'Open risk management', href: '#risks', featureKey: 'riskManagement' },
 	{ title: 'Assumptions', icon: '?', tone: 'blue', line: 'No data yet', href: '#assumptions' },
 	{ title: 'Issues', icon: '!', tone: 'blue', line: 'No data yet', href: '#issues' },
 	{ title: 'Dependencies', icon: '↔', tone: 'blue', line: 'No data yet', href: '#dependencies' },
@@ -44,6 +47,7 @@ try {
 	} else {
 		workspaceName = organisation.name;
 		canEditProject = can(workspace.role, 'project.editDetails');
+		riskManagementAccess = await loadFeatureAccess(serverSupabase, 'riskManagement', accessToken);
 		const { data, error } = await serverSupabase
 			.from('projects')
 			.select('name, project_ref, description, slug, status, health, created_at, updated_at, created_by')
@@ -68,6 +72,14 @@ try {
 } catch (error) {
 	message = error instanceof Error ? error.message : 'Unable to load project.';
 }
+
+const visibleProjectTiles = projectTiles
+	.filter((tile) => !tile.featureKey || riskManagementAccess.isVisible)
+	.map((tile) => ({
+		...tile,
+		href: tile.featureKey === 'riskManagement' && project ? `/app/projects/${project.slug}/risks` : tile.href,
+		featureAccess: tile.featureKey === 'riskManagement' ? riskManagementAccess : null,
+	}));
 ---
 <AuthenticatedLayout title={project ? `${project.name} | WatchTower` : 'Project | WatchTower'}>
 	<section class="project-dashboard" data-project-dashboard>
@@ -110,7 +122,17 @@ try {
 					</div>
 
 					<div class="dashboard-tile-grid" aria-label="Project dashboard areas">
-						{projectTiles.map((tile) => (
+						{visibleProjectTiles.map((tile) => tile.featureAccess && !tile.featureAccess.isAccessible ? (
+							<article
+								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--unavailable`}
+								aria-disabled="true"
+								data-feature-unavailable={tile.featureAccess.state}
+							>
+								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
+								<strong>{tile.title}</strong>
+								<small>{tile.featureAccess.unavailableReason}</small>
+							</article>
+						) : (
 							<a class={`dashboard-tile dashboard-tile--${tile.tone}`} href={tile.href} aria-label={`${tile.title}: ${tile.line}`}>
 								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
 								<strong>{tile.title}</strong>
@@ -297,6 +319,17 @@ try {
 		box-shadow: 0 14px 36px color-mix(in srgb, var(--tile-status) 24%, transparent);
 		transform: translateY(-2px);
 		outline: none;
+	}
+
+	.dashboard-tile--unavailable {
+		opacity: 0.72;
+		cursor: not-allowed;
+	}
+
+	.dashboard-tile--unavailable:hover {
+		border-color: color-mix(in srgb, var(--tile-status) 72%, transparent);
+		box-shadow: none;
+		transform: none;
 	}
 
 	.dashboard-tile__icon {

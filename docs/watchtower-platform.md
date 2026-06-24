@@ -29,9 +29,13 @@ The platform is intended for professional delivery and technology audiences, inc
 
 ## User profile and access foundation
 
-Supabase Auth owns authenticated accounts. Watchtower mirrors each verified account into a lightweight profile for identity, display and audit metadata only. Profiles are not permission stores and must not contain global customer roles, recovery email addresses, delivery personas or platform superuser flags.
+Supabase Auth owns authenticated accounts. Watchtower mirrors each verified account into a lightweight profile for identity, display and audit metadata. Profiles are not workspace permission stores and must not contain global customer roles, recovery email addresses, delivery personas or platform superuser roles. The one platform-level product control is the narrow `can_access_preview_features` eligibility flag; it cannot grant workspace membership, RBAC permissions or RLS access.
 
 Workspace access is derived from active organisation membership and the fixed MVP roles `owner`, `admin`, `member` and `viewer`. The database stores these roles on `organisation_members`, allowing a user to hold different roles in different workspaces. See `docs/access-foundation.md` for the full account/profile/membership/role model and future permission-readiness notes.
+
+## Feature availability and preview access
+
+Global product features move through `hidden`, `disabled`, `preview` and `enabled` states. Missing or malformed configuration fails closed as hidden. Approved preview accounts can enter `preview` features, but remain subject to authentication, active workspace membership, fixed-role permissions and Row Level Security. See `docs/feature-flags.md` for keys, integration rules, release transitions and UAT validation.
 
 ## Design direction
 
