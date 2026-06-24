@@ -1,407 +1,50 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
-import { getFeatureAccess, loadFeatureAccess } from '../../../lib/featureFlags';
-import type { FeatureKey } from '../../../lib/featureFlags';
-import { can } from '../../../lib/permissions';
-import { getCurrentWorkspace } from '../../../lib/projects';
+import { buildProjectPath, getAccessibleProjectsBySlug } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
 const accessToken = getServerAccessToken(Astro.cookies);
-let project = null;
-let workspaceName = '';
-let canEditProject = false;
+let projects = [];
 let message = '';
-let creatorDisplayName = '';
-let riskManagementAccess = getFeatureAccess('riskManagement');
-
-const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not available';
-const formatValue = (value, fallback = 'Not available') => value || fallback;
-const formatStatusLabel = (value) => value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Unknown';
-const healthTone = (value) => {
-	const health = value?.toLowerCase();
-	if (health === 'green') return 'green';
-	if (health === 'amber') return 'amber';
-	if (health === 'red') return 'red';
-	return 'blue';
-};
-
-const projectTiles: Array<{ title: string; icon: string; tone: string; line: string; href: string; featureKey?: FeatureKey }> = [
-	{ title: 'Risks', icon: '⚠', tone: 'blue', line: 'Open risk management', href: '#risks', featureKey: 'riskManagement' },
-	{ title: 'Assumptions', icon: '?', tone: 'blue', line: 'No data yet', href: '#assumptions' },
-	{ title: 'Issues', icon: '!', tone: 'blue', line: 'No data yet', href: '#issues' },
-	{ title: 'Dependencies', icon: '↔', tone: 'blue', line: 'No data yet', href: '#dependencies' },
-	{ title: 'Decisions', icon: '⚖', tone: 'blue', line: 'No data yet', href: '#decisions' },
-	{ title: 'Actions', icon: '☑', tone: 'blue', line: 'No data yet', href: '#actions' },
-	{ title: 'Timeline', icon: '▦', tone: 'blue', line: 'Not assessed', href: '#timeline' },
-];
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
-	const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
-	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
-	if (!workspace || !organisation) {
-		message = 'No active workspace is available for your account.';
-	} else if (!can(workspace.role, 'project.viewDashboard')) {
-		message = 'Your workspace role does not permit project dashboard access.';
-	} else {
-		workspaceName = organisation.name;
-		canEditProject = can(workspace.role, 'project.editDetails');
-		riskManagementAccess = await loadFeatureAccess(serverSupabase, 'riskManagement', accessToken);
-		const { data, error } = await serverSupabase
-			.from('projects')
-			.select('name, project_ref, description, slug, status, health, created_at, updated_at, created_by')
-			.eq('slug', projectSlug)
-			.eq('organisation_id', organisation.id)
-			.is('deleted_at', null)
-			.is('archived_at', null)
-			.maybeSingle();
-		if (error) throw error;
-		project = data;
-		if (!project) {
-			message = 'Project not found or you do not have access.';
-		} else if (project.created_by) {
-			const { data: creator, error: creatorError } = await serverSupabase
-				.from('profiles')
-				.select('display_name, email')
-				.eq('id', project.created_by)
-				.maybeSingle();
-			if (!creatorError && creator) creatorDisplayName = creator.display_name || creator.email || '';
-		}
+	projects = projectSlug
+		? await getAccessibleProjectsBySlug(serverSupabase, projectSlug, accessToken)
+		: [];
+
+	if (projects.length === 1) {
+		return Astro.redirect(buildProjectPath(projects[0].workspace.slug, projects[0].slug));
 	}
-} catch (error) {
-	message = error instanceof Error ? error.message : 'Unable to load project.';
+	if (projects.length === 0) {
+		message = 'Project not found or you do not have access.';
+		Astro.response.status = 404;
+	} else {
+		message = 'This project link matches more than one workspace. Choose the workspace you intended.';
+		Astro.response.status = 409;
+	}
+} catch {
+	message = 'Unable to resolve project.';
+	Astro.response.status = 500;
 }
-
-const visibleProjectTiles = projectTiles
-	.filter((tile) => !tile.featureKey || riskManagementAccess.isVisible)
-	.map((tile) => ({
-		...tile,
-		href: tile.featureKey === 'riskManagement' && project ? `/app/projects/${project.slug}/risks` : tile.href,
-		featureAccess: tile.featureKey === 'riskManagement' ? riskManagementAccess : null,
-	}));
 ---
-<AuthenticatedLayout title={project ? `${project.name} | WatchTower` : 'Project | WatchTower'}>
-	<section class="project-dashboard" data-project-dashboard>
-		<div class="project-dashboard__bar" aria-label="Project navigation">
-			<a class="project-dashboard__back" href="/app/projects">← Back to projects</a>
-			{workspaceName && (
-				<div class="project-dashboard__workspace">
-					<span>Workspace</span>
-					<strong>{workspaceName}</strong>
-				</div>
-			)}
-			<div data-edit-project-action>
-			{project && canEditProject ? (
-				<a class="button button--secondary project-dashboard__edit" href={`/app/projects/${project.slug}/edit`}>✎ Edit project details</a>
-			) : project ? (
-				<span class="button button--secondary project-dashboard__edit" aria-disabled="true" data-disabled-edit-action>✎ Edit project details</span>
-			) : <span></span>}
-			</div>
-		</div>
-
-		{project ? (
-			<>
-				<section class="content-card project-hero-card" aria-labelledby="project-dashboard-heading">
-					<div class="project-hero-card__intro">
-						<p class="eyebrow">Project dashboard</p>
-						<h1 id="project-dashboard-heading">{project.name}</h1>
-						<p class="project-reference">Project reference: <strong>{formatValue(project.project_ref, 'Not assigned')}</strong></p>
-						<p>{formatValue(project.description, 'No description provided.')}</p>
-						<div class="project-pills" aria-label="Project status summary">
-							<span>Reference: {formatValue(project.project_ref, 'Not assigned')}</span>
-							<span>Status: {formatStatusLabel(project.status)}</span>
-							<span>Health: {formatStatusLabel(formatValue(project.health, 'Not assessed'))}</span>
-						</div>
-					</div>
-
-					<div class={`rag-timeline rag-timeline--${healthTone(project.health)}`} aria-label={`Project health is ${formatStatusLabel(project.health || 'not assessed')}`}>
-						<div class="rag-timeline__labels"><span>Project start</span><span>Project end</span></div>
-						<div class="rag-timeline__track"><span></span></div>
-						<strong>{formatStatusLabel(formatValue(project.health, 'Not assessed'))}</strong>
-					</div>
-
-					<div class="dashboard-tile-grid" aria-label="Project dashboard areas">
-						{visibleProjectTiles.map((tile) => tile.featureAccess && !tile.featureAccess.isAccessible ? (
-							<article
-								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--unavailable`}
-								aria-disabled="true"
-								data-feature-unavailable={tile.featureAccess.state}
-							>
-								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
-								<strong>{tile.title}</strong>
-								<small>{tile.featureAccess.unavailableReason}</small>
-							</article>
-						) : (
-							<a class={`dashboard-tile dashboard-tile--${tile.tone}`} href={tile.href} aria-label={`${tile.title}: ${tile.line}`}>
-								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
-								<strong>{tile.title}</strong>
-								<small>{tile.line}</small>
-							</a>
-						))}
-					</div>
-				</section>
-
-				<section class="content-card project-information" aria-labelledby="project-information-heading">
-					<p class="eyebrow">Project information</p>
-					<span class="screen-reader-context">Read-only metadata</span>
-					<h2 id="project-information-heading">Key details</h2>
-					<dl>
-						<div class="screen-reader-context"><dt>Project name</dt><dd>{formatValue(project.name)}</dd></div>
-						<div><dt>Project reference</dt><dd>{formatValue(project.project_ref)}</dd></div>
-						<div class="screen-reader-context"><dt>Status</dt><dd>{formatValue(project.status, 'Unknown')}</dd></div>
-						<div class="screen-reader-context"><dt>Health</dt><dd>{formatValue(project.health, 'Not assessed')}</dd></div>
-						<div class="screen-reader-context"><dt>Workspace</dt><dd>{formatValue(workspaceName)}</dd></div>
-						<div><dt>Created</dt><dd>{formatDate(project.created_at)}</dd></div>
-						<div><dt>Last updated</dt><dd>{formatDate(project.updated_at)}</dd></div>
-						<div><dt>Created by</dt><dd>{formatValue(creatorDisplayName)}</dd></div>
-						<div><dt>Description</dt><dd>{formatValue(project.description)}</dd></div>
-					</dl>
-					{!canEditProject && <p data-edit-permission-message>You do not have permission to edit project details.</p>}
-				</section>
-			</>
-		) : (
-			<section class="content-card"><p>{message}</p></section>
+<AuthenticatedLayout title="Choose project workspace | WatchTower">
+	<section class="content-card" data-legacy-project-route>
+		<p class="eyebrow">Project link</p>
+		<h1>{projects.length > 1 ? 'Choose a workspace' : 'Project unavailable'}</h1>
+		<p>{message}</p>
+		{projects.length > 1 && (
+			<ul>
+				{projects.map((project) => (
+					<li>
+						<a href={buildProjectPath(project.workspace.slug, project.slug)}>
+							{project.name} — {project.workspace.name}
+						</a>
+					</li>
+				))}
+			</ul>
 		)}
+		<a class="button button--secondary" href="/app/projects">Back to projects</a>
 	</section>
 </AuthenticatedLayout>
-
-<style>
-	.project-dashboard {
-		display: grid;
-		gap: 0.8rem;
-	}
-
-	.project-dashboard__bar {
-		display: grid;
-		grid-template-columns: 1fr auto 1fr;
-		align-items: center;
-		gap: 1rem;
-		border: 1px solid var(--border);
-		border-radius: 1.35rem;
-		padding: 0.85rem 1.35rem;
-		background: linear-gradient(180deg, rgba(18, 31, 42, 0.9), rgba(8, 17, 27, 0.94));
-	}
-
-	.project-dashboard__back {
-		color: var(--text);
-		font-weight: 800;
-		text-decoration: none;
-	}
-
-	.project-dashboard__back:hover,
-	.project-dashboard__back:focus-visible {
-		color: var(--accent-strong);
-	}
-
-	.project-dashboard__workspace {
-		text-align: center;
-	}
-
-	.project-dashboard__workspace span {
-		display: block;
-		color: var(--accent-strong);
-		font-size: 0.72rem;
-		font-weight: 900;
-		letter-spacing: 0.12em;
-		text-transform: uppercase;
-	}
-
-	.project-dashboard__bar [data-edit-project-action] {
-		justify-self: end;
-	}
-
-	.project-dashboard__edit {
-		justify-self: end;
-	}
-
-	.project-hero-card {
-		display: grid;
-		gap: clamp(1.3rem, 3vw, 2rem);
-		background:
-			radial-gradient(circle at 88% 12%, rgba(0, 160, 255, 0.14), transparent 18rem),
-			linear-gradient(180deg, rgba(18, 31, 42, 0.94), rgba(8, 17, 27, 0.96));
-	}
-
-	.project-hero-card__intro h1 {
-		margin-bottom: 0.45rem;
-	}
-
-	.project-hero-card__intro p:not(.eyebrow) {
-		max-width: 62rem;
-		margin: 0;
-		color: var(--muted-strong);
-		font-size: 1.1rem;
-	}
-
-	.project-pills {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.7rem;
-		margin-top: 1rem;
-	}
-
-	.project-pills span {
-		border: 1px solid var(--border);
-		border-radius: 999px;
-		padding: 0.35rem 0.8rem;
-		background: rgba(4, 12, 24, 0.45);
-		color: var(--text);
-		font-weight: 800;
-	}
-
-	.rag-timeline {
-		display: grid;
-		gap: 0.45rem;
-	}
-
-	.rag-timeline__labels {
-		display: flex;
-		justify-content: space-between;
-		color: var(--muted-strong);
-		font-weight: 800;
-	}
-
-	.rag-timeline__track {
-		height: 0.85rem;
-		border-radius: 999px;
-		background: rgba(215, 226, 234, 0.12);
-	}
-
-	.rag-timeline__track span {
-		display: block;
-		width: 100%;
-		height: 100%;
-		border-radius: inherit;
-		background: var(--tile-status, var(--accent));
-		box-shadow: 0 0 22px color-mix(in srgb, var(--tile-status, var(--accent)) 42%, transparent);
-	}
-
-	.rag-timeline strong {
-		width: fit-content;
-		color: var(--tile-status, var(--accent-strong));
-	}
-
-	.rag-timeline--blue { --tile-status: #00a0ff; }
-	.rag-timeline--green { --tile-status: #21d36b; }
-	.rag-timeline--amber { --tile-status: #f6a400; }
-	.rag-timeline--red { --tile-status: #ff453a; }
-
-	.dashboard-tile-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
-		gap: 1rem;
-		max-width: 70rem;
-		margin-inline: auto;
-	}
-
-	.dashboard-tile {
-		aspect-ratio: 1;
-		display: grid;
-		place-items: center;
-		align-content: center;
-		gap: 0.45rem;
-		border: 1px solid color-mix(in srgb, var(--tile-status) 72%, transparent);
-		border-radius: 1rem;
-		padding: 1rem;
-		background:
-			radial-gradient(circle at 50% 12%, color-mix(in srgb, var(--tile-status) 32%, transparent), transparent 58%),
-			linear-gradient(145deg, color-mix(in srgb, var(--tile-status) 28%, rgba(4, 12, 24, 0.92)), rgba(4, 12, 24, 0.72));
-		color: var(--text);
-		text-align: center;
-		text-decoration: none;
-		transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
-	}
-
-	.dashboard-tile:hover,
-	.dashboard-tile:focus-visible {
-		border-color: var(--tile-status);
-		box-shadow: 0 14px 36px color-mix(in srgb, var(--tile-status) 24%, transparent);
-		transform: translateY(-2px);
-		outline: none;
-	}
-
-	.dashboard-tile--unavailable {
-		opacity: 0.72;
-		cursor: not-allowed;
-	}
-
-	.dashboard-tile--unavailable:hover {
-		border-color: color-mix(in srgb, var(--tile-status) 72%, transparent);
-		box-shadow: none;
-		transform: none;
-	}
-
-	.dashboard-tile__icon {
-		font-size: clamp(2.2rem, 5vw, 3.4rem);
-		font-weight: 900;
-		line-height: 1;
-	}
-
-	.dashboard-tile strong {
-		font-size: 1.1rem;
-	}
-
-	.dashboard-tile small {
-		color: var(--muted-strong);
-		font-size: 0.9rem;
-	}
-
-	.dashboard-tile--blue { --tile-status: #00a0ff; }
-	.dashboard-tile--green { --tile-status: #21d36b; }
-	.dashboard-tile--amber { --tile-status: #f6a400; }
-	.dashboard-tile--red { --tile-status: #ff453a; }
-
-	.project-information {
-		padding-block: 1rem;
-	}
-
-	.project-information h2 {
-		margin-top: 0;
-		font-size: 1.25rem;
-	}
-
-	.project-information dl {
-		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-		gap: 1rem;
-		margin: 0;
-	}
-
-	.project-information dt {
-		color: var(--muted);
-		font-size: 0.83rem;
-		font-weight: 850;
-	}
-
-	.project-information dd {
-		margin: 0.2rem 0 0;
-	}
-
-	.screen-reader-context {
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		padding: 0;
-		overflow: hidden;
-		clip: rect(0, 0, 0, 0);
-		white-space: nowrap;
-		border: 0;
-	}
-
-	@media (max-width: 850px) {
-		.project-dashboard__bar,
-		.project-information dl {
-			grid-template-columns: 1fr;
-		}
-
-		.project-dashboard__workspace {
-			text-align: left;
-		}
-
-		.project-dashboard__bar [data-edit-project-action],
-		.project-dashboard__edit {
-			justify-self: start;
-		}
-	}
-</style>

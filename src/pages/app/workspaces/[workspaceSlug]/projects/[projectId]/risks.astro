@@ -1,0 +1,100 @@
+---
+import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
+import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
+import { can } from '../../../../../../lib/permissions';
+import { buildProjectPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
+
+const projectSlug = Astro.params.projectId;
+const workspaceSlug = Astro.params.workspaceSlug;
+const accessToken = getServerAccessToken(Astro.cookies);
+let project = null;
+let workspaceRole = '';
+let message = '';
+let featureAccess = getFeatureAccess('riskManagement');
+
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug ?? '', accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+
+	if (!workspace || !organisation) {
+		message = 'Project not found or you do not have access.';
+		Astro.response.status = 404;
+	} else if (!can(workspace.role, 'risk.view')) {
+		message = 'You do not have permission to view project risks.';
+		Astro.response.status = 403;
+	} else {
+		workspaceRole = workspace.role;
+		const { data, error } = await serverSupabase
+			.from('projects')
+			.select('name, project_ref, slug')
+			.eq('slug', projectSlug)
+			.eq('organisation_id', organisation.id)
+			.is('deleted_at', null)
+			.is('archived_at', null)
+			.maybeSingle();
+		if (error) throw error;
+
+		if (!data) {
+			message = 'Project not found or you do not have access.';
+			Astro.response.status = 404;
+		} else {
+			featureAccess = await loadFeatureAccess(serverSupabase, 'riskManagement', accessToken);
+			if (!featureAccess.isAccessible) {
+				message = featureAccess.unavailableReason ?? 'This feature is not currently available to your account.';
+				Astro.response.status = featureAccess.state === 'hidden' ? 404 : 403;
+			} else {
+				project = data;
+			}
+		}
+	}
+} catch (error) {
+	message = error instanceof Error ? error.message : 'Unable to load risk management.';
+	Astro.response.status = 500;
+}
+
+const canCreateRisk = can(workspaceRole, 'risk.create');
+---
+<AuthenticatedLayout title={project ? `Risks — ${project.name} | WatchTower` : 'Risks | WatchTower'}>
+	<section class="content-card" data-risk-management-route data-feature-state={featureAccess.state}>
+		{project ? (
+			<>
+				<p class="eyebrow">Risk management</p>
+				<h1>{project.name} risks</h1>
+				<p>Project reference: <strong>{project.project_ref ?? 'Not assigned'}</strong></p>
+				<p>Risk management is available for this account. The risk workspace will be delivered in a later slice.</p>
+				<div class="feature-route-actions">
+					<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
+					{canCreateRisk ? (
+						<span class="button button--primary" aria-disabled="true">Add risk — not available yet</span>
+					) : (
+						<span class="button button--primary" aria-disabled="true" data-viewer-read-only>Add risk</span>
+					)}
+				</div>
+				{!canCreateRisk && <p data-permission-message>Viewer access is read-only.</p>}
+			</>
+		) : (
+			<>
+				<p class="eyebrow">Risk management</p>
+				<h1>Feature unavailable</h1>
+				<p data-feature-unavailable-message>{message}</p>
+				<a class="button button--secondary" href={workspaceSlug && projectSlug ? buildProjectPath(workspaceSlug, projectSlug) : '/app/projects'}>Back to project</a>
+			</>
+		)}
+	</section>
+</AuthenticatedLayout>
+
+<style>
+	.feature-route-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.8rem;
+		margin-top: 1.25rem;
+	}
+
+	[aria-disabled='true'] {
+		opacity: 0.68;
+		cursor: not-allowed;
+	}
+</style>

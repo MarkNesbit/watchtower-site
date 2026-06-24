@@ -1,18 +1,20 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
-import { getCurrentWorkspace } from '../../../lib/projects';
+import { buildProjectPath, getCurrentWorkspace } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
 const accessToken = getServerAccessToken(Astro.cookies);
 let workspaceMessage = 'No active workspace is available for your account.';
 let loadError = '';
 let projects = [];
+let workspaceSlug = '';
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
 	const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (workspace && organisation) {
+		workspaceSlug = organisation.slug;
 		workspaceMessage = `Current workspace: ${organisation.name}`;
 		const { data, error } = await serverSupabase
 			.from('projects')
@@ -51,7 +53,7 @@ try {
 					{projects.map((project) => (
 						<tr>
 							<td>{project.project_ref ?? 'Not assigned'}</td>
-							<td><a href={`/app/projects/${project.slug}`}>{project.name}</a></td>
+							<td><a href={buildProjectPath(workspaceSlug, project.slug)}>{project.name}</a></td>
 							<td>{project.status}</td>
 							<td>{project.health}</td>
 							<td>{new Date(project.updated_at).toLocaleString()}</td>

@@ -23,7 +23,7 @@ Feature flags are product controls, not a replacement for authentication or auth
 
 Unknown keys, missing rows and malformed states resolve to `hidden`. This is the production-safe, fail-closed default.
 
-The first end-to-end integration is `riskManagement`. Its project dashboard tile uses the central helper and `/app/projects/{projectSlug}/risks` repeats the check on direct access. The guarded route also requires an active workspace membership and the `risk.view` permission. Viewers may view an available placeholder but remain unable to create or edit risks.
+The first end-to-end integration is `riskManagement`. Its project dashboard tile uses the central helper and `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks` repeats the check on direct access. The guarded route also requires an active membership in the workspace named by the route and the `risk.view` permission. Viewers may view an available placeholder but remain unable to create or edit risks.
 
 ## Initial feature keys
 

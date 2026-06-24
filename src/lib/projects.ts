@@ -1,4 +1,5 @@
 import { assertCan } from './permissions';
+import { buildProjectEditPath, buildProjectPath, buildProjectRisksPath } from './projectRoutes';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
 import { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from './projectRefs';
 
@@ -16,7 +17,17 @@ function isConstraintViolation(error: DatabaseError | null, constraintName: stri
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
-export { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, slugifyProjectName, suggestProjectRef, buildUniqueSlug };
+export {
+	buildProjectEditPath,
+	buildProjectPath,
+	buildProjectRisksPath,
+	buildUniqueProjectRef,
+	normaliseProjectRef,
+	projectRefValidationMessage,
+	slugifyProjectName,
+	suggestProjectRef,
+	buildUniqueSlug,
+};
 
 export function isProjectStatus(value: unknown): value is ProjectStatus {
 	return typeof value === 'string' && PROJECT_STATUSES.includes(value as ProjectStatus);
@@ -32,7 +43,7 @@ export async function getCurrentWorkspace(client, accessToken?: string) {
 
 	const { data, error } = await client
 		.from('organisation_members')
-		.select('role, joined_at, created_at, organisations(id, name)')
+		.select('role, joined_at, created_at, organisations(id, name, slug)')
 		.eq('status', 'active')
 		.eq('user_id', user.id)
 		.order('joined_at', { ascending: true, nullsFirst: false })
@@ -42,6 +53,67 @@ export async function getCurrentWorkspace(client, accessToken?: string) {
 
 	if (error) throw error;
 	return data;
+}
+
+export async function getWorkspaceBySlug(client, workspaceSlug: string, accessToken?: string) {
+	const { data: userData, error: userError } = accessToken
+		? await client.auth.getUser(accessToken)
+		: await client.auth.getUser();
+	if (userError) throw userError;
+	const user = userData.user;
+	if (!user) return null;
+
+	const { data, error } = await client
+		.from('organisation_members')
+		.select('role, joined_at, created_at, organisations!inner(id, name, slug)')
+		.eq('status', 'active')
+		.eq('user_id', user.id)
+		.eq('organisations.slug', workspaceSlug)
+		.limit(1)
+		.maybeSingle();
+
+	if (error) throw error;
+	return data;
+}
+
+export async function getAccessibleProjectsBySlug(client, projectSlug: string, accessToken?: string) {
+	const { data: userData, error: userError } = accessToken
+		? await client.auth.getUser(accessToken)
+		: await client.auth.getUser();
+	if (userError) throw userError;
+	const user = userData.user;
+	if (!user) return [];
+
+	const { data: memberships, error: membershipError } = await client
+		.from('organisation_members')
+		.select('role, organisations!inner(id, name, slug)')
+		.eq('status', 'active')
+		.eq('user_id', user.id);
+	if (membershipError) throw membershipError;
+
+	const activeWorkspaces = (memberships ?? [])
+		.map((membership) => {
+			const organisation = Array.isArray(membership.organisations)
+				? membership.organisations[0]
+				: membership.organisations;
+			return organisation ? { ...organisation, role: membership.role } : null;
+		})
+		.filter(Boolean);
+	if (activeWorkspaces.length === 0) return [];
+
+	const workspaceById = new Map(activeWorkspaces.map((workspace) => [workspace.id, workspace]));
+	const { data: projects, error: projectError } = await client
+		.from('projects')
+		.select('name, project_ref, slug, organisation_id')
+		.eq('slug', projectSlug)
+		.in('organisation_id', activeWorkspaces.map((workspace) => workspace.id))
+		.is('deleted_at', null)
+		.is('archived_at', null);
+	if (projectError) throw projectError;
+
+	return (projects ?? [])
+		.map((project) => ({ ...project, workspace: workspaceById.get(project.organisation_id) }))
+		.filter((project) => project.workspace);
 }
 
 export async function createProject(
@@ -151,10 +223,11 @@ export async function createProject(
 	});
 	if (auditError) throw auditError;
 
-	return project;
+	return { ...project, workspaceSlug: organisation.slug };
 }
 
 export async function updateProjectCore(
+	workspaceSlug: string,
 	projectSlug: string,
 	input: { name: string; description?: string; status?: ProjectStatus },
 	client,
@@ -164,7 +237,7 @@ export async function updateProjectCore(
 	if (!name) throw new Error('Project name is required.');
 	if (!isProjectStatus(input.status)) throw new Error('Select a valid project status.');
 
-	const workspace = await getCurrentWorkspace(client, accessToken);
+	const workspace = await getWorkspaceBySlug(client, workspaceSlug, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation) throw new Error('No active workspace is available.');
 	assertCan(workspace.role, 'project.editDetails', 'Your workspace role does not permit project editing.');

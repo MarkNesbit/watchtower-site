@@ -171,6 +171,18 @@ For MVP, `project_ref` is immutable after creation. The project edit page displa
 
 Future risk references will use the authoritative project reference in the compound format `Risk-{PROJECT_REF}-{NNN}`, for example `Risk-HHH-003`. Existing early projects that do not yet have a valid project reference should be assigned one through a controlled future process or recreated before Risk records can be created against them.
 
+## WT-US-0205 workspace-safe project routing
+
+Project slugs are unique only within a workspace, so project destinations include both readable routing slugs:
+
+- `/app/workspaces/{workspaceSlug}/projects/{projectSlug}`
+- `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/edit`
+- `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks`
+
+Every scoped page first requires an active membership in the workspace identified by `organisations.slug`, then resolves the active project using both `projects.organisation_id` and `projects.slug`. Deleted and archived projects remain unavailable. This keeps copied links and bookmarks pinned to the intended workspace without exposing organisation or project UUIDs. RBAC remains unchanged: Viewers can open the dashboard and an available Risk Management preview, but cannot edit project details or create risks.
+
+`/app/projects/{projectSlug}` and its former edit and Risks variants remain transitional compatibility routes. They search only projects visible through the signed-in user's active memberships. One accessible match redirects to the corresponding workspace-scoped URL, multiple accessible matches show a workspace choice instead of selecting silently, and no match returns the same not-found/no-access response without revealing inaccessible project existence. New app-generated project links do not use these transitional routes.
+
 ## Feature-gated project capabilities
 
-WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and the direct `/app/projects/{projectSlug}/risks` route. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. The route is a release-control placeholder and does not expand the risk UI scope described in `docs/risk-foundation.md`.
+WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and the direct `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks` route. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. The route is a release-control placeholder and does not expand the risk UI scope described in `docs/risk-foundation.md`.

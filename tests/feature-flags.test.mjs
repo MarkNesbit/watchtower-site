@@ -98,15 +98,15 @@ test('Migration adds account preview access and stateful fail-closed flags', asy
 });
 
 test('Risk tile and direct route both use central feature access', async () => {
-	const dashboard = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
-	const route = await readFile(new URL('../src/pages/app/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
+	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+	const route = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
 
 	assert.match(dashboard, /loadFeatureAccess\(serverSupabase, 'riskManagement', accessToken\)/);
 	assert.match(dashboard, /riskManagementAccess\.isVisible/);
 	assert.match(dashboard, /data-feature-unavailable/);
-	assert.match(dashboard, /\/app\/projects\/\$\{project\.slug\}\/risks/);
+	assert.match(dashboard, /buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\)/);
 
-	assert.match(route, /getCurrentWorkspace\(serverSupabase, accessToken\)/);
+	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
 	assert.match(route, /can\(workspace\.role, 'risk\.view'\)/);
 	assert.match(route, /loadFeatureAccess\(serverSupabase, 'riskManagement', accessToken\)/);
 	assert.match(route, /if \(!featureAccess\.isAccessible\)/);

@@ -153,7 +153,7 @@ test('Risk foundation does not add out-of-scope RAID, notification, email, or da
 	]) {
 		assert.doesNotMatch(sql, new RegExp(`create\\s+table\\s+(public\\.)?${table}\\b`, 'i'));
 	}
-	const dashboard = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
+	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	assert.doesNotMatch(dashboard, /project_risks/);
 	assert.doesNotMatch(dashboard, /risk_ref/);
 });

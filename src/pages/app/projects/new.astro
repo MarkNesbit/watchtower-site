@@ -1,6 +1,6 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
-import { buildUniqueProjectRef, createProject, getCurrentWorkspace, PROJECT_STATUSES, suggestProjectRef } from '../../../lib/projects';
+import { buildProjectPath, buildUniqueProjectRef, createProject, getCurrentWorkspace, PROJECT_STATUSES, suggestProjectRef } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
 let message = '';
@@ -44,7 +44,7 @@ if (Astro.request.method === 'POST') {
 			serverSupabase,
 			accessToken,
 		);
-		return Astro.redirect(`/app/projects/${project.slug}`);
+		return Astro.redirect(buildProjectPath(project.workspaceSlug, project.slug));
 	} catch (error) {
 		message = error instanceof Error ? error.message : 'Unable to create project.';
 	}

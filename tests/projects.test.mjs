@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { buildUniqueSlug, slugifyProjectName } from '../src/lib/projectSlugs.ts';
 import { can } from '../src/lib/permissions.ts';
+import { buildProjectEditPath, buildProjectPath, buildProjectRisksPath } from '../src/lib/projectRoutes.ts';
 
 const migrationPath = new URL('../supabase/migrations/20260617000100_create_projects.sql', import.meta.url);
 const projectPolicyFixMigrationPath = new URL(
@@ -83,14 +84,15 @@ test('Current workspace lookup is scoped to the signed-in user membership', asyn
 
 test('Project list and detail render database values with safe Astro templates', async () => {
 	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
-	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
+	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	for (const source of [listSource, detailSource]) {
 		assert.doesNotMatch(source, /innerHTML\s*=/);
 		assert.doesNotMatch(source, /<script[\s>]/);
 	}
 	assert.match(listSource, /{project\.name}/);
 	assert.match(detailSource, /{project\.name}/);
-	assert.match(listSource, /href={`\/app\/projects\/\$\{project\.slug\}`}/);
+	assert.match(listSource, /buildProjectPath\(workspaceSlug, project\.slug\)/);
+	assert.match(listSource, /workspaceSlug = organisation\.slug/);
 	assert.match(detailSource, /\.eq\('slug', projectSlug\)/);
 	assert.match(detailSource, /formatValue\(project\.health,\s*'Not assessed'\)/);
 });
@@ -98,7 +100,7 @@ test('Project list and detail render database values with safe Astro templates',
 test('Project pages do not use client-side imports for project flow', async () => {
 	const pagePaths = [
 		'../src/pages/app/projects/index.astro',
-		'../src/pages/app/projects/[projectId].astro',
+		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro',
 		'../src/pages/app/projects/new.astro',
 	];
 	for (const pagePath of pagePaths) {
@@ -124,7 +126,7 @@ test('Permission helper maps existing workspace roles to project permissions', (
 });
 
 test('Project dashboard is read-only and displays metadata including description', async () => {
-	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
+	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	const labels = ['Project name', 'Description', 'Status', 'Health', 'Workspace', 'Created', 'Last updated', 'Created by'];
 	for (const label of labels) {
 		assert.match(detailSource, new RegExp(`<dt>${label}</dt>`));
@@ -138,6 +140,7 @@ test('Project dashboard is read-only and displays metadata including description
 	assert.match(detailSource, /formatValue\(creatorDisplayName\)/);
 	assert.match(detailSource, /\.eq\('slug', projectSlug\)/);
 	assert.match(detailSource, /\.eq\('organisation_id', organisation\.id\)/);
+	assert.match(detailSource, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
 	assert.match(detailSource, /\.is\('deleted_at', null\)/);
 	assert.match(detailSource, /\.is\('archived_at', null\)/);
 	assert.doesNotMatch(detailSource, /<form\b|<input\b|<select\b|<textarea\b|type="submit"|Save project/);
@@ -145,18 +148,18 @@ test('Project dashboard is read-only and displays metadata including description
 });
 
 test('Project dashboard edit action is visible to all viewers and active only for permitted roles', async () => {
-	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
+	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	assert.match(detailSource, /canEditProject = can\(workspace\.role, 'project\.editDetails'\)/);
 	assert.match(detailSource, /data-edit-project-action/);
 	assert.match(detailSource, /Edit project details/);
-	assert.match(detailSource, /href={`\/app\/projects\/\$\{project\.slug\}\/edit`}/);
+	assert.match(detailSource, /buildProjectEditPath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(detailSource, /data-disabled-edit-action/);
 	assert.match(detailSource, /aria-disabled="true"/);
 	assert.match(detailSource, /You do not have permission to edit project details\./);
 });
 
 test('Project edit route enforces permission and only exposes safe editable fields', async () => {
-	const editSource = await readFile(new URL('../src/pages/app/projects/[projectId]/edit.astro', import.meta.url), 'utf8');
+	const editSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/edit.astro', import.meta.url), 'utf8');
 	assert.match(editSource, /data-project-edit-form/);
 	assert.match(editSource, /canEditProject = can\(workspace\.role, 'project\.editDetails'\)/);
 	assert.match(editSource, /Astro\.request\.method === 'POST' && canEditProject/);
@@ -168,6 +171,7 @@ test('Project edit route enforces permission and only exposes safe editable fiel
 	assert.doesNotMatch(editSource, /name="health"|name="created_by"|name="updated_by"|name="organisation_id"|name="slug"/);
 	assert.match(editSource, /\.eq\('slug', projectSlug\)/);
 	assert.match(editSource, /\.eq\('organisation_id', organisation\.id\)/);
+	assert.match(editSource, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
 	assert.match(editSource, /\.is\('deleted_at', null\)/);
 	assert.match(editSource, /\.is\('archived_at', null\)/);
 });
@@ -183,19 +187,74 @@ test('Project update helper rejects unsafe updates and preserves omitted descrip
 	assert.doesNotMatch(projectLibrarySource, /update\(\{ name, status: input\.status, description: input\.description/);
 });
 
-test('WT-002C keeps migrations, admin invite permissions tables, routing and future models out of scope', async () => {
+test('Project routing keeps migrations, admin invite permissions tables and future models out of scope', async () => {
 	const migrationFiles = await readdir(new URL('../supabase/migrations/', import.meta.url));
 	const sourceFiles = [
 		await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8'),
 		await readFile(new URL('../src/lib/permissions.ts', import.meta.url), 'utf8'),
-		await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8'),
-		await readFile(new URL('../src/pages/app/projects/[projectId]/edit.astro', import.meta.url), 'utf8'),
+		await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8'),
+		await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/edit.astro', import.meta.url), 'utf8'),
 	].join('\n');
 	assert.deepEqual(migrationFiles.filter((file) => file.includes('wt_002c') || file.includes('permissions')), []);
 	assert.doesNotMatch(sourceFiles, /from\('project_permissions'\)|create\s+table\s+(public\.)?project_permissions/i);
 	assert.doesNotMatch(sourceFiles, /invite|invitation|admin panel/i);
-	assert.doesNotMatch(sourceFiles, /data-future-route|workspaceSlug|organisationSlug|\[workspace/);
 	assert.doesNotMatch(sourceFiles, /from\('risks'\)|from\('issues'\)|from\('dependencies'\)|RAID|programme|portfolio|Red\/Amber\/Green/);
+});
+
+test('Workspace-scoped project route builders use readable slugs for every project destination', () => {
+	assert.equal(buildProjectPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check');
+	assert.equal(buildProjectEditPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/edit');
+	assert.equal(buildProjectRisksPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/risks');
+	for (const route of [
+		buildProjectPath('workspace-a', 'same-slug'),
+		buildProjectPath('workspace-b', 'same-slug'),
+	]) {
+		assert.doesNotMatch(route, /[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+	}
+	assert.notEqual(buildProjectPath('workspace-a', 'same-slug'), buildProjectPath('workspace-b', 'same-slug'));
+});
+
+test('Workspace lookup requires the authenticated user active membership and workspace slug', async () => {
+	const source = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
+	assert.match(source, /export async function getWorkspaceBySlug/);
+	assert.match(source, /organisations!inner\(id, name, slug\)/);
+	assert.match(source, /\.eq\('status', 'active'\)\s*\n\s*\.eq\('user_id', user\.id\)\s*\n\s*\.eq\('organisations\.slug', workspaceSlug\)/);
+});
+
+test('Every workspace-scoped project page binds project slug to the matched workspace', async () => {
+	for (const pagePath of [
+		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro',
+		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/edit.astro',
+		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro',
+	]) {
+		const source = await readFile(new URL(pagePath, import.meta.url), 'utf8');
+		assert.match(source, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
+		assert.match(source, /\.eq\('slug', projectSlug\)/);
+		assert.match(source, /\.eq\('organisation_id', organisation\.id\)/);
+		assert.match(source, /\.is\('deleted_at', null\)/);
+		assert.match(source, /\.is\('archived_at', null\)/);
+	}
+});
+
+test('Legacy project routes redirect only one accessible match and block ambiguity', async () => {
+	const librarySource = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
+	assert.match(librarySource, /export async function getAccessibleProjectsBySlug/);
+	assert.match(librarySource, /\.in\('organisation_id', activeWorkspaces\.map\(\(workspace\) => workspace\.id\)\)/);
+	assert.match(librarySource, /\.eq\('slug', projectSlug\)/);
+	assert.match(librarySource, /\.is\('deleted_at', null\)/);
+	assert.match(librarySource, /\.is\('archived_at', null\)/);
+	for (const pagePath of [
+		'../src/pages/app/projects/[projectId].astro',
+		'../src/pages/app/projects/[projectId]/edit.astro',
+		'../src/pages/app/projects/[projectId]/risks.astro',
+	]) {
+		const source = await readFile(new URL(pagePath, import.meta.url), 'utf8');
+		assert.match(source, /getAccessibleProjectsBySlug\(serverSupabase, projectSlug, accessToken\)/);
+		assert.match(source, /if \(projects\.length === 1\)/);
+		assert.match(source, /if \(projects\.length === 0\)/);
+		assert.match(source, /Astro\.response\.status = 409/);
+		assert.match(source, /projects\.map\(\(project\) =>/);
+	}
 });
 
 import { buildUniqueProjectRef, isValidProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from '../src/lib/projectRefs.ts';
@@ -261,8 +320,8 @@ test('Project creation retries a server-generated reference after a concurrent c
 test('Project UI displays and protects project reference', async () => {
 	const newSource = await readFile(new URL('../src/pages/app/projects/new.astro', import.meta.url), 'utf8');
 	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
-	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
-	const editSource = await readFile(new URL('../src/pages/app/projects/[projectId]/edit.astro', import.meta.url), 'utf8');
+	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+	const editSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/edit.astro', import.meta.url), 'utf8');
 	assert.match(newSource, /aria-labelledby="project-reference-label"/);
 	assert.match(newSource, /aria-describedby="project-reference-help"/);
 	assert.match(newSource, /Watchtower will assign this fixed project reference when the project is created/);
@@ -274,4 +333,5 @@ test('Project UI displays and protects project reference', async () => {
 	assert.match(editSource, /project\.project_ref/);
 	assert.match(editSource, /read-only and cannot be edited after creation in MVP/);
 	assert.doesNotMatch(editSource, /name="project_ref"/);
+	assert.match(newSource, /Astro\.redirect\(buildProjectPath\(project\.workspaceSlug, project\.slug\)\)/);
 });
