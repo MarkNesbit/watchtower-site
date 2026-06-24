@@ -165,15 +165,17 @@ const visibleProjectTiles = projectTiles.flatMap((tile) => {
 					</div>
 
 					<div class="dashboard-tile-grid" aria-label="Project dashboard areas">
-						{visibleProjectTiles.map((tile) => !tile.isAccessible ? (
+						{visibleProjectTiles.map((tile, index) => !tile.isAccessible ? (
 							<article
 								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--unavailable`}
 								aria-disabled="true"
+								aria-describedby={`dashboard-tile-help-${index}`}
+								tabindex="0"
 								data-feature-unavailable={tile.featureAccess?.state ?? 'route-unavailable'}
 							>
 								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
 								<strong>{tile.title}</strong>
-								<small>{tile.unavailableReason}</small>
+								<small id={`dashboard-tile-help-${index}`}>{tile.unavailableReason}</small>
 							</article>
 						) : (
 							<a class={`dashboard-tile dashboard-tile--${tile.tone}`} href={tile.href} aria-label={`${tile.title}: ${tile.line}`}>
@@ -365,14 +367,7 @@ const visibleProjectTiles = projectTiles.flatMap((tile) => {
 	}
 
 	.dashboard-tile--unavailable {
-		opacity: 0.72;
 		cursor: not-allowed;
-	}
-
-	.dashboard-tile--unavailable:hover {
-		border-color: color-mix(in srgb, var(--tile-status) 72%, transparent);
-		box-shadow: none;
-		transform: none;
 	}
 
 	.dashboard-tile__icon {
@@ -386,8 +381,15 @@ const visibleProjectTiles = projectTiles.flatMap((tile) => {
 	}
 
 	.dashboard-tile small {
+		display: none;
 		color: var(--muted-strong);
 		font-size: 0.9rem;
+	}
+
+	.dashboard-tile:hover small,
+	.dashboard-tile:focus-visible small,
+	.dashboard-tile:focus-within small {
+		display: block;
 	}
 
 	.dashboard-tile--blue { --tile-status: #00a0ff; }

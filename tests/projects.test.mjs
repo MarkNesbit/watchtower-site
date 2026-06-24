@@ -162,6 +162,18 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	assert.doesNotMatch(detailSource, /href: ['"]\/app\/[^'"]*(?:narrative|diary)/i);
 });
 
+test('Project dashboard tiles share hover and keyboard focus treatment without activating unavailable tiles', async () => {
+	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+
+	assert.match(detailSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?aria-disabled="true"[\s\S]*?aria-describedby={[\s\S]*?tabindex="0"/);
+	assert.match(detailSource, /<small id={`dashboard-tile-help-\$\{index\}`}>/);
+	assert.match(detailSource, /\.dashboard-tile small \{\s*display: none;/);
+	assert.match(detailSource, /\.dashboard-tile:hover small,[\s\S]*?\.dashboard-tile:focus-visible small,[\s\S]*?\.dashboard-tile:focus-within small \{\s*display: block;/);
+	assert.doesNotMatch(detailSource, /\.dashboard-tile--unavailable\s*\{[^}]*opacity:/);
+	assert.doesNotMatch(detailSource, /\.dashboard-tile--unavailable:hover/);
+	assert.match(detailSource, /<a class={`dashboard-tile[\s\S]*?href={tile\.href}/);
+});
+
 test('Project dashboard edit action is visible to all viewers and active only for permitted roles', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	assert.match(detailSource, /canEditProject = can\(workspace\.role, 'project\.editDetails'\)/);
