@@ -46,3 +46,5 @@ WatchTower Portfolio is a future product direction focused on helping senior del
 WatchTower is built around workspaces. Projects belong to workspaces, and every user starts with a default personal workspace created during onboarding.
 
 Projects are the core objects users navigate, review and progressively enrich. Future project intelligence should help users understand project risk, dependencies, delivery confidence and governance clarity. Project health will eventually use both explicit data and missing or uncertain data as signals; optional project fields should therefore not be treated as unimportant.
+
+The project model includes a workspace-isolated relationship foundation for future dependency, prerequisite, programme and portfolio visibility. This readiness layer is not a relationship management interface or a programme/portfolio reporting feature. Non-specific `relates_to` links are reserved as possible future ambiguity signals and do not automatically create risks or change project health.
