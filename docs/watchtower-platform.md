@@ -42,3 +42,7 @@ The website should feel credible, calm, data-led and professional for a senior d
 WatchTower is built around workspaces. The database and internal implementation use the term `organisation`, while user-facing language should normally use `Workspace`. Every user starts with a default personal workspace, and projects belong to workspaces rather than directly to users.
 
 This workspace foundation supports future project intelligence across risk, dependencies, delivery confidence and governance clarity. Future project health should use both explicit data and missing or uncertain data as signals, with expectations that vary by lifecycle stage and commitment level.
+
+## Project references and routing slugs
+
+Project slugs are URL-safe routing identifiers only. User-facing delivery records should use `projects.project_ref`, a short 3-4 character uppercase code that is unique within the workspace/organisation and immutable after project creation for MVP. Future risk references will combine this code with a project-specific sequence, for example `Risk-HHH-003`.

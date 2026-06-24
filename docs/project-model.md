@@ -155,3 +155,15 @@ Editable project fields are limited to the existing core fields `name` and `stat
 Project creation remains lightweight. `created_by` continues to be populated automatically from the authenticated Supabase user when a project is created. The current schema does not include `updated_by`; WT-002B therefore does not add it and recommends a later small audit migration when the surrounding profile/audit display pattern is ready.
 
 WT-002B does not implement Red/Amber/Green scoring, RAID tables, dependency modelling, programme/portfolio modelling, or additional optional project fields.
+
+## WT-US-0202A project reference code foundation
+
+Projects now have a dedicated `projects.project_ref` field for the user-facing project reference code. This is separate from `projects.slug`: the slug remains a URL-safe routing identifier only and must not be used as a delivery record reference.
+
+Project references are short project codes rather than descriptive labels. New project references are generated from the project name during project creation, shown to the authorised creator, and can be amended before submission. The final stored reference is normalised to uppercase, must be 3-4 uppercase alphanumeric characters, and must start with a letter.
+
+Project references are unique within a workspace/organisation, but the same reference may be reused in another workspace/organisation. Project names are also unique within a workspace/organisation so that project lists and cross-project views remain unambiguous.
+
+For MVP, `project_ref` is immutable after creation. The project edit page may display it read-only, but normal authenticated project update flows must not change it. Future admin override is deliberately outside this scope.
+
+Future risk references will use the authoritative project reference in the compound format `Risk-{PROJECT_REF}-{NNN}`, for example `Risk-HHH-003`. Existing early projects that do not yet have a valid project reference should be assigned one through a controlled future process or recreated before Risk records can be created against them.

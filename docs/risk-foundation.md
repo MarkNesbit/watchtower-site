@@ -95,3 +95,11 @@ The following are also future scope and are not created by this foundation:
 - Actions tables;
 - Timeline or milestone tables;
 - automatic RAG scoring or AI scoring.
+
+## Project reference dependency for future Risk creation
+
+Future Risk creation must use `projects.project_ref` as the authoritative project code in references such as `Risk-{PROJECT_REF}-{NNN}`. The project slug is routing-only and must not be used in risk references.
+
+From WT-US-0202A onward, new projects receive a 3-4 character uppercase `project_ref` at creation time. The reference is unique within the workspace/organisation and immutable after creation for MVP. The same project reference may exist in another workspace/organisation.
+
+Existing early projects without a valid `project_ref` need a controlled assignment or recreation before Risk records can be created for them. Risk creation should be blocked for projects where `project_ref` is missing or invalid.

@@ -197,3 +197,63 @@ test('WT-002C keeps migrations, admin invite permissions tables, routing and fut
 	assert.doesNotMatch(sourceFiles, /data-future-route|workspaceSlug|organisationSlug|\[workspace/);
 	assert.doesNotMatch(sourceFiles, /from\('risks'\)|from\('issues'\)|from\('dependencies'\)|RAID|programme|portfolio|Red\/Amber\/Green/);
 });
+
+import { buildUniqueProjectRef, isValidProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from '../src/lib/projectRefs.ts';
+
+const projectReferenceMigrationPath = new URL('../supabase/migrations/20260624000100_project_reference_code_foundation.sql', import.meta.url);
+
+test('Project reference generator creates short distinctive uppercase references', () => {
+	assert.equal(suggestProjectRef('Hive Health Hub'), 'HHH');
+	assert.equal(suggestProjectRef('Acme CRM Migration'), 'ACM');
+	assert.equal(suggestProjectRef('Delivery Intelligence MVP'), 'DIM');
+	assert.equal(normaliseProjectRef(' hhh '), 'HHH');
+	assert.equal(buildUniqueProjectRef('HHH', ['HHH']), 'HHH1');
+});
+
+test('Project reference validation enforces MVP format', () => {
+	assert.equal(isValidProjectRef('HHH'), true);
+	assert.equal(isValidProjectRef('H1H2'), true);
+	assert.equal(isValidProjectRef('hh1'), true);
+	assert.equal(isValidProjectRef('HH'), false);
+	assert.equal(isValidProjectRef('HHHHH'), false);
+	assert.equal(isValidProjectRef('1HH'), false);
+	assert.equal(projectRefValidationMessage('1HH'), 'Project reference must be 3–4 uppercase letters or numbers and start with a letter.');
+});
+
+test('Project reference migration tightens format uniqueness names and immutability', async () => {
+	const sql = await readFile(projectReferenceMigrationPath, 'utf8');
+	assert.match(sql, /projects_project_ref_format_check/);
+	assert.match(sql, /project_ref ~ '\^\[A-Z\]\[A-Z0-9\]\{2,3\}\$'/);
+	assert.match(sql, /projects_organisation_project_name_key/);
+	assert.match(sql, /organisation_id, lower\(btrim\(name\)\)/);
+	assert.match(sql, /Project reference cannot be changed after project creation\./);
+	assert.match(sql, /revoke update \(project_ref\) on public\.projects from authenticated/);
+});
+
+test('Project creation stores project_ref separately from routing slug and validates duplicates', async () => {
+	const source = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
+	assert.match(source, /project_ref: projectRef/);
+	assert.match(source, /const baseSlug = slugifyProjectName\(name\)/);
+	assert.match(source, /slug,/);
+	assert.match(source, /\.eq\('project_ref', projectRef\)/);
+	assert.match(source, /A project with this reference already exists in this Workspace\./);
+	assert.match(source, /\.ilike\('name', name\)/);
+	assert.match(source, /A project with this name already exists in this Workspace\./);
+	assert.doesNotMatch(source, /slug\s*=\s*projectRef|projectRef\s*=\s*slug/);
+});
+
+test('Project UI displays and protects project reference', async () => {
+	const newSource = await readFile(new URL('../src/pages/app/projects/new.astro', import.meta.url), 'utf8');
+	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
+	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
+	const editSource = await readFile(new URL('../src/pages/app/projects/[projectId]/edit.astro', import.meta.url), 'utf8');
+	assert.match(newSource, /name="project_ref"/);
+	assert.match(newSource, /Project reference is a short code used in records such as Risk-HHH-003/);
+	assert.match(listSource, /project_ref/);
+	assert.match(listSource, /<th>Reference<\/th>/);
+	assert.match(detailSource, /Project reference/);
+	assert.match(detailSource, /project\.project_ref/);
+	assert.match(editSource, /project\.project_ref/);
+	assert.match(editSource, /read-only and cannot be edited after creation in MVP/);
+	assert.doesNotMatch(editSource, /name="project_ref"/);
+});

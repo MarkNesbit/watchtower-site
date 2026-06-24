@@ -46,7 +46,7 @@ try {
 		canEditProject = can(workspace.role, 'project.editDetails');
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('name, description, slug, status, health, created_at, updated_at, created_by')
+			.select('name, project_ref, description, slug, status, health, created_at, updated_at, created_by')
 			.eq('slug', projectSlug)
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
@@ -94,8 +94,10 @@ try {
 					<div class="project-hero-card__intro">
 						<p class="eyebrow">Project dashboard</p>
 						<h1 id="project-dashboard-heading">{project.name}</h1>
+						<p class="project-reference">Project reference: <strong>{formatValue(project.project_ref, 'Not assigned')}</strong></p>
 						<p>{formatValue(project.description, 'No description provided.')}</p>
 						<div class="project-pills" aria-label="Project status summary">
+							<span>Reference: {formatValue(project.project_ref, 'Not assigned')}</span>
 							<span>Status: {formatStatusLabel(project.status)}</span>
 							<span>Health: {formatStatusLabel(formatValue(project.health, 'Not assessed'))}</span>
 						</div>
@@ -124,6 +126,7 @@ try {
 					<h2 id="project-information-heading">Key details</h2>
 					<dl>
 						<div class="screen-reader-context"><dt>Project name</dt><dd>{formatValue(project.name)}</dd></div>
+						<div><dt>Project reference</dt><dd>{formatValue(project.project_ref)}</dd></div>
 						<div class="screen-reader-context"><dt>Status</dt><dd>{formatValue(project.status, 'Unknown')}</dd></div>
 						<div class="screen-reader-context"><dt>Health</dt><dd>{formatValue(project.health, 'Not assessed')}</dd></div>
 						<div class="screen-reader-context"><dt>Workspace</dt><dd>{formatValue(workspaceName)}</dd></div>

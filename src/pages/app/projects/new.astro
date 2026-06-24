@@ -1,20 +1,46 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
-import { createProject, PROJECT_STATUSES } from '../../../lib/projects';
+import { buildUniqueProjectRef, createProject, getCurrentWorkspace, PROJECT_STATUSES, suggestProjectRef } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
 let message = '';
+let projectRefValue = '';
+let nameValue = '';
+let descriptionValue = '';
+let statusValue = 'proposed';
+let existingProjectRefs = [];
 const accessToken = getServerAccessToken(Astro.cookies);
+const serverSupabase = createSupabaseServerClient(accessToken);
+
+try {
+	const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+	if (workspace && organisation) {
+		const { data, error } = await serverSupabase
+			.from('projects')
+			.select('project_ref')
+			.eq('organisation_id', organisation.id)
+			.not('project_ref', 'is', null);
+		if (error) throw error;
+		existingProjectRefs = (data ?? []).map((project) => project.project_ref).filter(Boolean);
+	}
+} catch (error) {
+	message = error instanceof Error ? error.message : 'Unable to prepare project reference suggestions.';
+}
 
 if (Astro.request.method === 'POST') {
 	const formData = await Astro.request.formData();
-	const serverSupabase = createSupabaseServerClient(accessToken);
+	nameValue = String(formData.get('name') ?? '');
+	descriptionValue = String(formData.get('description') ?? '');
+	statusValue = String(formData.get('status') ?? 'proposed');
+	projectRefValue = String(formData.get('project_ref') ?? '') || buildUniqueProjectRef(suggestProjectRef(nameValue), existingProjectRefs);
 	try {
 		const project = await createProject(
 			{
-				name: String(formData.get('name') ?? ''),
-				description: String(formData.get('description') ?? ''),
-				status: String(formData.get('status') ?? 'proposed'),
+				name: nameValue,
+				projectRef: projectRefValue,
+				description: descriptionValue,
+				status: statusValue,
 			},
 			serverSupabase,
 			accessToken,
@@ -30,15 +56,50 @@ if (Astro.request.method === 'POST') {
 		<p class="eyebrow">Projects</p>
 		<h1>Create Project</h1>
 		<form class="auth-card" method="post">
-			<label>Name <input name="name" required autocomplete="off" /></label>
-			<label>Description <textarea name="description" rows="4"></textarea></label>
+			<label>Name <input name="name" value={nameValue} required autocomplete="off" data-project-name /></label>
+			<label>Project reference <input name="project_ref" value={projectRefValue} required autocomplete="off" maxlength="4" pattern="[A-Za-z][A-Za-z0-9]{2,3}" data-project-reference /></label>
+			<p class="form-help">Project reference is a short code used in records such as Risk-HHH-003. Watchtower has suggested one from the project name. You can change it before creating the project, but it cannot be edited afterwards in MVP.</p>
+			<label>Description <textarea name="description" rows="4">{descriptionValue}</textarea></label>
 			<label>Status
 				<select name="status">
-					{PROJECT_STATUSES.map((status) => <option value={status} selected={status === 'proposed'}>{status}</option>)}
+					{PROJECT_STATUSES.map((status) => <option value={status} selected={status === statusValue}>{status}</option>)}
 				</select>
 			</label>
 			<button class="button button--primary" type="submit">Create Project</button>
 			<p class="form-message">{message}</p>
 		</form>
 	</section>
+	<script define:vars={{ existingProjectRefs }}>
+		const genericTerms = new Set(['CRM','APP','WEB','API','MVP','CMS','ERP','INT','MIG','SUPPORT','DISCOVERY','PORTAL','WEBSITE','REBUILD','MIGRATION','INTEGRATION','PLATFORM','PROJECT','PROGRAMME','PHASE']);
+		const existingRefs = new Set(existingProjectRefs.map((value) => String(value).trim().toUpperCase()));
+		const nameInput = document.querySelector('[data-project-name]');
+		const referenceInput = document.querySelector('[data-project-reference]');
+		let referenceTouched = Boolean(referenceInput?.value);
+		function suggest(name) {
+			const words = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+			const firstDistinctiveIndex = words.findIndex((word) => !genericTerms.has(word) && /^[A-Z]/.test(word));
+			const acronymWords = firstDistinctiveIndex >= 0 ? words.slice(firstDistinctiveIndex).filter((word) => /^[A-Z]/.test(word)) : [];
+			if (acronymWords.length >= 3) return acronymWords.slice(0, 4).map((word) => word[0]).join('').slice(0, 4);
+			const distinctive = words.filter((word) => !genericTerms.has(word));
+			const source = (distinctive.length ? distinctive : words).filter((word) => /^[A-Z]/.test(word));
+			if (source.length === 2) return `${source[0][0]}${source[1][0]}${source[1][1] || source[0][1] || 'X'}`.slice(0, 4);
+			return source[0] ? source[0].slice(0, 4).padEnd(3, source[0][0]) : '';
+		}
+		function unique(preferred) {
+			const base = preferred.trim().toUpperCase();
+			if (/^[A-Z][A-Z0-9]{2,3}$/.test(base) && !existingRefs.has(base)) return base;
+			for (const rootLength of [3, 2]) for (let suffix = 1; suffix <= 99; suffix += 1) {
+				const candidate = `${base.slice(0, rootLength)}${suffix}`.slice(0, 4);
+				if (/^[A-Z][A-Z0-9]{2,3}$/.test(candidate) && !existingRefs.has(candidate)) return candidate;
+			}
+			return base;
+		}
+		referenceInput?.addEventListener('input', () => {
+			referenceTouched = true;
+			referenceInput.value = referenceInput.value.toUpperCase();
+		});
+		nameInput?.addEventListener('input', () => {
+			if (!referenceTouched && referenceInput) referenceInput.value = unique(suggest(nameInput.value));
+		});
+	</script>
 </AuthenticatedLayout>
