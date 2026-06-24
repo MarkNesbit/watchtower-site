@@ -28,7 +28,7 @@ Risk-HHH-003
 
 `projects.project_ref` is the short uppercase project reference used in these risk references. It must be unique within a workspace/organisation when present. Existing project UUID primary keys remain unchanged; `project_ref` is not a primary key.
 
-Existing projects are not automatically given meaningful references by the migration. The field is nullable to avoid breaking current lightweight project creation flows until a future UI or project editing slice supports explicit project reference management.
+Existing projects are not automatically given meaningful references by the migration, so the field remains nullable for those historical records. New project creation assigns a system-generated reference; existing projects without one require a controlled future assignment or recreation rather than user editing.
 
 ## Risk ownership and future actioners
 
@@ -100,6 +100,6 @@ The following are also future scope and are not created by this foundation:
 
 Future Risk creation must use `projects.project_ref` as the authoritative project code in references such as `Risk-{PROJECT_REF}-{NNN}`. The project slug is routing-only and must not be used in risk references.
 
-From WT-US-0202A onward, new projects receive a 3-4 character uppercase `project_ref` at creation time. The reference is unique within the workspace/organisation and immutable after creation for MVP. The same project reference may exist in another workspace/organisation.
+From WT-US-0202B onward, Watchtower generates a 3-4 character uppercase `project_ref` from the project name, resolves workspace/organisation collisions automatically, and fixes the reference at creation time. Users cannot edit or override it during MVP; a future admin-only override is outside the current scope. The same project reference may exist in another workspace/organisation.
 
 Existing early projects without a valid `project_ref` need a controlled assignment or recreation before Risk records can be created for them. Risk creation should be blocked for projects where `project_ref` is missing or invalid.
