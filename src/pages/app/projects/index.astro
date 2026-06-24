@@ -16,7 +16,7 @@ try {
 		workspaceMessage = `Current workspace: ${organisation.name}`;
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('name, slug, status, health, updated_at')
+			.select('name, project_ref, slug, status, health, updated_at')
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
 			.is('archived_at', null)
@@ -45,11 +45,12 @@ try {
 		) : (
 			<table class="simple-table">
 				<thead>
-					<tr><th>Name</th><th>Status</th><th>Health</th><th>Last updated</th></tr>
+					<tr><th>Reference</th><th>Name</th><th>Status</th><th>Health</th><th>Last updated</th></tr>
 				</thead>
 				<tbody>
 					{projects.map((project) => (
 						<tr>
+							<td>{project.project_ref ?? 'Not assigned'}</td>
 							<td><a href={`/app/projects/${project.slug}`}>{project.name}</a></td>
 							<td>{project.status}</td>
 							<td>{project.health}</td>

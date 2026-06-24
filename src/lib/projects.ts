@@ -1,10 +1,11 @@
 import { assertCan } from './permissions';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
+import { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from './projectRefs';
 
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
-export { buildUniqueSlug, slugifyProjectName };
+export { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, slugifyProjectName, suggestProjectRef, buildUniqueSlug };
 
 export function isProjectStatus(value: unknown): value is ProjectStatus {
 	return typeof value === 'string' && PROJECT_STATUSES.includes(value as ProjectStatus);
@@ -33,7 +34,7 @@ export async function getCurrentWorkspace(client, accessToken?: string) {
 }
 
 export async function createProject(
-	input: { name: string; description?: string; status?: ProjectStatus },
+	input: { name: string; projectRef?: string; description?: string; status?: ProjectStatus },
 	client,
 	accessToken?: string,
 ) {
@@ -57,6 +58,36 @@ export async function createProject(
 	}
 
 	const status = input.status && PROJECT_STATUSES.includes(input.status) ? input.status : 'proposed';
+	let projectRef = normaliseProjectRef(input.projectRef || suggestProjectRef(name));
+	if (!input.projectRef) {
+		const { data: refRows, error: existingRefError } = await client
+			.from('projects')
+			.select('project_ref')
+			.eq('organisation_id', organisation.id)
+			.not('project_ref', 'is', null);
+		if (existingRefError) throw existingRefError;
+		projectRef = buildUniqueProjectRef(projectRef, (refRows ?? []).map((project) => project.project_ref));
+	}
+	const projectRefMessage = projectRefValidationMessage(projectRef);
+	if (projectRefMessage) throw new Error(projectRefMessage);
+
+	const { data: duplicateNames, error: nameError } = await client
+		.from('projects')
+		.select('id')
+		.eq('organisation_id', organisation.id)
+		.ilike('name', name)
+		.limit(1);
+	if (nameError) throw nameError;
+	if ((duplicateNames ?? []).length > 0) throw new Error('A project with this name already exists in this Workspace.');
+
+	const { data: duplicateRefs, error: refError } = await client
+		.from('projects')
+		.select('id')
+		.eq('organisation_id', organisation.id)
+		.eq('project_ref', projectRef)
+		.limit(1);
+	if (refError) throw refError;
+	if ((duplicateRefs ?? []).length > 0) throw new Error('A project with this reference already exists in this Workspace.');
 	const baseSlug = slugifyProjectName(name);
 	const { data: slugRows, error: slugError } = await client
 		.from('projects')
@@ -77,13 +108,14 @@ export async function createProject(
 		.insert({
 			organisation_id: organisation.id,
 			name,
+			project_ref: projectRef,
 			slug,
 			description: input.description?.trim() || null,
 			status,
 			health: 'unknown',
 			created_by: userData.user.id,
 		})
-		.select('id, name, slug, status, health, organisation_id')
+		.select('id, name, project_ref, slug, status, health, organisation_id')
 		.single();
 	if (projectError) throw projectError;
 
@@ -93,7 +125,7 @@ export async function createProject(
 		action: 'project.created',
 		entity_type: 'project',
 		entity_id: project.id,
-		new_values: { name: project.name, status: project.status, health: project.health },
+		new_values: { name: project.name, project_ref: project.project_ref, status: project.status, health: project.health },
 	});
 	if (auditError) throw auditError;
 

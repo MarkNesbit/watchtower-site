@@ -41,7 +41,7 @@ try {
 
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('name, description, slug, status, health')
+			.select('name, project_ref, description, slug, status, health')
 			.eq('slug', projectSlug)
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
@@ -68,6 +68,8 @@ try {
 		{project && canEditProject ? (
 			<form class="auth-card" method="post" data-project-edit-form>
 				<label>Name <input name="name" value={project.name} required autocomplete="off" /></label>
+				<p>Project reference: <strong>{formatValue(project.project_ref)}</strong></p>
+				<p>This project reference is read-only and cannot be edited after creation in MVP.</p>
 				<label>Description <textarea name="description" rows="4">{project.description ?? ''}</textarea></label>
 				<label>Status
 					<select name="status">
