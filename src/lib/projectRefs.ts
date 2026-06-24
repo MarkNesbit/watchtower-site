@@ -29,7 +29,7 @@ export function projectRefValidationMessage(value: string): string | null {
 
 export function suggestProjectRef(name: string): string {
 	const words = wordsFromName(name);
-	if (words.length === 0) return '';
+	if (words.length === 0) return 'PRJ';
 
 	const distinctiveWords = words.filter((word) => !GENERIC_REFERENCE_TERMS.has(word));
 	const firstDistinctiveIndex = words.findIndex((word) => !GENERIC_REFERENCE_TERMS.has(word) && /^[A-Z]/.test(word));
@@ -47,22 +47,21 @@ export function suggestProjectRef(name: string): string {
 
 	const compact = usableWords[0].replace(/[^A-Z0-9]/g, '');
 	if (/^[A-Z]/.test(compact)) return compact.slice(0, 4).padEnd(3, compact[0] || 'X');
-	return '';
+	return 'PRJ';
 }
 
 export function buildUniqueProjectRef(preferredRef: string, existingRefs: string[]): string {
 	const existing = new Set(existingRefs.map(normaliseProjectRef));
-	const preferred = normaliseProjectRef(preferredRef);
+	const normalisedPreferred = normaliseProjectRef(preferredRef);
+	const preferred = isValidProjectRef(normalisedPreferred) ? normalisedPreferred : 'PRJ';
 	if (isValidProjectRef(preferred) && !existing.has(preferred)) return preferred;
 
-	const base = preferred.replace(/[^A-Z0-9]/g, '').replace(/^[^A-Z]+/, '').slice(0, 4);
-	for (const rootLength of [3, 2]) {
-		const root = base.slice(0, rootLength);
-		if (!/^[A-Z][A-Z0-9]{1,2}$/.test(root)) continue;
-		for (let suffix = 1; suffix <= 99; suffix += 1) {
-			const candidate = `${root}${suffix}`.slice(0, 4);
-			if (isValidProjectRef(candidate) && !existing.has(candidate)) return candidate;
-		}
+	const base = preferred.slice(0, 3);
+	for (let suffix = 1; suffix <= 999; suffix += 1) {
+		const suffixText = String(suffix);
+		const root = base.slice(0, 4 - suffixText.length);
+		const candidate = `${root}${suffixText}`;
+		if (isValidProjectRef(candidate) && !existing.has(candidate)) return candidate;
 	}
 	return preferred;
 }

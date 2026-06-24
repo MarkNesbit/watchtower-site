@@ -206,8 +206,14 @@ test('Project reference generator creates short distinctive uppercase references
 	assert.equal(suggestProjectRef('Hive Health Hub'), 'HHH');
 	assert.equal(suggestProjectRef('Acme CRM Migration'), 'ACM');
 	assert.equal(suggestProjectRef('Delivery Intelligence MVP'), 'DIM');
+	assert.equal(suggestProjectRef('123'), 'PRJ');
 	assert.equal(normaliseProjectRef(' hhh '), 'HHH');
 	assert.equal(buildUniqueProjectRef('HHH', ['HHH']), 'HHH1');
+	assert.equal(
+		buildUniqueProjectRef('HHH', ['HHH', 'HHH1', 'HHH2', 'HHH3', 'HHH4', 'HHH5', 'HHH6', 'HHH7', 'HHH8', 'HHH9']),
+		'HH10',
+	);
+	assert.equal(buildUniqueProjectRef('', []), 'PRJ');
 });
 
 test('Project reference validation enforces MVP format', () => {
@@ -230,16 +236,26 @@ test('Project reference migration tightens format uniqueness names and immutabil
 	assert.match(sql, /revoke update \(project_ref\) on public\.projects from authenticated/);
 });
 
-test('Project creation stores project_ref separately from routing slug and validates duplicates', async () => {
+test('Project creation generates project_ref independently from routing slug and client input', async () => {
 	const source = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
+	assert.match(source, /input: \{ name: string; description\?: string; status\?: ProjectStatus \}/);
+	assert.match(source, /preferredProjectRef = normaliseProjectRef\(suggestProjectRef\(name\)\)/);
 	assert.match(source, /project_ref: projectRef/);
 	assert.match(source, /const baseSlug = slugifyProjectName\(name\)/);
 	assert.match(source, /slug,/);
-	assert.match(source, /\.eq\('project_ref', projectRef\)/);
-	assert.match(source, /A project with this reference already exists in this Workspace\./);
+	assert.doesNotMatch(source, /input\.projectRef|input\.project_ref/);
 	assert.match(source, /\.ilike\('name', name\)/);
 	assert.match(source, /A project with this name already exists in this Workspace\./);
 	assert.doesNotMatch(source, /slug\s*=\s*projectRef|projectRef\s*=\s*slug/);
+});
+
+test('Project creation retries a server-generated reference after a concurrent collision', async () => {
+	const source = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
+	assert.match(source, /PROJECT_REF_CONSTRAINT = 'projects_organisation_project_ref_key'/);
+	assert.match(source, /MAX_PROJECT_REF_INSERT_ATTEMPTS = 3/);
+	assert.match(source, /isConstraintViolation\(error, PROJECT_REF_CONSTRAINT\)/);
+	assert.match(source, /projectRef = buildUniqueProjectRef\(preferredProjectRef, await loadExistingProjectRefs\(\)\)/);
+	assert.doesNotMatch(source, /A project with this reference already exists in this Workspace\./);
 });
 
 test('Project UI displays and protects project reference', async () => {
@@ -247,8 +263,10 @@ test('Project UI displays and protects project reference', async () => {
 	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
 	const detailSource = await readFile(new URL('../src/pages/app/projects/[projectId].astro', import.meta.url), 'utf8');
 	const editSource = await readFile(new URL('../src/pages/app/projects/[projectId]/edit.astro', import.meta.url), 'utf8');
-	assert.match(newSource, /name="project_ref"/);
-	assert.match(newSource, /Project reference is a short code used in records such as Risk-HHH-003/);
+	assert.match(newSource, /aria-labelledby="project-reference-label"/);
+	assert.match(newSource, /aria-describedby="project-reference-help"/);
+	assert.match(newSource, /Watchtower will assign this fixed project reference when the project is created/);
+	assert.doesNotMatch(newSource, /name="project_ref"|formData\.get\('project_ref'\)|projectRef:/);
 	assert.match(listSource, /project_ref/);
 	assert.match(listSource, /<th>Reference<\/th>/);
 	assert.match(detailSource, /Project reference/);

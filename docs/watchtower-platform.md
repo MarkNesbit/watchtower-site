@@ -45,4 +45,4 @@ This workspace foundation supports future project intelligence across risk, depe
 
 ## Project references and routing slugs
 
-Project slugs are URL-safe routing identifiers only. User-facing delivery records should use `projects.project_ref`, a short 3-4 character uppercase code that is unique within the workspace/organisation and immutable after project creation for MVP. Future risk references will combine this code with a project-specific sequence, for example `Risk-HHH-003`.
+Project slugs are URL-safe routing identifiers only. User-facing delivery records should use `projects.project_ref`, a short 3-4 character uppercase code generated and collision-resolved by Watchtower within the workspace/organisation. The create flow displays the expected reference as fixed and read-only; users cannot supply or override it, and it remains immutable after creation for MVP. A future admin-only override is outside the current scope. Future risk references will combine this code with a project-specific sequence, for example `Risk-HHH-003`.

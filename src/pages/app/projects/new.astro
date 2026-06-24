@@ -33,12 +33,11 @@ if (Astro.request.method === 'POST') {
 	nameValue = String(formData.get('name') ?? '');
 	descriptionValue = String(formData.get('description') ?? '');
 	statusValue = String(formData.get('status') ?? 'proposed');
-	projectRefValue = String(formData.get('project_ref') ?? '') || buildUniqueProjectRef(suggestProjectRef(nameValue), existingProjectRefs);
+	projectRefValue = buildUniqueProjectRef(suggestProjectRef(nameValue), existingProjectRefs);
 	try {
 		const project = await createProject(
 			{
 				name: nameValue,
-				projectRef: projectRefValue,
 				description: descriptionValue,
 				status: statusValue,
 			},
@@ -57,8 +56,16 @@ if (Astro.request.method === 'POST') {
 		<h1>Create Project</h1>
 		<form class="auth-card" method="post">
 			<label>Name <input name="name" value={nameValue} required autocomplete="off" data-project-name /></label>
-			<label>Project reference <input name="project_ref" value={projectRefValue} required autocomplete="off" maxlength="4" pattern="[A-Za-z][A-Za-z0-9]{2,3}" data-project-reference /></label>
-			<p class="form-help">Project reference is a short code used in records such as Risk-HHH-003. Watchtower has suggested one from the project name. You can change it before creating the project, but it cannot be edited afterwards in MVP.</p>
+			<div class="generated-project-reference">
+				<span id="project-reference-label">Project reference</span>
+				<output
+					data-project-reference
+					aria-labelledby="project-reference-label"
+					aria-describedby="project-reference-help"
+					aria-live="polite"
+				>{projectRefValue || 'Enter a project name to preview'}</output>
+			</div>
+			<p class="form-help" id="project-reference-help">Watchtower will assign this fixed project reference when the project is created. It is used in records such as Risk-HHH-003 and cannot be edited afterwards in MVP.</p>
 			<label>Description <textarea name="description" rows="4">{descriptionValue}</textarea></label>
 			<label>Status
 				<select name="status">
@@ -73,8 +80,7 @@ if (Astro.request.method === 'POST') {
 		const genericTerms = new Set(['CRM','APP','WEB','API','MVP','CMS','ERP','INT','MIG','SUPPORT','DISCOVERY','PORTAL','WEBSITE','REBUILD','MIGRATION','INTEGRATION','PLATFORM','PROJECT','PROGRAMME','PHASE']);
 		const existingRefs = new Set(existingProjectRefs.map((value) => String(value).trim().toUpperCase()));
 		const nameInput = document.querySelector('[data-project-name]');
-		const referenceInput = document.querySelector('[data-project-reference]');
-		let referenceTouched = Boolean(referenceInput?.value);
+		const referenceOutput = document.querySelector('[data-project-reference]');
 		function suggest(name) {
 			const words = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim().split(/\s+/).filter(Boolean);
 			const firstDistinctiveIndex = words.findIndex((word) => !genericTerms.has(word) && /^[A-Z]/.test(word));
@@ -83,23 +89,45 @@ if (Astro.request.method === 'POST') {
 			const distinctive = words.filter((word) => !genericTerms.has(word));
 			const source = (distinctive.length ? distinctive : words).filter((word) => /^[A-Z]/.test(word));
 			if (source.length === 2) return `${source[0][0]}${source[1][0]}${source[1][1] || source[0][1] || 'X'}`.slice(0, 4);
-			return source[0] ? source[0].slice(0, 4).padEnd(3, source[0][0]) : '';
+			if (!source[0] || !/^[A-Z]/.test(source[0])) return 'PRJ';
+			return source[0].slice(0, 4).padEnd(3, source[0][0]);
 		}
 		function unique(preferred) {
-			const base = preferred.trim().toUpperCase();
+			const normalised = preferred.trim().toUpperCase();
+			const base = /^[A-Z][A-Z0-9]{2,3}$/.test(normalised) ? normalised : 'PRJ';
 			if (/^[A-Z][A-Z0-9]{2,3}$/.test(base) && !existingRefs.has(base)) return base;
-			for (const rootLength of [3, 2]) for (let suffix = 1; suffix <= 99; suffix += 1) {
-				const candidate = `${base.slice(0, rootLength)}${suffix}`.slice(0, 4);
+			for (let suffix = 1; suffix <= 999; suffix += 1) {
+				const suffixText = String(suffix);
+				const candidate = `${base.slice(0, 4 - suffixText.length)}${suffixText}`;
 				if (/^[A-Z][A-Z0-9]{2,3}$/.test(candidate) && !existingRefs.has(candidate)) return candidate;
 			}
 			return base;
 		}
-		referenceInput?.addEventListener('input', () => {
-			referenceTouched = true;
-			referenceInput.value = referenceInput.value.toUpperCase();
-		});
 		nameInput?.addEventListener('input', () => {
-			if (!referenceTouched && referenceInput) referenceInput.value = unique(suggest(nameInput.value));
+			if (referenceOutput) referenceOutput.textContent = nameInput.value.trim() ? unique(suggest(nameInput.value)) : 'Enter a project name to preview';
 		});
 	</script>
 </AuthenticatedLayout>
+
+<style>
+	.generated-project-reference {
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.generated-project-reference > span {
+		font-weight: 800;
+	}
+
+	.generated-project-reference output {
+		width: fit-content;
+		min-width: 4.75rem;
+		border: 1px solid var(--border);
+		border-radius: 0.7rem;
+		padding: 0.65rem 0.8rem;
+		background: rgba(4, 12, 24, 0.48);
+		color: var(--accent-strong);
+		font-weight: 900;
+		letter-spacing: 0.08em;
+	}
+</style>

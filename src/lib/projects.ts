@@ -2,6 +2,17 @@ import { assertCan } from './permissions';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
 import { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from './projectRefs';
 
+const PROJECT_REF_CONSTRAINT = 'projects_organisation_project_ref_key';
+const PROJECT_NAME_CONSTRAINT = 'projects_organisation_project_name_key';
+const MAX_PROJECT_REF_INSERT_ATTEMPTS = 3;
+
+type DatabaseError = { code?: string; message?: string; details?: string; hint?: string };
+
+function isConstraintViolation(error: DatabaseError | null, constraintName: string): boolean {
+	if (!error || error.code !== '23505') return false;
+	return [error.message, error.details, error.hint].filter(Boolean).join(' ').includes(constraintName);
+}
+
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
@@ -34,7 +45,7 @@ export async function getCurrentWorkspace(client, accessToken?: string) {
 }
 
 export async function createProject(
-	input: { name: string; projectRef?: string; description?: string; status?: ProjectStatus },
+	input: { name: string; description?: string; status?: ProjectStatus },
 	client,
 	accessToken?: string,
 ) {
@@ -57,20 +68,6 @@ export async function createProject(
 		}
 	}
 
-	const status = input.status && PROJECT_STATUSES.includes(input.status) ? input.status : 'proposed';
-	let projectRef = normaliseProjectRef(input.projectRef || suggestProjectRef(name));
-	if (!input.projectRef) {
-		const { data: refRows, error: existingRefError } = await client
-			.from('projects')
-			.select('project_ref')
-			.eq('organisation_id', organisation.id)
-			.not('project_ref', 'is', null);
-		if (existingRefError) throw existingRefError;
-		projectRef = buildUniqueProjectRef(projectRef, (refRows ?? []).map((project) => project.project_ref));
-	}
-	const projectRefMessage = projectRefValidationMessage(projectRef);
-	if (projectRefMessage) throw new Error(projectRefMessage);
-
 	const { data: duplicateNames, error: nameError } = await client
 		.from('projects')
 		.select('id')
@@ -80,14 +77,21 @@ export async function createProject(
 	if (nameError) throw nameError;
 	if ((duplicateNames ?? []).length > 0) throw new Error('A project with this name already exists in this Workspace.');
 
-	const { data: duplicateRefs, error: refError } = await client
-		.from('projects')
-		.select('id')
-		.eq('organisation_id', organisation.id)
-		.eq('project_ref', projectRef)
-		.limit(1);
-	if (refError) throw refError;
-	if ((duplicateRefs ?? []).length > 0) throw new Error('A project with this reference already exists in this Workspace.');
+	const status = input.status && PROJECT_STATUSES.includes(input.status) ? input.status : 'proposed';
+	const preferredProjectRef = normaliseProjectRef(suggestProjectRef(name));
+	const loadExistingProjectRefs = async () => {
+		const { data, error } = await client
+			.from('projects')
+			.select('project_ref')
+			.eq('organisation_id', organisation.id)
+			.not('project_ref', 'is', null);
+		if (error) throw error;
+		return (data ?? []).map((project: { project_ref: string }) => project.project_ref);
+	};
+	let projectRef = buildUniqueProjectRef(preferredProjectRef, await loadExistingProjectRefs());
+	const projectRefMessage = projectRefValidationMessage(projectRef);
+	if (projectRefMessage) throw new Error(projectRefMessage);
+
 	const baseSlug = slugifyProjectName(name);
 	const { data: slugRows, error: slugError } = await client
 		.from('projects')
@@ -103,21 +107,39 @@ export async function createProject(
 	if (userError) throw userError;
 	if (!userData.user) throw new Error('You must be signed in to create a project.');
 
-	const { data: project, error: projectError } = await client
-		.from('projects')
-		.insert({
-			organisation_id: organisation.id,
-			name,
-			project_ref: projectRef,
-			slug,
-			description: input.description?.trim() || null,
-			status,
-			health: 'unknown',
-			created_by: userData.user.id,
-		})
-		.select('id, name, project_ref, slug, status, health, organisation_id')
-		.single();
-	if (projectError) throw projectError;
+	let project;
+	for (let attempt = 1; attempt <= MAX_PROJECT_REF_INSERT_ATTEMPTS; attempt += 1) {
+		const { data, error } = await client
+			.from('projects')
+			.insert({
+				organisation_id: organisation.id,
+				name,
+				project_ref: projectRef,
+				slug,
+				description: input.description?.trim() || null,
+				status,
+				health: 'unknown',
+				created_by: userData.user.id,
+			})
+			.select('id, name, project_ref, slug, status, health, organisation_id')
+			.single();
+		if (!error) {
+			project = data;
+			break;
+		}
+		if (isConstraintViolation(error, PROJECT_NAME_CONSTRAINT)) {
+			throw new Error('A project with this name already exists in this Workspace.');
+		}
+		if (isConstraintViolation(error, PROJECT_REF_CONSTRAINT)) {
+			if (attempt < MAX_PROJECT_REF_INSERT_ATTEMPTS) {
+				projectRef = buildUniqueProjectRef(preferredProjectRef, await loadExistingProjectRefs());
+				continue;
+			}
+			throw new Error('Watchtower could not assign a unique project reference. Please try again.');
+		}
+		throw error;
+	}
+	if (!project) throw new Error('Watchtower could not assign a unique project reference. Please try again.');
 
 	const { error: auditError } = await client.from('audit_log').insert({
 		organisation_id: project.organisation_id,

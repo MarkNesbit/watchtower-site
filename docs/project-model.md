@@ -1,7 +1,9 @@
 # Watchtower Project Model
 
-**Status:** Product working reference for WT-002B preparation  
-**Last updated:** 18 June 2026  
+**Status:** Product working reference for WT-002B preparation
+
+**Last updated:** 24 June 2026
+
 **Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `supabase/migrations/20260617000100_create_projects.sql`
 
 ## Purpose of a project in Watchtower
@@ -44,6 +46,7 @@ Current implementation notes:
 - The database currently uses `status` with allowed values `proposed`, `active`, `paused`, `completed`, and `cancelled`; application creation defaults to `proposed`.
 - The database currently includes `health`, defaulting to `unknown`. This is present for future health display but should not be treated as a full Red/Amber/Green scoring implementation.
 - The database currently includes generated/default `created_at` and `updated_at` timestamps.
+- The application currently requires a Watchtower-generated `project_ref` for new project creation. It is a fixed user-facing reference, not an editable creation field.
 - The database currently requires a `slug` for URL-safe identity within a workspace. This is an implementation field, not a primary user-facing product field.
 - The current schema has nullable `description`, `archived_at`, and `deleted_at` fields.
 
@@ -156,14 +159,14 @@ Project creation remains lightweight. `created_by` continues to be populated aut
 
 WT-002B does not implement Red/Amber/Green scoring, RAID tables, dependency modelling, programme/portfolio modelling, or additional optional project fields.
 
-## WT-US-0202A project reference code foundation
+## WT-US-0202B system-generated fixed project references
 
 Projects now have a dedicated `projects.project_ref` field for the user-facing project reference code. This is separate from `projects.slug`: the slug remains a URL-safe routing identifier only and must not be used as a delivery record reference.
 
-Project references are short project codes rather than descriptive labels. New project references are generated from the project name during project creation, shown to the authorised creator, and can be amended before submission. The final stored reference is normalised to uppercase, must be 3-4 uppercase alphanumeric characters, and must start with a letter.
+Project references are short project codes rather than descriptive labels. Watchtower generates each new reference from the project name, shows the expected reference to the authorised creator as a fixed read-only preview, and independently derives the final value on the server. Users cannot supply, amend, or override a project reference during MVP. The stored reference is normalised to uppercase, must be 3-4 uppercase alphanumeric characters, and must start with a letter.
 
-Project references are unique within a workspace/organisation, but the same reference may be reused in another workspace/organisation. Project names are also unique within a workspace/organisation so that project lists and cross-project views remain unambiguous.
+Project references are unique within a workspace/organisation, but the same reference may be reused in another workspace/organisation. If the preferred generated reference is already in use, Watchtower assigns a numeric-suffix alternative automatically rather than asking the user to resolve the collision. Project names are also unique within a workspace/organisation so that project lists and cross-project views remain unambiguous.
 
-For MVP, `project_ref` is immutable after creation. The project edit page may display it read-only, but normal authenticated project update flows must not change it. Future admin override is deliberately outside this scope.
+For MVP, `project_ref` is immutable after creation. The project edit page displays it read-only, but normal authenticated project update flows must not change it. A future admin-only override may be considered, but is deliberately outside this scope.
 
 Future risk references will use the authoritative project reference in the compound format `Risk-{PROJECT_REF}-{NNN}`, for example `Risk-HHH-003`. Existing early projects that do not yet have a valid project reference should be assigned one through a controlled future process or recreated before Risk records can be created against them.
