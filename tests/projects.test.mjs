@@ -127,11 +127,21 @@ test('Permission helper maps existing workspace roles to project permissions', (
 
 test('Project dashboard is read-only and displays metadata including description', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
-	const labels = ['Project name', 'Description', 'Status', 'Health', 'Workspace', 'Created', 'Last updated', 'Created by'];
+	const labels = ['Description', 'Status', 'Health', 'Created', 'Last updated', 'Created by'];
 	for (const label of labels) {
 		assert.match(detailSource, new RegExp(`<dt>${label}</dt>`));
 	}
 	assert.match(detailSource, /data-project-dashboard/);
+	assert.match(detailSource, /import ProjectPageHero/);
+	assert.match(detailSource, /import ProjectControlPanel/);
+	assert.match(detailSource, /import ProjectContentPanel/);
+	assert.match(detailSource, /import RagReferencePill/);
+	assert.match(detailSource, /<ProjectPageHero[\s\S]*workspaceName=\{workspaceName\}[\s\S]*projectName=\{project\.name\}[\s\S]*projectRef=\{project\.project_ref\}[\s\S]*title="Project Dashboard"/);
+	assert.match(detailSource, /<ProjectControlPanel title="Project status"/);
+	assert.match(detailSource, /<ProjectContentPanel[\s\S]*label="Capability hub"[\s\S]*title="Project areas"/);
+	assert.match(detailSource, /<ProjectContentPanel[\s\S]*label="Read-only metadata"[\s\S]*title="Key details"/);
+	assert.match(detailSource, /<RagReferencePill[\s\S]*tone=\{healthTone\(project\.health\)\}/);
+	assert.doesNotMatch(detailSource, /project-dashboard__bar|project-dashboard__workspace|project-hero-card|project-pills|rag-timeline/);
 	assert.match(detailSource, /Read-only metadata/);
 	assert.match(detailSource, /description, slug/);
 	assert.match(detailSource, /formatValue\(project\.description\)/);
@@ -145,6 +155,7 @@ test('Project dashboard is read-only and displays metadata including description
 	assert.match(detailSource, /\.is\('archived_at', null\)/);
 	assert.doesNotMatch(detailSource, /<form\b|<input\b|<select\b|<textarea\b|type="submit"|Save project/);
 	assert.doesNotMatch(detailSource, /<dd>{project\.created_by}<\/dd>|<dd>{project\.organisation_id}<\/dd>|data-project-id/);
+	assert.doesNotMatch(detailSource, /<dt>Project name<\/dt>|<dt>Project reference<\/dt>|<dt>Workspace<\/dt>/);
 });
 
 test('Project dashboard capability tiles lead with Project Narrative while keeping Timeline separate', async () => {
@@ -357,8 +368,7 @@ test('Project UI displays and protects project reference', async () => {
 	assert.doesNotMatch(newSource, /name="project_ref"|formData\.get\('project_ref'\)|projectRef:/);
 	assert.match(listSource, /project_ref/);
 	assert.match(listSource, /<th>Reference<\/th>/);
-	assert.match(detailSource, /Project reference/);
-	assert.match(detailSource, /project\.project_ref/);
+	assert.match(detailSource, /projectRef=\{project\.project_ref\}/);
 	assert.match(editSource, /project\.project_ref/);
 	assert.match(editSource, /read-only and cannot be edited after creation in MVP/);
 	assert.doesNotMatch(editSource, /name="project_ref"/);

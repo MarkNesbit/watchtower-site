@@ -63,7 +63,7 @@ Project Narrative uses the internal `projectDiary` feature flag. WT-US-0207 adde
 
 WT-NARRATIVE-003 adds manual Project Narrative entry creation for owners, admins, and members. Viewers retain read-only access and see the create action disabled with helper text. Manual entries can include structured links with required labels and safe `http://` or `https://` URLs. Clicking a Narrative Ref opens a read-only detail modal on the same page.
 
-WT-US-0209 introduced the authenticated project page design standard and lightweight reusable layout components for future project pages. Project Narrative is the first route to adopt the shared hero, filter/status panel, main content panel, primary action slot, disabled action hint, and empty state components.
+WT-US-0209 introduced the authenticated project page design standard and lightweight reusable layout components for future project pages. Project Narrative is the reference implementation for the shared hero, filter/status panel, main content panel, primary action slot, disabled action hint, and empty state components. The project dashboard now follows the same shell for its project context, status summary, capability hub, and read-only detail panels while retaining its existing feature-gated tile behaviour.
 
 Risk, Issue, Dependency, and Assumption records remain authoritative. Future source-generated Narrative entries may reference them for assurance history, but must not become an alternative editing surface. The full schema and permission boundary are documented in `docs/project-narrative.md`.
 
