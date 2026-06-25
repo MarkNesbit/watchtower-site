@@ -2,18 +2,24 @@
 type Props = {
 	tone?: 'blue' | 'green' | 'amber' | 'red' | 'neutral';
 	label: string;
+	statusLabel?: string;
+	ariaLabel?: string;
 };
 
-const { tone = 'neutral', label } = Astro.props;
+const { tone = 'neutral', label, statusLabel = '', ariaLabel = '' } = Astro.props;
 ---
 
-<span class={`rag-reference-pill rag-reference-pill--${tone}`}>{label}</span>
+<span class={`rag-reference-pill rag-reference-pill--${tone}`} aria-label={ariaLabel || undefined}>
+	<span>{label}</span>
+	{statusLabel && <span class="rag-reference-pill__status">{statusLabel}</span>}
+</span>
 
 <style>
 	.rag-reference-pill {
 		--rag-pill-tone: #7c8b98;
 		display: inline-flex;
 		align-items: center;
+		gap: 0.5rem;
 		width: fit-content;
 		border: 1px solid color-mix(in srgb, var(--rag-pill-tone) 65%, transparent);
 		border-radius: 999px;
@@ -22,6 +28,16 @@ const { tone = 'neutral', label } = Astro.props;
 		color: var(--text);
 		font-size: 0.82rem;
 		font-weight: 850;
+		transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+		white-space: nowrap;
+	}
+
+	.rag-reference-pill__status {
+		border-left: 1px solid color-mix(in srgb, var(--rag-pill-tone) 45%, transparent);
+		padding-left: 0.5rem;
+		color: color-mix(in srgb, var(--rag-pill-tone) 78%, var(--text));
+		font-size: 0.72rem;
+		text-transform: uppercase;
 	}
 
 	.rag-reference-pill--blue { --rag-pill-tone: #00a0ff; }

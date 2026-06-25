@@ -215,7 +215,7 @@ WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashbo
 
 WT-US-0207 adds **Project Narrative** near the start of the dashboard capability tiles. Project Narrative is the user-facing project event, update, decision and history layer: it explains what happened, what changed and why it matters. It remains distinct from **Timeline**, which represents dates, milestones and key project stages.
 
-Project Narrative uses the existing internal `projectDiary` feature key. The dashboard applies the same `hidden`, `disabled`, `preview` and `enabled` access model to all feature-gated tiles rather than treating Risk Management as a one-off. WT-NARRATIVE-001 adds the guarded canonical destination at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/narrative`; an accessible tile now links there. The page lists scoped entries newest first using Ref, Attention, Details, Created by, and Created columns. Internal entry numbers are not shown, and no Type column is added. Risk Management routing and RBAC behaviour are unchanged.
+Project Narrative uses the existing internal `projectDiary` feature key. The dashboard applies the same `hidden`, `disabled`, `preview` and `enabled` access model to all feature-gated tiles rather than treating Risk Management as a one-off. WT-NARRATIVE-001 adds the guarded canonical destination at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/narrative`; an accessible tile now links there. The page lists scoped entries newest first using Ref, Details, Created by, and Created columns. Ref carries the visible RAG/attention pill, internal entry numbers are not shown, and no Type column is added. Risk Management routing and RBAC behaviour are unchanged.
 
 ## WT-US-0209 universal project page layout
 

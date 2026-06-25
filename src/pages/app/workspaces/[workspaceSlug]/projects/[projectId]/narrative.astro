@@ -4,6 +4,7 @@ import EmptyState from '../../../../../../components/app/EmptyState.astro';
 import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
 import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
+import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import {
 	createProjectNarrativeEntry,
@@ -153,6 +154,10 @@ try {
 
 const canCreateNarrative = can(workspaceRole, 'narrative.create');
 const formatAttention = (value) => value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Neutral';
+const getAttentionPillTone = (value) => {
+	if (value === 'green' || value === 'amber' || value === 'red') return value;
+	return 'neutral';
+};
 const formatSourceType = (value) => {
 	if (!value) return 'Manual';
 	const labels = { manual: 'Manual', risk: 'Risk', issue: 'Issue', dependency: 'Dependency', assumption: 'Assumption', system: 'System' };
@@ -200,7 +205,6 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 				<ProjectControlPanel title="Filters" status="Coming soon" headingId="narrative-filters-heading" />
 
 				<ProjectContentPanel
-					label="Assurance timeline"
 					title="Narrative entries"
 					headingId="narrative-table-heading"
 				>
@@ -236,13 +240,25 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							<div class="narrative-table-scroll">
 								<table class="simple-table narrative-table">
 									<thead>
-										<tr><th scope="col">Ref</th><th scope="col">Attention</th><th scope="col">Details</th><th scope="col">Created by</th><th scope="col">Created</th></tr>
+										<tr><th scope="col">Ref</th><th scope="col">Details</th><th scope="col">Created by</th><th scope="col">Created</th></tr>
 									</thead>
 									<tbody>
 										{entries.map((entry) => (
 											<tr>
-												<td><button class="narrative-ref" type="button" data-entry-id={entry.id}>{getNarrativeDisplayRef(entry)}</button></td>
-												<td><span class={`attention-badge attention-badge--${entry.attention_level}`}><span aria-hidden="true" class="attention-badge__dot"></span>{formatAttention(entry.attention_level)}</span></td>
+												<td>
+													<button
+														class="narrative-ref"
+														type="button"
+														data-entry-id={entry.id}
+														aria-label={`Open ${getNarrativeDisplayRef(entry)}, ${formatAttention(entry.attention_level)} attention`}
+													>
+														<RagReferencePill
+															tone={getAttentionPillTone(entry.attention_level)}
+															label={getNarrativeDisplayRef(entry)}
+															statusLabel={formatAttention(entry.attention_level)}
+														/>
+													</button>
+												</td>
 												<td class="narrative-details">{entry.title && <strong>{entry.title}</strong>}{entry.details && <span>{entry.details}</span>}</td>
 												<td>{creatorName(entry)}</td>
 												<td><time datetime={entry.created_at}>{formatCreatedAt(entry.created_at)}</time></td>
@@ -535,17 +551,21 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 
 <style>
 	.narrative-page { display: grid; gap: 0.9rem; }
+	.narrative-page :global(.project-content-panel h2) { font-size: clamp(1.45rem, 2.4vw, 2rem); }
 	.narrative-action { display: contents; }
+	.narrative-action .button--primary:hover {
+		box-shadow: 0 16px 38px rgba(0, 160, 255, 0.34);
+	}
 	.narrative-action [disabled] { opacity: 0.68; cursor: not-allowed; }
 	.narrative-table-scroll { overflow-x: auto; }
-	.narrative-table { min-width: 52rem; }
-	.narrative-table th:first-child { width: 10rem; }
-	.narrative-table th:nth-child(2) { width: 8rem; }
-	.narrative-table th:nth-child(4) { width: 11rem; }
+	.narrative-table { min-width: 46rem; }
+	.narrative-table th:first-child { width: 13rem; }
+	.narrative-table th:nth-child(3) { width: 11rem; }
 	.narrative-table th:last-child { width: 12rem; }
 	.narrative-table td { vertical-align: top; }
-	.narrative-ref { border: 0; padding: 0.15rem 0.2rem; background: transparent; color: var(--accent-strong); font: inherit; font-weight: 900; text-decoration: underline; text-decoration-thickness: 0.08em; text-underline-offset: 0.18em; cursor: pointer; }
-	.narrative-ref:focus-visible { border-radius: 0.25rem; outline: 3px solid var(--accent-strong); outline-offset: 3px; }
+	.narrative-ref { display: inline-flex; border: 0; border-radius: 999px; padding: 0; background: transparent; font: inherit; cursor: pointer; }
+	.narrative-ref:hover :global(.rag-reference-pill) { transform: translateY(-1px); background: color-mix(in srgb, var(--rag-pill-tone) 22%, transparent); }
+	.narrative-ref:focus-visible { outline: 3px solid var(--accent-strong); outline-offset: 3px; }
 	.attention-badge { display: inline-flex; align-items: center; gap: 0.45rem; border: 1px solid color-mix(in srgb, var(--attention-tone) 65%, transparent); border-radius: 999px; padding: 0.25rem 0.55rem; color: var(--text); font-size: 0.82rem; font-weight: 850; }
 	.attention-badge__dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--attention-tone); }
 	.attention-badge--neutral { --attention-tone: #7c8b98; color: var(--muted-strong); }

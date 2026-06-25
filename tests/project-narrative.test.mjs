@@ -508,6 +508,8 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	const controlPanel = await readFile(new URL('../src/components/app/ProjectControlPanel.astro', import.meta.url), 'utf8');
 	const contentPanel = await readFile(new URL('../src/components/app/ProjectContentPanel.astro', import.meta.url), 'utf8');
 	const emptyState = await readFile(new URL('../src/components/app/EmptyState.astro', import.meta.url), 'utf8');
+	const ragReferencePill = await readFile(new URL('../src/components/app/RagReferencePill.astro', import.meta.url), 'utf8');
+	const siteLayout = await readFile(new URL('../src/layouts/SiteLayout.astro', import.meta.url), 'utf8');
 
 	assert.match(page, /data-project-narrative-route/);
 	assert.match(page, /<ProjectPageHero/);
@@ -520,12 +522,16 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(hero, /width: min\(100%, 11\.5rem\)/);
 	assert.match(page, /A project-level timeline of key events, updates and decisions\./);
 	assert.match(page, /<ProjectContentPanel/);
-	assert.match(page, /label="Assurance timeline"/);
+	assert.doesNotMatch(page, /label="Assurance timeline"/);
+	assert.doesNotMatch(page, /ASSURANCE TIMELINE|Assurance timeline/);
 	assert.match(page, /title="Narrative entries"/);
+	assert.match(page, /project-content-panel h2\) \{ font-size: clamp\(1\.45rem, 2\.4vw, 2rem\); \}/);
 	assert.doesNotMatch(page, /helper="Open an entry to inspect its full read-only details\."/);
 	assert.match(contentPanel, /<slot name="action" \/>/);
 	assert.match(page, />New Entry<\/button>/);
 	assert.match(page, /data-open-create-narrative/);
+	assert.match(siteLayout, /\.button \{[\s\S]*?cursor: pointer/);
+	assert.match(siteLayout, /\.button:focus-visible/);
 	assert.doesNotMatch(page, /<DisabledActionHint|narrative-action-help|Capture a manual project update/);
 	assert.match(page, /data-create-narrative-modal/);
 	assert.match(page, /data-create-narrative-form/);
@@ -554,9 +560,16 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /<EmptyState title="No narrative entries yet\."/);
 	assert.match(page, /<ProjectControlPanel title="Filters" status="Coming soon"/);
 	assert.match(controlPanel, /<slot \/>/);
-	assert.match(page, /<tr><th scope="col">Ref<\/th><th scope="col">Attention<\/th><th scope="col">Details<\/th><th scope="col">Created by<\/th><th scope="col">Created<\/th><\/tr>/);
+	assert.match(page, /<tr><th scope="col">Ref<\/th><th scope="col">Details<\/th><th scope="col">Created by<\/th><th scope="col">Created<\/th><\/tr>/);
+	assert.doesNotMatch(page, /<th scope="col">Attention<\/th>/);
 	assert.doesNotMatch(page, /<th[^>]*>Type<\/th>|<th[^>]*>(?:Entry|Row) number<\/th>/i);
+	assert.match(page, /import RagReferencePill/);
 	assert.match(page, /getNarrativeDisplayRef\(entry\)/);
+	assert.match(page, /<RagReferencePill[\s\S]*tone=\{getAttentionPillTone\(entry\.attention_level\)\}[\s\S]*label=\{getNarrativeDisplayRef\(entry\)\}[\s\S]*statusLabel=\{formatAttention\(entry\.attention_level\)\}/);
+	assert.match(page, /aria-label=\{`Open \$\{getNarrativeDisplayRef\(entry\)\}, \$\{formatAttention\(entry\.attention_level\)\} attention`\}/);
+	assert.match(ragReferencePill, /statusLabel/);
+	assert.match(ragReferencePill, /rag-reference-pill__status/);
+	assert.doesNotMatch(page, /<td><span class=\{`attention-badge attention-badge--\$\{entry\.attention_level\}`\}/);
 	assert.doesNotMatch(page, /class="narrative-ref"[\s\S]*?aria-disabled="true"/);
 	assert.match(page, /No narrative entries yet\./);
 	assert.match(page, /Project Narrative will show key project events, manual updates and future RAID-linked activity in one assurance timeline\./);
