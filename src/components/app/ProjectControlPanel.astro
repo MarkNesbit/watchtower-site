@@ -1,0 +1,53 @@
+---
+type Props = {
+	title: string;
+	status?: string;
+	headingId?: string;
+};
+
+const { title, status = '', headingId = 'project-control-panel-heading' } = Astro.props;
+---
+
+<section class="content-card project-control-panel" aria-labelledby={headingId}>
+	<div class="project-control-panel__heading">
+		<h2 id={headingId}>{title}</h2>
+		{status && <span>{status}</span>}
+	</div>
+	<slot />
+</section>
+
+<style>
+	.project-control-panel {
+		padding-block: 1.05rem;
+	}
+
+	.project-control-panel__heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.project-control-panel h2 {
+		margin: 0;
+		font-size: 1.1rem;
+	}
+
+	.project-control-panel span {
+		border: 1px solid rgba(0, 160, 255, 0.22);
+		border-radius: 999px;
+		padding: 0.35rem 0.75rem;
+		background: rgba(0, 160, 255, 0.1);
+		color: var(--muted-strong);
+		font-size: 0.82rem;
+		font-weight: 850;
+		white-space: nowrap;
+	}
+
+	@media (max-width: 560px) {
+		.project-control-panel__heading {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+	}
+</style>

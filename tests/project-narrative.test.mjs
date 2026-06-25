@@ -504,11 +504,27 @@ test('Project Narrative page provides manual creation and read-only detail modal
 		new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/narrative.astro', import.meta.url),
 		'utf8',
 	);
+	const hero = await readFile(new URL('../src/components/app/ProjectPageHero.astro', import.meta.url), 'utf8');
+	const controlPanel = await readFile(new URL('../src/components/app/ProjectControlPanel.astro', import.meta.url), 'utf8');
+	const contentPanel = await readFile(new URL('../src/components/app/ProjectContentPanel.astro', import.meta.url), 'utf8');
+	const emptyState = await readFile(new URL('../src/components/app/EmptyState.astro', import.meta.url), 'utf8');
+	const disabledActionHint = await readFile(new URL('../src/components/app/DisabledActionHint.astro', import.meta.url), 'utf8');
+
 	assert.match(page, /data-project-narrative-route/);
-	assert.match(page, /<h1 id="project-narrative-heading">Project Narrative<\/h1>/);
+	assert.match(page, /<ProjectPageHero/);
+	assert.match(page, /workspaceName=\{workspaceName\}/);
+	assert.match(page, /projectName=\{project\.name\}/);
+	assert.match(page, /title="Project Narrative"/);
+	assert.match(hero, /<h1 id=\{headingId\}>\{title\}<\/h1>/);
 	assert.match(page, /A project-level timeline of key events, updates and decisions\./);
-	assert.match(page, />Create Project Narrative Entry<\/button>/);
+	assert.match(page, /<ProjectContentPanel/);
+	assert.match(page, /label="Assurance timeline"/);
+	assert.match(page, /title="Narrative entries"/);
+	assert.match(contentPanel, /<slot name="action" \/>/);
+	assert.match(page, />New Entry<\/button>/);
 	assert.match(page, /data-open-create-narrative/);
+	assert.match(page, /<DisabledActionHint/);
+	assert.match(disabledActionHint, /<small class="disabled-action-hint" id=\{id\}>/);
 	assert.match(page, /data-create-narrative-modal/);
 	assert.match(page, /data-create-narrative-form/);
 	assert.match(page, /name="title"[\s\S]*?required/);
@@ -527,13 +543,14 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /showModal\(\)/);
 	assert.match(page, /detailModal\?\.addEventListener\('close'/);
 	assert.match(page, /entriesLoadError/);
+	assert.match(page, /<EmptyState title="Project Narrative entries could not be loaded\."/);
+	assert.match(emptyState, /class=\{`empty-state empty-state--\$\{tone\}`\}/);
 	assert.match(page, /data-narrative-list-error/);
 	assert.match(page, /Project Narrative entries could not be loaded\./);
 	assert.match(page, /entriesLoadError \? \(/);
-	assert.match(page, /class="narrative-filters"/);
-	for (const label of ['Entry/source type', 'Attention', 'Date range', 'Source']) {
-		assert.match(page, new RegExp(`<label>${label}`));
-	}
+	assert.match(page, /<EmptyState title="No narrative entries yet\."/);
+	assert.match(page, /<ProjectControlPanel title="Filters" status="Coming soon"/);
+	assert.match(controlPanel, /<slot \/>/);
 	assert.match(page, /<tr><th scope="col">Ref<\/th><th scope="col">Attention<\/th><th scope="col">Details<\/th><th scope="col">Created by<\/th><th scope="col">Created<\/th><\/tr>/);
 	assert.doesNotMatch(page, /<th[^>]*>Type<\/th>|<th[^>]*>(?:Entry|Row) number<\/th>/i);
 	assert.match(page, /getNarrativeDisplayRef\(entry\)/);

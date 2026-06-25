@@ -4,7 +4,7 @@
 
 **Last updated:** 25 June 2026
 
-**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`, `supabase/migrations/20260625000100_project_narrative_entry_links.sql`
+**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/ui-page-design-standard.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`, `supabase/migrations/20260625000100_project_narrative_entry_links.sql`
 
 ## Purpose of a project in Watchtower
 
@@ -216,3 +216,11 @@ WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashbo
 WT-US-0207 adds **Project Narrative** near the start of the dashboard capability tiles. Project Narrative is the user-facing project event, update, decision and history layer: it explains what happened, what changed and why it matters. It remains distinct from **Timeline**, which represents dates, milestones and key project stages.
 
 Project Narrative uses the existing internal `projectDiary` feature key. The dashboard applies the same `hidden`, `disabled`, `preview` and `enabled` access model to all feature-gated tiles rather than treating Risk Management as a one-off. WT-NARRATIVE-001 adds the guarded canonical destination at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/narrative`; an accessible tile now links there. The page lists scoped entries newest first using Ref, Attention, Details, Created by, and Created columns. Internal entry numbers are not shown, and no Type column is added. Risk Management routing and RBAC behaviour are unchanged.
+
+## WT-US-0209 universal project page layout
+
+WT-US-0209 defines the reusable authenticated project-page layout standard in `docs/ui-page-design-standard.md`. Project-level pages should follow the shared structure of global authenticated navigation, project hero/context panel, optional control/filter/status panel, main content panel, table/list/card content, empty state, and restricted-action state.
+
+Primary page-level actions should live in the main content panel header, normally top-right on desktop and above content on mobile. Secondary actions belong in local card, row, modal, detail, or supporting action groups. Viewer users and disabled feature states must retain visible but non-interactive actions only when useful, with clear helper text and no permission expansion.
+
+Lightweight reusable components now exist for shared project hero, control panel, content panel, disabled-action helper, empty state, and RAG/reference pills. Project Narrative is the first adopter; the project dashboard and future RAID pages are candidates for incremental adoption when their routes are next touched.
