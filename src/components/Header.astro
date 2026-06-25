@@ -1,4 +1,6 @@
 ---
+import SignOutButton from './auth/SignOutButton.astro';
+
 const navItems = [
 	{ href: '/', label: 'Home' },
 	{ href: '/products', label: 'Products' },
@@ -7,6 +9,7 @@ const navItems = [
 ];
 
 const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/';
+const hasAuthCookie = Boolean(Astro.cookies.get('wt-access-token')?.value);
 ---
 
 <header class="site-header">
@@ -29,6 +32,27 @@ const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/';
 				);
 			})}
 		</nav>
-		<a class="login-slot" href="/login">Login</a>
+		<a class="login-slot" href="/login" data-header-login hidden={hasAuthCookie || undefined}>Login</a>
+		<div data-header-sign-out hidden={!hasAuthCookie || undefined}>
+			<SignOutButton className="login-slot login-slot--button" label="Sign out" />
+		</div>
 	</div>
 </header>
+<script>
+	import { supabase } from '../lib/supabaseClient';
+
+	const loginLink = document.querySelector('[data-header-login]');
+	const signOutAction = document.querySelector('[data-header-sign-out]');
+
+	function setHeaderAuthState(session) {
+		loginLink?.toggleAttribute('hidden', Boolean(session));
+		signOutAction?.toggleAttribute('hidden', !session);
+	}
+
+	const { data } = await supabase.auth.getSession();
+	setHeaderAuthState(data.session);
+
+	supabase.auth.onAuthStateChange((_event, session) => {
+		setHeaderAuthState(session);
+	});
+</script>

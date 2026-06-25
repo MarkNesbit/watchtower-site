@@ -38,6 +38,8 @@ The hero should show:
 
 The hero should not normally contain the page's primary create/edit action. Keeping the hero descriptive makes page actions predictable across modules.
 
+Authenticated project heroes should be compact product headers rather than public marketing heroes. Keep vertical padding restrained, keep the page title dominant but materially smaller than public-site hero type, and ensure the decorative brand mark stays subtle.
+
 ## Optional Control Panel
 
 Use `ProjectControlPanel` for page-level filters, controls, status summaries, or future controls that need to remain visible but inactive.
