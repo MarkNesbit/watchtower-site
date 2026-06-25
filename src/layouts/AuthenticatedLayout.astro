@@ -1,6 +1,5 @@
 ---
 import AuthStatus from '../components/auth/AuthStatus.astro';
-import SignOutButton from '../components/auth/SignOutButton.astro';
 import SiteLayout from './SiteLayout.astro';
 
 type Props = { title?: string; description?: string };
@@ -8,17 +7,7 @@ const { title = 'WatchTower App', description = 'Authenticated WatchTower worksp
 ---
 <SiteLayout title={title} description={description}>
 	<AuthStatus />
-	<section class="app-shell section" data-authenticated-shell hidden>
-		<div class="app-shell__bar">
-			<div>
-				<p class="eyebrow">Workspace</p>
-				<strong>WatchTower</strong>
-			</div>
-			<nav class="app-shell__nav" aria-label="Workspace navigation">
-				<a href="/app/projects">Projects</a>
-			</nav>
-			<SignOutButton />
-		</div>
+	<section class="app-shell" data-authenticated-shell hidden>
 		<slot />
 	</section>
 </SiteLayout>

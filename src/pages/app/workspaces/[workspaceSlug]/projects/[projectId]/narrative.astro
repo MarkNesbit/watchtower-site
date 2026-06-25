@@ -1,6 +1,5 @@
 ---
 import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
-import DisabledActionHint from '../../../../../../components/app/DisabledActionHint.astro';
 import EmptyState from '../../../../../../components/app/EmptyState.astro';
 import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
 import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
@@ -203,7 +202,6 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 				<ProjectContentPanel
 					label="Assurance timeline"
 					title="Narrative entries"
-					helper="Open an entry to inspect its full read-only details."
 					headingId="narrative-table-heading"
 				>
 					<div slot="action" class="narrative-action">
@@ -211,7 +209,6 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							<button
 								class="button button--primary"
 								type="button"
-								aria-describedby="narrative-action-help"
 								data-open-create-narrative
 							>New Entry</button>
 						) : (
@@ -219,16 +216,9 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 								class="button button--primary"
 								type="button"
 								disabled
-								aria-describedby="narrative-action-help"
 								data-viewer-read-only
 							>New Entry</button>
 						)}
-						<DisabledActionHint
-							id="narrative-action-help"
-							allowed={canCreateNarrative}
-							allowedText="Capture a manual project update without creating or changing a RAID record."
-							disabledText="Viewer access is read-only. Your role does not allow entry creation."
-						/>
 					</div>
 
 					{entriesLoadError ? (
@@ -243,7 +233,6 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 						</EmptyState>
 					) : (
 						<>
-							<p id="narrative-ref-help" class="narrative-helper">Open an entry to inspect its full read-only details.</p>
 							<div class="narrative-table-scroll">
 								<table class="simple-table narrative-table">
 									<thead>
@@ -252,7 +241,7 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 									<tbody>
 										{entries.map((entry) => (
 											<tr>
-												<td><button class="narrative-ref" type="button" aria-describedby="narrative-ref-help" data-entry-id={entry.id}>{getNarrativeDisplayRef(entry)}</button></td>
+												<td><button class="narrative-ref" type="button" data-entry-id={entry.id}>{getNarrativeDisplayRef(entry)}</button></td>
 												<td><span class={`attention-badge attention-badge--${entry.attention_level}`}><span aria-hidden="true" class="attention-badge__dot"></span>{formatAttention(entry.attention_level)}</span></td>
 												<td class="narrative-details">{entry.title && <strong>{entry.title}</strong>}{entry.details && <span>{entry.details}</span>}</td>
 												<td>{creatorName(entry)}</td>
@@ -548,7 +537,6 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-page { display: grid; gap: 0.9rem; }
 	.narrative-action { display: contents; }
 	.narrative-action [disabled] { opacity: 0.68; cursor: not-allowed; }
-	.narrative-helper { margin: -0.35rem 0 0.8rem; color: var(--muted-strong); font-size: 0.85rem; }
 	.narrative-table-scroll { overflow-x: auto; }
 	.narrative-table { min-width: 52rem; }
 	.narrative-table th:first-child { width: 10rem; }
