@@ -1,10 +1,10 @@
 # Watchtower Project Model
 
-**Status:** Product working reference through WT-NARRATIVE-001
+**Status:** Product working reference through WT-NARRATIVE-003
 
-**Last updated:** 24 June 2026
+**Last updated:** 25 June 2026
 
-**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`
+**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`, `supabase/migrations/20260625000100_project_narrative_entry_links.sql`
 
 ## Purpose of a project in Watchtower
 
@@ -154,6 +154,14 @@ Entries may be manual or prepared for future Risk, Issue, Dependency, Assumption
 Owners, admins, and members can read and mutate Narrative entries for projects in an active workspace; viewers are read-only. Composite foreign keys and Row Level Security preserve workspace isolation. Audit timestamps use UTC-compatible `timestamptz`; optional context accepts validated IANA timezone names for later display/audit use.
 
 WT-NARRATIVE-002 adds no Project Narrative page, form, table, modal, filters, RAID integration, notifications, export, or AI. See `docs/project-narrative.md` for the schema, reference, DTS, permission, and validation details.
+
+## WT-NARRATIVE-003 manual Project Narrative entries
+
+WT-NARRATIVE-003 makes Project Narrative usable for manual project context capture. Owners, admins, and members can create manual Narrative entries from the workspace/project Narrative route. Viewers can still read the table and detail modal, but the create action is visible and disabled with role-specific helper text.
+
+Manual entries require Title, Details, and an Attention level. Attention defaults to Neutral and remains constrained to `neutral`, `green`, `amber`, and `red`. Manual entries are stored with `source_type = manual`, `source_record_id = null`, and `source_ref = null`, so they do not create or update Risk, Issue, Dependency, or Assumption records.
+
+Structured links are stored in `project_narrative_entry_links`. Each link belongs to the same workspace and project as its parent Narrative entry, requires a label and safe `http://` or `https://` URL, and is protected by Row Level Security. Active workspace members can read links; owners, admins, and members can create links; viewers cannot create links. Link editing/deletion and RAID promotion/conversion are separate future stories.
 
 ## WT-002B implementation guidance
 

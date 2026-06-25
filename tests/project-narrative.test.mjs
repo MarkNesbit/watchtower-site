@@ -8,6 +8,8 @@ import {
 	isNarrativeAttentionLevel,
 	isNarrativeSourceType,
 	listProjectNarrativeEntries,
+	normaliseProjectNarrativeLinks,
+	normaliseProjectNarrativeLinkUrl,
 	NARRATIVE_ATTENTION_LEVELS,
 	NARRATIVE_SOURCE_TYPES,
 } from '../src/lib/projectNarrative.ts';
@@ -18,6 +20,11 @@ const migrationPath = new URL(
 	import.meta.url,
 );
 const migrationSql = async () => readFile(migrationPath, 'utf8');
+const linksMigrationPath = new URL(
+	'../supabase/migrations/20260625000100_project_narrative_entry_links.sql',
+	import.meta.url,
+);
+const linksMigrationSql = async () => readFile(linksMigrationPath, 'utf8');
 
 test('Project Narrative migration creates the structured project-scoped record', async () => {
 	const sql = await migrationSql();
@@ -120,6 +127,35 @@ test('RLS permits active workspace readers and excludes viewers from mutations',
 	assert.equal(can('viewer', 'narrative.delete'), false);
 });
 
+test('Project Narrative link migration creates scoped structured hyperlinks with read/create RLS', async () => {
+	const sql = await linksMigrationSql();
+	assert.match(sql, /create table public\.project_narrative_entry_links \(/);
+	for (const field of [
+		'id uuid primary key default gen_random_uuid()',
+		'organisation_id uuid not null references public.organisations(id) on delete cascade',
+		'project_id uuid not null references public.projects(id) on delete cascade',
+		'narrative_entry_id uuid not null references public.project_narrative_entries(id) on delete cascade',
+		'label text not null',
+		'url text not null',
+		'created_by uuid not null references public.profiles(id) on delete restrict',
+		'created_at timestamptz not null default now()',
+	]) {
+		assert.ok(sql.includes(field), `Expected links migration to contain ${field}`);
+	}
+	assert.match(sql, /unique \(id, project_id, organisation_id\)/);
+	assert.match(sql, /foreign key \(narrative_entry_id, project_id, organisation_id\)[\s\S]*references public\.project_narrative_entries\(id, project_id, organisation_id\)/);
+	assert.match(sql, /project_narrative_entry_links_label_not_empty_check/);
+	assert.match(sql, /project_narrative_entry_links_url_not_empty_check/);
+	assert.match(sql, /project_narrative_entry_links_safe_url_check[\s\S]*url ~\* '\^https\?:\/\//);
+	assert.match(sql, /alter table public\.project_narrative_entry_links enable row level security/);
+	assert.match(sql, /Active members can read project narrative entry links/);
+	assert.match(sql, /Owners admins and members can create project narrative entry links/);
+	assert.match(sql, /is_active_organisation_member\(project_narrative_entry_links\.organisation_id\)/);
+	assert.match(sql, /has_active_organisation_role\(\s*project_narrative_entry_links\.organisation_id,\s*array\['owner', 'admin', 'member'\]/);
+	assert.doesNotMatch(sql, /array\['owner', 'admin', 'member', 'viewer'\]/);
+	assert.doesNotMatch(sql, /for update|for delete/i);
+});
+
 test('data access defaults manual entries to neutral and leaves source metadata optional', async () => {
 	let insertedPayload;
 	const result = {
@@ -146,18 +182,18 @@ test('data access defaults manual entries to neutral and leaves source metadata 
 	};
 
 	const entry = await createProjectNarrativeEntry(
-		{ projectId: 'project-id', details: 'Project mobilisation completed.' },
+		{ projectId: 'project-id', title: 'Mobilisation complete', details: 'Project mobilisation completed.' },
 		'member',
 		client,
 	);
-	assert.equal(entry, result);
+	assert.deepEqual(entry, { ...result, links: [] });
 	assert.deepEqual(insertedPayload, {
 		project_id: 'project-id',
 		source_type: 'manual',
 		source_record_id: null,
 		source_ref: null,
 		attention_level: 'neutral',
-		title: null,
+		title: 'Mobilisation complete',
 		details: 'Project mobilisation completed.',
 		created_timezone: null,
 	});
@@ -188,6 +224,7 @@ test('data access preserves future source UUID and display reference metadata', 
 			sourceRef: ' Risk-HHH-003 ',
 			attentionLevel: 'red',
 			title: 'Risk escalated',
+			details: 'The delivery risk has moved to urgent attention.',
 		},
 		'owner',
 		client,
@@ -197,6 +234,64 @@ test('data access preserves future source UUID and display reference metadata', 
 	assert.equal(insertedPayload.source_record_id, '9ae15cbc-2c1d-4701-8717-e8dab84ff9ea');
 	assert.equal(insertedPayload.source_ref, 'Risk-HHH-003');
 	assert.equal(insertedPayload.attention_level, 'red');
+});
+
+test('data access saves validated links against the created narrative entry scope', async () => {
+	const calls = [];
+	const entryResult = {
+		id: 'entry-id',
+		organisation_id: 'workspace-id',
+		project_id: 'project-id',
+		narrative_ref: 'NAR-HHH-001',
+		source_type: 'manual',
+		attention_level: 'green',
+	};
+	const linkResult = [{
+		id: 'link-id',
+		organisation_id: 'workspace-id',
+		project_id: 'project-id',
+		narrative_entry_id: 'entry-id',
+		label: 'Steering note',
+		url: 'https://example.com/steering',
+	}];
+	const client = {
+		from(table) {
+			return {
+				insert(payload) {
+					calls.push(['insert', table, payload]);
+					return {
+						select() {
+							if (table === 'project_narrative_entries') {
+								return { single: async () => ({ data: entryResult, error: null }) };
+							}
+							return Promise.resolve({ data: linkResult, error: null });
+						},
+					};
+				},
+			};
+		},
+	};
+
+	const entry = await createProjectNarrativeEntry(
+		{
+			projectId: 'project-id',
+			title: 'Steering outcome',
+			details: 'The steering group approved the revised delivery approach.',
+			attentionLevel: 'green',
+			links: [{ label: ' Steering note ', url: 'https://example.com/steering' }],
+		},
+		'admin',
+		client,
+	);
+
+	assert.deepEqual(entry.links, linkResult);
+	assert.deepEqual(calls[1], ['insert', 'project_narrative_entry_links', [{
+		organisation_id: 'workspace-id',
+		project_id: 'project-id',
+		narrative_entry_id: 'entry-id',
+		label: 'Steering note',
+		url: 'https://example.com/steering',
+	}]]);
 });
 
 test('narrative list stays workspace and project scoped and sorts newest first', async () => {
@@ -241,12 +336,12 @@ test('display reference prefers a source reference and otherwise uses the Narrat
 test('viewer writes and invalid narrative values are rejected before data access', async () => {
 	const unusedClient = { from: () => assert.fail('Client should not be called') };
 	await assert.rejects(
-		createProjectNarrativeEntry({ projectId: 'project-id', details: 'No write.' }, 'viewer', unusedClient),
+		createProjectNarrativeEntry({ projectId: 'project-id', title: 'No write', details: 'No write.' }, 'viewer', unusedClient),
 		/does not permit Project Narrative entry creation/,
 	);
 	await assert.rejects(
 		createProjectNarrativeEntry(
-			{ projectId: 'project-id', details: 'Invalid', attentionLevel: 'blue' },
+			{ projectId: 'project-id', title: 'Invalid', details: 'Invalid', attentionLevel: 'blue' },
 			'member',
 			unusedClient,
 		),
@@ -254,11 +349,27 @@ test('viewer writes and invalid narrative values are rejected before data access
 	);
 	await assert.rejects(
 		createProjectNarrativeEntry({ projectId: 'project-id', title: ' ', details: ' ' }, 'member', unusedClient),
-		/requires a title or details/,
+		/Title is required/,
+	);
+	await assert.rejects(
+		createProjectNarrativeEntry({ projectId: 'project-id', title: 'Title only', details: ' ' }, 'member', unusedClient),
+		/Details are required/,
 	);
 });
 
-test('Project Narrative page provides the table layout foundation without forms or modal behaviour', async () => {
+test('Project Narrative link validation accepts only complete safe http or https links', () => {
+	assert.equal(normaliseProjectNarrativeLinkUrl(' https://example.com/evidence '), 'https://example.com/evidence');
+	assert.deepEqual(normaliseProjectNarrativeLinks([{ label: ' Evidence ', url: 'http://example.com' }]), [{
+		label: 'Evidence',
+		url: 'http://example.com/',
+	}]);
+	assert.throws(() => normaliseProjectNarrativeLinks([{ label: '', url: 'https://example.com' }]), /Link label is required/);
+	assert.throws(() => normaliseProjectNarrativeLinks([{ label: 'Evidence', url: '' }]), /Link URL is required/);
+	assert.throws(() => normaliseProjectNarrativeLinks([{ label: 'Evidence', url: 'notaurl' }]), /valid link URL/);
+	assert.throws(() => normaliseProjectNarrativeLinks([{ label: 'Evidence', url: 'javascript:alert(1)' }]), /safe link URL/);
+});
+
+test('Project Narrative page provides manual creation and read-only detail modal behaviour', async () => {
 	const page = await readFile(
 		new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/narrative.astro', import.meta.url),
 		'utf8',
@@ -266,7 +377,25 @@ test('Project Narrative page provides the table layout foundation without forms 
 	assert.match(page, /data-project-narrative-route/);
 	assert.match(page, /<h1 id="project-narrative-heading">Project Narrative<\/h1>/);
 	assert.match(page, /A project-level timeline of key events, updates and decisions\./);
-	assert.match(page, />Add narrative entry<\/span>/);
+	assert.match(page, />Create Project Narrative Entry<\/button>/);
+	assert.match(page, /data-open-create-narrative/);
+	assert.match(page, /data-create-narrative-modal/);
+	assert.match(page, /data-create-narrative-form/);
+	assert.match(page, /name="title"[\s\S]*?required/);
+	assert.match(page, /name="attention_level"[\s\S]*?value=\{level\}[\s\S]*?required/);
+	assert.match(page, /name="details"[\s\S]*?required/);
+	assert.match(page, /name="link_label"/);
+	assert.match(page, /name="link_url"/);
+	assert.match(page, /Link label is required when adding a link/);
+	assert.match(page, /normaliseProjectNarrativeLinkUrl\(link\.url\)/);
+	assert.match(page, /createProjectNarrativeEntry\(/);
+	assert.match(page, /data-detail-modal/);
+	assert.match(page, /data-entry-id=\{entry\.id\}/);
+	assert.match(page, /data-detail-narrative-ref/);
+	assert.match(page, /data-detail-source-type/);
+	assert.match(page, /data-detail-links/);
+	assert.match(page, /showModal\(\)/);
+	assert.match(page, /detailModal\?\.addEventListener\('close'/);
 	assert.match(page, /class="narrative-filters"/);
 	for (const label of ['Entry/source type', 'Attention', 'Date range', 'Source']) {
 		assert.match(page, new RegExp(`<label>${label}`));
@@ -274,14 +403,14 @@ test('Project Narrative page provides the table layout foundation without forms 
 	assert.match(page, /<tr><th scope="col">Ref<\/th><th scope="col">Attention<\/th><th scope="col">Details<\/th><th scope="col">Created by<\/th><th scope="col">Created<\/th><\/tr>/);
 	assert.doesNotMatch(page, /<th[^>]*>Type<\/th>|<th[^>]*>(?:Entry|Row) number<\/th>/i);
 	assert.match(page, /getNarrativeDisplayRef\(entry\)/);
-	assert.match(page, /class="narrative-ref"[\s\S]*?aria-disabled="true"/);
+	assert.doesNotMatch(page, /class="narrative-ref"[\s\S]*?aria-disabled="true"/);
 	assert.match(page, /No narrative entries yet\./);
 	assert.match(page, /Project Narrative will show key project events, manual updates and future RAID-linked activity in one assurance timeline\./);
 	assert.match(page, /can\(workspace\.role, 'narrative\.view'\)/);
 	assert.match(page, /can\(workspaceRole, 'narrative\.create'\)/);
 	assert.match(page, /listProjectNarrativeEntries\(organisation\.id, data\.id, workspace\.role, serverSupabase\)/);
 	assert.match(page, /loadFeatureAccess\(serverSupabase, 'projectDiary', accessToken\)/);
-	assert.doesNotMatch(page, /<form\b|<dialog\b|showModal\(|from\('project_(?:risks|issues|dependencies|assumptions)'\)/);
+	assert.doesNotMatch(page, /from\('project_(?:risks|issues|dependencies|assumptions)'\)/);
 });
 
 test('Project Narrative foundation does not add RAID integration, export, notifications or AI', async () => {
