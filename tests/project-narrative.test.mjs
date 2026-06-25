@@ -4,8 +4,10 @@ import test from 'node:test';
 
 import {
 	createProjectNarrativeEntry,
+	getNarrativeDisplayRef,
 	isNarrativeAttentionLevel,
 	isNarrativeSourceType,
+	listProjectNarrativeEntries,
 	NARRATIVE_ATTENTION_LEVELS,
 	NARRATIVE_SOURCE_TYPES,
 } from '../src/lib/projectNarrative.ts';
@@ -197,6 +199,45 @@ test('data access preserves future source UUID and display reference metadata', 
 	assert.equal(insertedPayload.attention_level, 'red');
 });
 
+test('narrative list stays workspace and project scoped and sorts newest first', async () => {
+	const calls = [];
+	const query = {
+		select(columns) {
+			calls.push(['select', columns]);
+			return this;
+		},
+		eq(column, value) {
+			calls.push(['eq', column, value]);
+			return this;
+		},
+		order(column, options) {
+			calls.push(['order', column, options]);
+			if (calls.filter(([name]) => name === 'order').length === 2) {
+				return Promise.resolve({ data: [{ narrative_ref: 'NAR-HHH-002' }], error: null });
+			}
+			return this;
+		},
+	};
+	const client = { from: (table) => (calls.push(['from', table]), query) };
+
+	const result = await listProjectNarrativeEntries('workspace-id', 'project-id', 'viewer', client);
+	assert.deepEqual(result, [{ narrative_ref: 'NAR-HHH-002' }]);
+	assert.deepEqual(calls.filter(([name]) => name === 'eq'), [
+		['eq', 'organisation_id', 'workspace-id'],
+		['eq', 'project_id', 'project-id'],
+	]);
+	assert.deepEqual(calls.filter(([name]) => name === 'order'), [
+		['order', 'created_at', { ascending: false }],
+		['order', 'entry_number', { ascending: false }],
+	]);
+});
+
+test('display reference prefers a source reference and otherwise uses the Narrative reference', () => {
+	assert.equal(getNarrativeDisplayRef({ source_ref: 'Risk-HHH-003', narrative_ref: 'NAR-HHH-007' }), 'Risk-HHH-003');
+	assert.equal(getNarrativeDisplayRef({ source_ref: null, narrative_ref: 'NAR-HHH-007' }), 'NAR-HHH-007');
+	assert.equal(getNarrativeDisplayRef({ source_ref: '   ', narrative_ref: 'NAR-HHH-007' }), 'NAR-HHH-007');
+});
+
 test('viewer writes and invalid narrative values are rejected before data access', async () => {
 	const unusedClient = { from: () => assert.fail('Client should not be called') };
 	await assert.rejects(
@@ -217,7 +258,33 @@ test('viewer writes and invalid narrative values are rejected before data access
 	);
 });
 
-test('schema foundation does not add Narrative UI, RAID integration, export, notifications or AI', async () => {
+test('Project Narrative page provides the table layout foundation without forms or modal behaviour', async () => {
+	const page = await readFile(
+		new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/narrative.astro', import.meta.url),
+		'utf8',
+	);
+	assert.match(page, /data-project-narrative-route/);
+	assert.match(page, /<h1 id="project-narrative-heading">Project Narrative<\/h1>/);
+	assert.match(page, /A project-level timeline of key events, updates and decisions\./);
+	assert.match(page, />Add narrative entry<\/span>/);
+	assert.match(page, /class="narrative-filters"/);
+	for (const label of ['Entry/source type', 'Attention', 'Date range', 'Source']) {
+		assert.match(page, new RegExp(`<label>${label}`));
+	}
+	assert.match(page, /<tr><th scope="col">Ref<\/th><th scope="col">Attention<\/th><th scope="col">Details<\/th><th scope="col">Created by<\/th><th scope="col">Created<\/th><\/tr>/);
+	assert.doesNotMatch(page, /<th[^>]*>Type<\/th>|<th[^>]*>(?:Entry|Row) number<\/th>/i);
+	assert.match(page, /getNarrativeDisplayRef\(entry\)/);
+	assert.match(page, /class="narrative-ref"[\s\S]*?aria-disabled="true"/);
+	assert.match(page, /No narrative entries yet\./);
+	assert.match(page, /Project Narrative will show key project events, manual updates and future RAID-linked activity in one assurance timeline\./);
+	assert.match(page, /can\(workspace\.role, 'narrative\.view'\)/);
+	assert.match(page, /can\(workspaceRole, 'narrative\.create'\)/);
+	assert.match(page, /listProjectNarrativeEntries\(organisation\.id, data\.id, workspace\.role, serverSupabase\)/);
+	assert.match(page, /loadFeatureAccess\(serverSupabase, 'projectDiary', accessToken\)/);
+	assert.doesNotMatch(page, /<form\b|<dialog\b|showModal\(|from\('project_(?:risks|issues|dependencies|assumptions)'\)/);
+});
+
+test('Project Narrative foundation does not add RAID integration, export, notifications or AI', async () => {
 	const sql = await migrationSql();
 	for (const excludedTable of [
 		'project_issues',
@@ -230,11 +297,9 @@ test('schema foundation does not add Narrative UI, RAID integration, export, not
 	]) {
 		assert.doesNotMatch(sql, new RegExp(`create\\s+table\\s+(public\\.)?${excludedTable}\\b`, 'i'));
 	}
-
-	const dashboard = await readFile(
-		new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url),
+	const page = await readFile(
+		new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/narrative.astro', import.meta.url),
 		'utf8',
 	);
-	assert.doesNotMatch(dashboard, /from\('project_narrative_entries'\)/);
-	assert.doesNotMatch(dashboard, /href: ['"]\/app\/[^'"]*narrative/i);
+	assert.doesNotMatch(page, /CSV|notification|digest|browser badge|favicon count|AI summar|AI analys/i);
 });

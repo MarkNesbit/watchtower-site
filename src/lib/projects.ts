@@ -1,5 +1,5 @@
 import { assertCan } from './permissions';
-import { buildProjectEditPath, buildProjectPath, buildProjectRisksPath } from './projectRoutes';
+import { buildProjectEditPath, buildProjectNarrativePath, buildProjectPath, buildProjectRisksPath } from './projectRoutes';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
 import { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from './projectRefs';
 
@@ -19,6 +19,7 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 export {
 	buildProjectEditPath,
+	buildProjectNarrativePath,
 	buildProjectPath,
 	buildProjectRisksPath,
 	buildUniqueProjectRef,
