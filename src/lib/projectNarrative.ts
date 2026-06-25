@@ -15,6 +15,17 @@ export type ProjectNarrativeEntryInput = {
 	title?: string | null;
 	details?: string | null;
 	createdTimezone?: string | null;
+	links?: ProjectNarrativeEntryLinkInput[];
+};
+
+export type ProjectNarrativeEntryLinkInput = {
+	label?: string | null;
+	url?: string | null;
+};
+
+export type NormalisedProjectNarrativeLink = {
+	label: string;
+	url: string;
 };
 
 export function isNarrativeSourceType(value: unknown): value is NarrativeSourceType {
@@ -33,6 +44,37 @@ function cleanOptionalText(value: string | null | undefined): string | null {
 	return value?.trim() || null;
 }
 
+export function normaliseProjectNarrativeLinkUrl(value: string | null | undefined): string {
+	const url = cleanOptionalText(value);
+	if (!url) throw new Error('Link URL is required when adding a link.');
+
+	let parsedUrl: URL;
+	try {
+		parsedUrl = new URL(url);
+	} catch {
+		throw new Error('Enter a valid link URL.');
+	}
+
+	if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+		throw new Error('Enter a safe link URL that starts with http:// or https://.');
+	}
+
+	return parsedUrl.href;
+}
+
+export function normaliseProjectNarrativeLinks(
+	links: ProjectNarrativeEntryLinkInput[] | null | undefined,
+): NormalisedProjectNarrativeLink[] {
+	return (links ?? []).map((link) => {
+		const label = cleanOptionalText(link.label);
+		if (!label) throw new Error('Link label is required when adding a link.');
+		return {
+			label,
+			url: normaliseProjectNarrativeLinkUrl(link.url),
+		};
+	});
+}
+
 export async function listProjectNarrativeEntries(
 	organisationId: string,
 	projectId: string,
@@ -44,7 +86,7 @@ export async function listProjectNarrativeEntries(
 	const { data, error } = await client
 		.from('project_narrative_entries')
 		.select(
-			'id, organisation_id, project_id, entry_number, narrative_ref, source_type, source_record_id, source_ref, attention_level, title, details, created_by, updated_by, created_at, updated_at, created_timezone, updated_timezone, creator:profiles!project_narrative_entries_created_by_fkey(display_name, email)',
+			'id, organisation_id, project_id, entry_number, narrative_ref, source_type, source_record_id, source_ref, attention_level, title, details, created_by, updated_by, created_at, updated_at, created_timezone, updated_timezone, creator:profiles!project_narrative_entries_created_by_fkey(display_name, email), updater:profiles!project_narrative_entries_updated_by_fkey(display_name, email), links:project_narrative_entry_links(id, label, url, created_at)',
 		)
 		.eq('organisation_id', organisationId)
 		.eq('project_id', projectId)
@@ -69,7 +111,9 @@ export async function createProjectNarrativeEntry(
 
 	const title = cleanOptionalText(input.title);
 	const details = cleanOptionalText(input.details);
-	if (!title && !details) throw new Error('A Project Narrative entry requires a title or details.');
+	if (!title) throw new Error('Title is required.');
+	if (!details) throw new Error('Details are required.');
+	const links = normaliseProjectNarrativeLinks(input.links);
 
 	const { data, error } = await client
 		.from('project_narrative_entries')
@@ -89,5 +133,24 @@ export async function createProjectNarrativeEntry(
 		.single();
 
 	if (error) throw error;
-	return data;
+
+	if (links.length > 0) {
+		const { data: createdLinks, error: linkError } = await client
+			.from('project_narrative_entry_links')
+			.insert(
+				links.map((link) => ({
+					organisation_id: data.organisation_id,
+					project_id: data.project_id,
+					narrative_entry_id: data.id,
+					label: link.label,
+					url: link.url,
+				})),
+			)
+			.select('id, organisation_id, project_id, narrative_entry_id, label, url, created_by, created_at');
+
+		if (linkError) throw linkError;
+		return { ...data, links: createdLinks ?? [] };
+	}
+
+	return { ...data, links: [] };
 }

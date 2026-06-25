@@ -1,10 +1,10 @@
 # Project Narrative
 
-**Status:** WT-NARRATIVE-001 table layout foundation on the WT-NARRATIVE-002 schema
+**Status:** WT-NARRATIVE-003 manual entry creation and read-only detail modal
 
-**Migration:** `20260624000400_project_narrative_schema_foundation.sql`
+**Migrations:** `20260624000400_project_narrative_schema_foundation.sql`, `20260625000100_project_narrative_entry_links.sql`
 
-**Scope:** Workspace-isolated records, data access, permissions, and the first project-level assurance table
+**Scope:** Workspace-isolated records, data access, permissions, manual entry creation, structured links, and the project-level assurance table/detail modal
 
 ## Purpose and source-of-truth boundary
 
@@ -29,7 +29,17 @@ The user-facing term is **Project Narrative**. The existing `projectDiary` and `
 
 Allowed source types are `manual`, `risk`, `issue`, `dependency`, `assumption`, and `system`. Manual entries default to `manual` and may omit both source metadata fields. The migration does not add a foreign key from `source_record_id` because the future RAID tables do not all exist yet.
 
-At least one of `title` or `details` must contain non-whitespace text. `source_ref`, when present, cannot be blank.
+The database requires at least one of `title` or `details` to contain non-whitespace text so future source-generated entries can remain flexible. The WT-NARRATIVE-003 manual entry form is stricter: manual entries require both Title and Details for usable project context. `source_ref`, when present, cannot be blank.
+
+`project_narrative_entry_links` stores optional structured hyperlinks for an entry. Each link includes:
+
+- an internal UUID `id`;
+- workspace and project ownership through `organisation_id` and `project_id`;
+- `narrative_entry_id` pointing at the parent entry;
+- required `label` and `url`;
+- `created_by` and `created_at` audit fields.
+
+Composite foreign keys require the link, parent Narrative entry, and project to belong to the same workspace. Link URLs are validated by the application and constrained in the database to `http://` or `https://` schemes. Unsafe schemes such as `javascript:` are rejected. Links are deleted with their parent entry. WT-NARRATIVE-003 does not add link editing or deletion UI.
 
 ## Entry numbering and references
 
@@ -59,8 +69,9 @@ Project access currently follows active workspace membership; there is no separa
 
 RLS and the application permission map enforce:
 
-- owners, admins, members, and viewers can read entries in an active workspace they belong to;
-- owners, admins, and members can create, update, and delete entries in that workspace;
+- owners, admins, members, and viewers can read entries and links in an active workspace they belong to;
+- owners, admins, and members can create entries and links in that workspace;
+- existing database policies still permit entry update/delete for readiness, but WT-NARRATIVE-003 exposes no edit or delete UI;
 - viewers cannot create, update, or delete entries;
 - users cannot read or mutate entries in another workspace;
 - client inserts cannot supply workspace ownership, entry numbers, Narrative references, or creator identity;
@@ -68,11 +79,13 @@ RLS and the application permission map enforce:
 
 The counter table has RLS enabled and no authenticated-client policies or grants. It is used only by the security-definer insert trigger and service-role maintenance.
 
-## Page and table layout
+## Page, creation modal, and detail modal
 
 The canonical route is `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/narrative`. It resolves active workspace membership and the project within that workspace, observes the internal `projectDiary` feature flag, checks `narrative.view`, and then uses the scoped Narrative list helper. The project dashboard's **Project Narrative** tile links to this route whenever the feature is accessible.
 
-The page hero contains the **Project Narrative** title, its helper text, the visible **Add narrative entry** action, and disabled foundation controls for entry/source type, attention, date range, and source. Manual entry creation and functional filtering remain deferred, so both areas explain their unavailable state. Viewers receive the same read access as other active members but no active mutation control.
+The page hero contains the **Project Narrative** title, its helper text, the visible **Create Project Narrative Entry** action, and disabled foundation controls for entry/source type, attention, date range, and source. Owners, admins, and members can open the create modal. Viewers see the same action disabled with helper text explaining that their role does not allow entry creation.
+
+The create modal captures Title, Attention level, Details, and optional Links. Title and Details are required, Attention defaults to Neutral, and allowed attention values remain `neutral`, `green`, `amber`, and `red`. Link rows require both a label and a safe URL. Successful manual saves use `source_type = manual`, leave `source_record_id` and `source_ref` null, close the modal through a redirect back to the page, and show the refreshed newest-first table.
 
 Entries render newest first in an accessible, horizontally scrollable table with exactly these columns:
 
@@ -82,19 +95,21 @@ Entries render newest first in an accessible, horizontally scrollable table with
 4. Created by
 5. Created
 
-There is deliberately no Type column. The internal `entry_number` remains audit/export-readiness data and is not a visible row-number column. Ref displays `source_ref` when present and otherwise `narrative_ref`. It is styled and focusable as the future detail interaction, while clearly marked unavailable until the source-record modal story is delivered.
+There is deliberately no Type column. The internal `entry_number` remains audit/export-readiness data and is not a visible row-number column. Ref displays `source_ref` when present and otherwise `narrative_ref`. Clicking the Ref opens a read-only detail modal without navigating away from the Project Narrative page.
 
 Attention displays both text and a colour treatment, including a quieter neutral state. Details render title and body as escaped Astro template content. Creator display uses profile name/email where the existing profile RLS relationship makes it available and otherwise shows `Workspace member`; UUIDs are not exposed. Creation timestamps currently use a simple explicit UTC display. A shared effective-viewer-timezone DTS helper remains future work.
 
-The empty state explains that future manual updates and RAID-linked activity will appear in one assurance timeline.
+The detail modal displays the Narrative reference, title, attention level, details, links, source type, source reference when present, created by/at, and updated by/at when present. For manual entries the source type displays as `Manual`; an empty source reference row is not shown.
+
+The empty state explains that future manual updates and RAID-linked activity will appear in one assurance timeline, while respecting the user's create permission.
 
 ## Data-access foundation
 
-`src/lib/projectNarrative.ts` centralises the allowed source and attention values and provides scoped list/create helpers. The page uses the list helper, which always filters by both workspace and project and sorts by `created_at` descending then `entry_number` descending. The create helper applies role checks and safe defaults, while the database remains the final validation and security boundary; the page does not call it because creation UI is outside this story.
+`src/lib/projectNarrative.ts` centralises the allowed source and attention values and provides scoped list/create helpers. The page uses the list helper, which always filters by both workspace and project and sorts by `created_at` descending then `entry_number` descending. The create helper applies role checks, requires manual Title and Details, defaults source fields to manual/null, validates link rows, rejects unsafe URL protocols, inserts the entry, and then attaches any structured links to the created entry scope. The database remains the final validation and security boundary.
 
 ## Validation
 
-Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, future source metadata, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, scoped newest-first listing, Ref selection, route/table structure, dashboard routing, and absence of out-of-scope integrations.
+Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, future source metadata, structured link schema/RLS, link validation, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, scoped newest-first listing, Ref/detail modal behavior, route/table structure, dashboard routing, and absence of out-of-scope integrations.
 
 For an environment with the Supabase CLI and local Docker runtime, validate the complete migration chain with:
 
@@ -107,10 +122,10 @@ Then exercise authenticated owner/member/viewer users in two workspaces to confi
 
 ## Explicitly deferred
 
-- Manual Narrative entry creation.
-- Source-record modal behaviour from Ref.
 - Risk-to-Narrative and other RAID event integrations.
+- Risk, Issue, Dependency, or Assumption creation from Narrative entries.
+- Promotion or conversion from Narrative to RAID.
 - Functional/full filter and search behaviour.
 - Notification, digest, attention-item, CSV export, AI, and browser badge behaviour.
-- Edit and delete UI. Before any delete UI is introduced, confirm whether Members retain delete permission or whether deletion becomes Owner/Admin-only or archive-based.
+- Edit and delete UI for entries or links. Before any delete UI is introduced, confirm whether Members retain delete permission or whether deletion becomes Owner/Admin-only or archive-based.
 - A shared effective-viewer-timezone DTS display helper.

@@ -1,7 +1,13 @@
 ---
 import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
-import { getNarrativeDisplayRef, listProjectNarrativeEntries } from '../../../../../../lib/projectNarrative';
+import {
+	createProjectNarrativeEntry,
+	getNarrativeDisplayRef,
+	isNarrativeAttentionLevel,
+	listProjectNarrativeEntries,
+	normaliseProjectNarrativeLinkUrl,
+} from '../../../../../../lib/projectNarrative';
 import { can } from '../../../../../../lib/permissions';
 import { buildProjectPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
@@ -14,6 +20,46 @@ let entries = [];
 let workspaceRole = '';
 let message = '';
 let featureAccess = getFeatureAccess('projectDiary');
+let createModalOpen = false;
+let saveMessage = '';
+let formValues = {
+	title: '',
+	attentionLevel: 'neutral',
+	details: '',
+};
+let formLinks = [];
+let formErrors = {};
+
+const parseLinkRows = (formData) => {
+	const labels = formData.getAll('link_label').map((value) => String(value ?? ''));
+	const urls = formData.getAll('link_url').map((value) => String(value ?? ''));
+	return Array.from({ length: Math.max(labels.length, urls.length) }, (_, index) => ({
+		label: labels[index] ?? '',
+		url: urls[index] ?? '',
+	}));
+};
+
+const validateForm = (values, links) => {
+	const errors = {};
+	if (!values.title.trim()) errors.title = 'Title is required.';
+	if (!values.details.trim()) errors.details = 'Details are required.';
+	if (!isNarrativeAttentionLevel(values.attentionLevel)) errors.attentionLevel = 'Select a valid attention level.';
+
+	links.forEach((link, index) => {
+		if (!link.label.trim()) errors[`link_label_${index}`] = 'Link label is required when adding a link.';
+		if (!link.url.trim()) {
+			errors[`link_url_${index}`] = 'Link URL is required when adding a link.';
+			return;
+		}
+		try {
+			normaliseProjectNarrativeLinkUrl(link.url);
+		} catch (error) {
+			errors[`link_url_${index}`] = error instanceof Error ? error.message : 'Enter a valid link URL.';
+		}
+	});
+
+	return errors;
+};
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -48,6 +94,42 @@ try {
 				Astro.response.status = featureAccess.state === 'hidden' ? 404 : 403;
 			} else {
 				project = data;
+				if (Astro.request.method === 'POST') {
+					const formData = await Astro.request.formData();
+					formValues = {
+						title: String(formData.get('title') ?? ''),
+						attentionLevel: String(formData.get('attention_level') ?? 'neutral'),
+						details: String(formData.get('details') ?? ''),
+					};
+					formLinks = parseLinkRows(formData);
+					createModalOpen = true;
+
+					if (!can(workspace.role, 'narrative.create')) {
+						formErrors = { general: 'Your workspace role does not permit Project Narrative entry creation.' };
+					} else {
+						formErrors = validateForm(formValues, formLinks);
+						if (Object.keys(formErrors).length === 0) {
+							try {
+								await createProjectNarrativeEntry(
+									{
+										projectId: data.id,
+										title: formValues.title,
+										attentionLevel: formValues.attentionLevel,
+										details: formValues.details,
+										createdTimezone: String(formData.get('created_timezone') ?? ''),
+										links: formLinks,
+									},
+									workspace.role,
+									serverSupabase,
+								);
+								return Astro.redirect(Astro.url.pathname);
+							} catch (error) {
+								formErrors = { general: error instanceof Error ? error.message : 'Unable to save narrative entry.' };
+							}
+						}
+					}
+					saveMessage = formErrors.general ?? 'Please fix the highlighted fields.';
+				}
 				entries = await listProjectNarrativeEntries(organisation.id, data.id, workspace.role, serverSupabase);
 			}
 		}
@@ -59,13 +141,36 @@ try {
 
 const canCreateNarrative = can(workspaceRole, 'narrative.create');
 const formatAttention = (value) => value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Neutral';
+const formatSourceType = (value) => {
+	if (!value) return 'Manual';
+	const labels = { manual: 'Manual', risk: 'Risk', issue: 'Issue', dependency: 'Dependency', assumption: 'Assumption', system: 'System' };
+	return labels[value] ?? formatAttention(value);
+};
 const formatCreatedAt = (value) => value
 	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
 	: 'Not available';
-const creatorName = (entry) => {
-	const creator = Array.isArray(entry.creator) ? entry.creator[0] : entry.creator;
-	return creator?.display_name || creator?.email || 'Workspace member';
+const profileName = (profile) => {
+	const resolvedProfile = Array.isArray(profile) ? profile[0] : profile;
+	return resolvedProfile?.display_name || resolvedProfile?.email || 'Workspace member';
 };
+const creatorName = (entry) => profileName(entry.creator);
+const updaterName = (entry) => entry.updated_by ? profileName(entry.updater) : '';
+const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
+	id: entry.id,
+	displayRef: getNarrativeDisplayRef(entry),
+	narrativeRef: entry.narrative_ref,
+	sourceType: formatSourceType(entry.source_type),
+	sourceRef: entry.source_ref,
+	attentionLevel: entry.attention_level,
+	attentionLabel: formatAttention(entry.attention_level),
+	title: entry.title,
+	details: entry.details,
+	links: entry.links ?? [],
+	createdBy: creatorName(entry),
+	createdAt: formatCreatedAt(entry.created_at),
+	updatedBy: updaterName(entry),
+	updatedAt: entry.updated_at ? formatCreatedAt(entry.updated_at) : '',
+}))).replace(/</g, '\\u003c');
 ---
 <AuthenticatedLayout title={project ? `Project Narrative — ${project.name} | WatchTower` : 'Project Narrative | WatchTower'}>
 	<section class="narrative-page" data-project-narrative-route data-feature-state={featureAccess.state}>
@@ -79,14 +184,24 @@ const creatorName = (entry) => {
 							<p>A project-level timeline of key events, updates and decisions.</p>
 						</div>
 						<div class="narrative-action">
-							<span
-								class="button button--primary"
-								aria-disabled="true"
-								aria-describedby="narrative-action-help"
-								data-viewer-read-only={!canCreateNarrative || undefined}
-							>Add narrative entry</span>
+							{canCreateNarrative ? (
+								<button
+									class="button button--primary"
+									type="button"
+									aria-describedby="narrative-action-help"
+									data-open-create-narrative
+								>Create Project Narrative Entry</button>
+							) : (
+								<button
+									class="button button--primary"
+									type="button"
+									disabled
+									aria-describedby="narrative-action-help"
+									data-viewer-read-only
+								>Create Project Narrative Entry</button>
+							)}
 							<small id="narrative-action-help">
-								{canCreateNarrative ? 'Manual entry creation will be added in a later story.' : 'Viewer access is read-only. Manual entry creation is unavailable.'}
+								{canCreateNarrative ? 'Capture a manual project update without creating or changing a RAID record.' : 'Viewer access is read-only. Your role does not allow entry creation.'}
 							</small>
 						</div>
 					</div>
@@ -114,11 +229,11 @@ const creatorName = (entry) => {
 						<div class="narrative-empty" data-narrative-empty-state>
 							<h3>No narrative entries yet.</h3>
 							<p>Project Narrative will show key project events, manual updates and future RAID-linked activity in one assurance timeline.</p>
-							<p>Manual entry creation will be added in a later story.</p>
+							<p>{canCreateNarrative ? 'Create the first manual entry when there is project context to capture.' : 'Viewer access is read-only, so entry creation is unavailable for your role.'}</p>
 						</div>
 					) : (
 						<>
-							<p id="narrative-ref-help" class="narrative-helper">Reference details will open from this column in a later story.</p>
+							<p id="narrative-ref-help" class="narrative-helper">Open an entry to inspect its full read-only details.</p>
 							<div class="narrative-table-scroll">
 								<table class="simple-table narrative-table">
 									<thead>
@@ -127,7 +242,7 @@ const creatorName = (entry) => {
 									<tbody>
 										{entries.map((entry) => (
 											<tr>
-												<td><button class="narrative-ref" type="button" aria-disabled="true" aria-describedby="narrative-ref-help">{getNarrativeDisplayRef(entry)}</button></td>
+												<td><button class="narrative-ref" type="button" aria-describedby="narrative-ref-help" data-entry-id={entry.id}>{getNarrativeDisplayRef(entry)}</button></td>
 												<td><span class={`attention-badge attention-badge--${entry.attention_level}`}><span aria-hidden="true" class="attention-badge__dot"></span>{formatAttention(entry.attention_level)}</span></td>
 												<td class="narrative-details">{entry.title && <strong>{entry.title}</strong>}{entry.details && <span>{entry.details}</span>}</td>
 												<td>{creatorName(entry)}</td>
@@ -140,6 +255,272 @@ const creatorName = (entry) => {
 						</>
 					)}
 				</section>
+
+				<dialog class="narrative-modal" aria-labelledby="create-narrative-title" data-create-narrative-modal data-open-on-load={createModalOpen || undefined}>
+					<form method="dialog" class="narrative-modal__close-form">
+						<button class="narrative-modal__close" type="submit" aria-label="Close create narrative entry modal">Close</button>
+					</form>
+					<form class="narrative-form" method="post" novalidate data-create-narrative-form>
+						<div>
+							<p class="eyebrow">Manual entry</p>
+							<h2 id="create-narrative-title">Create Project Narrative Entry</h2>
+							<p>This entry will be saved to Project Narrative. It will not create or update a Risk, Issue, Dependency or Assumption.</p>
+						</div>
+
+						{saveMessage && <p class="form-message narrative-form__message" role="alert">{saveMessage}</p>}
+
+						<label for="narrative-title">Title <span aria-hidden="true">*</span></label>
+						<input
+							id="narrative-title"
+							name="title"
+							value={formValues.title}
+							required
+							aria-required="true"
+							aria-invalid={Boolean(formErrors.title) || undefined}
+							aria-describedby={formErrors.title ? 'narrative-title-error' : undefined}
+							autocomplete="off"
+						/>
+						{formErrors.title && <p class="field-error" id="narrative-title-error">{formErrors.title}</p>}
+
+						<fieldset class="narrative-attention" aria-describedby={formErrors.attentionLevel ? 'narrative-attention-error' : undefined}>
+							<legend>Attention level <span aria-hidden="true">*</span></legend>
+							{['neutral', 'green', 'amber', 'red'].map((level) => (
+								<label>
+									<input type="radio" name="attention_level" value={level} required checked={formValues.attentionLevel === level} />
+									<span>{formatAttention(level)}</span>
+								</label>
+							))}
+						</fieldset>
+						{formErrors.attentionLevel && <p class="field-error" id="narrative-attention-error">{formErrors.attentionLevel}</p>}
+
+						<label for="narrative-details">Details <span aria-hidden="true">*</span></label>
+						<textarea
+							id="narrative-details"
+							name="details"
+							rows="6"
+							required
+							aria-required="true"
+							aria-invalid={Boolean(formErrors.details) || undefined}
+							aria-describedby={formErrors.details ? 'narrative-details-error' : undefined}
+						>{formValues.details}</textarea>
+						{formErrors.details && <p class="field-error" id="narrative-details-error">{formErrors.details}</p>}
+
+						<fieldset class="narrative-links" data-link-list aria-describedby="narrative-links-help">
+							<legend>Links</legend>
+							<p id="narrative-links-help">Add supporting links only when they are useful evidence or context.</p>
+							{formLinks.map((link, index) => (
+								<div class="narrative-link-row" data-link-row>
+									<label for={`link-label-${index}`}>Label <span aria-hidden="true">*</span></label>
+									<input
+										id={`link-label-${index}`}
+										name="link_label"
+										value={link.label}
+										aria-invalid={Boolean(formErrors[`link_label_${index}`]) || undefined}
+										aria-describedby={formErrors[`link_label_${index}`] ? `link-label-error-${index}` : undefined}
+									/>
+									{formErrors[`link_label_${index}`] && <p class="field-error" id={`link-label-error-${index}`}>{formErrors[`link_label_${index}`]}</p>}
+									<label for={`link-url-${index}`}>URL <span aria-hidden="true">*</span></label>
+									<input
+										id={`link-url-${index}`}
+										name="link_url"
+										value={link.url}
+										inputmode="url"
+										aria-invalid={Boolean(formErrors[`link_url_${index}`]) || undefined}
+										aria-describedby={formErrors[`link_url_${index}`] ? `link-url-error-${index}` : undefined}
+									/>
+									{formErrors[`link_url_${index}`] && <p class="field-error" id={`link-url-error-${index}`}>{formErrors[`link_url_${index}`]}</p>}
+									<button class="button button--secondary" type="button" data-remove-link>Remove link</button>
+								</div>
+							))}
+						</fieldset>
+						<button class="button button--secondary narrative-add-link" type="button" data-add-link>Add another link</button>
+						<input type="hidden" name="created_timezone" value="" data-created-timezone />
+
+						<div class="narrative-form__actions">
+							<button class="button button--secondary" type="button" data-close-create-narrative>Cancel</button>
+							<button class="button button--primary" type="submit">Save entry</button>
+						</div>
+					</form>
+				</dialog>
+
+				<dialog class="narrative-modal narrative-detail-modal" aria-labelledby="narrative-detail-title" data-detail-modal>
+					<form method="dialog" class="narrative-modal__close-form">
+						<button class="narrative-modal__close" type="submit" aria-label="Close narrative entry detail modal">Close</button>
+					</form>
+					<div class="narrative-detail">
+						<div>
+							<p class="eyebrow" data-detail-ref></p>
+							<h2 id="narrative-detail-title" data-detail-title></h2>
+							<span class="attention-badge" data-detail-attention></span>
+						</div>
+						<section>
+							<h3>Details</h3>
+							<p data-detail-body></p>
+						</section>
+						<section data-detail-links-section hidden>
+							<h3>Links</h3>
+							<ul data-detail-links></ul>
+						</section>
+						<dl class="narrative-detail__meta">
+							<div><dt>Narrative reference</dt><dd data-detail-narrative-ref></dd></div>
+							<div><dt>Source type</dt><dd data-detail-source-type></dd></div>
+							<div data-detail-source-ref-row hidden><dt>Source reference</dt><dd data-detail-source-ref></dd></div>
+							<div><dt>Created by</dt><dd data-detail-created-by></dd></div>
+							<div><dt>Created</dt><dd data-detail-created-at></dd></div>
+							<div data-detail-updated-by-row hidden><dt>Updated by</dt><dd data-detail-updated-by></dd></div>
+							<div data-detail-updated-at-row hidden><dt>Updated</dt><dd data-detail-updated-at></dd></div>
+						</dl>
+					</div>
+				</dialog>
+
+				<script type="application/json" id="narrative-entry-data" set:html={narrativeEntriesJson}></script>
+				<script>
+					const createModal = document.querySelector('[data-create-narrative-modal]');
+					const createTrigger = document.querySelector('[data-open-create-narrative]');
+					const createCancel = document.querySelector('[data-close-create-narrative]');
+					const createForm = document.querySelector('[data-create-narrative-form]');
+					const linkList = document.querySelector('[data-link-list]');
+					const addLinkButton = document.querySelector('[data-add-link]');
+					const timezoneInput = document.querySelector('[data-created-timezone]');
+					const detailModal = document.querySelector('[data-detail-modal]');
+					const entriesData = JSON.parse(document.getElementById('narrative-entry-data')?.textContent || '[]');
+					const entriesById = new Map(entriesData.map((entry) => [entry.id, entry]));
+					let lastTrigger = null;
+
+					const openDialog = (dialog, trigger) => {
+						if (!(dialog instanceof HTMLDialogElement)) return;
+						lastTrigger = trigger instanceof HTMLElement ? trigger : null;
+						if (!dialog.open) dialog.showModal();
+					};
+
+					const closeCreateModal = () => {
+						if (createModal instanceof HTMLDialogElement) createModal.close();
+					};
+
+					createTrigger?.addEventListener('click', (event) => openDialog(createModal, event.currentTarget));
+					createCancel?.addEventListener('click', closeCreateModal);
+					createModal?.addEventListener('close', () => {
+						if (lastTrigger instanceof HTMLElement) lastTrigger.focus();
+					});
+					detailModal?.addEventListener('close', () => {
+						if (lastTrigger instanceof HTMLElement) lastTrigger.focus();
+					});
+
+					if (createModal instanceof HTMLDialogElement && createModal.dataset.openOnLoad === 'true') {
+						createModal.showModal();
+					}
+
+					if (timezoneInput instanceof HTMLInputElement) {
+						timezoneInput.value = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+					}
+
+					const linkRowCount = () => linkList?.querySelectorAll('[data-link-row]').length ?? 0;
+					const addLinkRow = () => {
+						if (!(linkList instanceof HTMLElement)) return;
+						const index = linkRowCount();
+						const row = document.createElement('div');
+						row.className = 'narrative-link-row';
+						row.dataset.linkRow = '';
+
+						const labelLabel = document.createElement('label');
+						labelLabel.setAttribute('for', `link-label-${index}`);
+						labelLabel.textContent = 'Label *';
+						const labelInput = document.createElement('input');
+						labelInput.id = `link-label-${index}`;
+						labelInput.name = 'link_label';
+
+						const urlLabel = document.createElement('label');
+						urlLabel.setAttribute('for', `link-url-${index}`);
+						urlLabel.textContent = 'URL *';
+						const urlInput = document.createElement('input');
+						urlInput.id = `link-url-${index}`;
+						urlInput.name = 'link_url';
+						urlInput.inputMode = 'url';
+
+						const removeButton = document.createElement('button');
+						removeButton.className = 'button button--secondary';
+						removeButton.type = 'button';
+						removeButton.dataset.removeLink = '';
+						removeButton.textContent = 'Remove link';
+
+						row.append(labelLabel, labelInput, urlLabel, urlInput, removeButton);
+						linkList.append(row);
+						labelInput.focus();
+					};
+
+					addLinkButton?.addEventListener('click', addLinkRow);
+					linkList?.addEventListener('click', (event) => {
+						const target = event.target;
+						if (!(target instanceof HTMLElement) || !target.matches('[data-remove-link]')) return;
+						target.closest('[data-link-row]')?.remove();
+					});
+
+					createForm?.addEventListener('submit', () => {
+						if (timezoneInput instanceof HTMLInputElement) {
+							timezoneInput.value = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+						}
+					});
+
+					const setText = (selector, value) => {
+						const target = detailModal?.querySelector(selector);
+						if (target) target.textContent = value || 'Not available';
+					};
+
+					const setOptionalRow = (rowSelector, valueSelector, value) => {
+						const row = detailModal?.querySelector(rowSelector);
+						const target = detailModal?.querySelector(valueSelector);
+						if (!(row instanceof HTMLElement) || !target) return;
+						row.hidden = !value;
+						target.textContent = value || '';
+					};
+
+					const openDetail = (entry, trigger) => {
+						if (!(detailModal instanceof HTMLDialogElement)) return;
+						setText('[data-detail-ref]', entry.displayRef);
+						setText('[data-detail-title]', entry.title);
+						const attention = detailModal.querySelector('[data-detail-attention]');
+						if (attention instanceof HTMLElement) {
+							attention.className = `attention-badge attention-badge--${entry.attentionLevel}`;
+							attention.textContent = entry.attentionLabel;
+						}
+						setText('[data-detail-body]', entry.details);
+						setText('[data-detail-narrative-ref]', entry.narrativeRef);
+						setText('[data-detail-source-type]', entry.sourceType);
+						setOptionalRow('[data-detail-source-ref-row]', '[data-detail-source-ref]', entry.sourceRef);
+						setText('[data-detail-created-by]', entry.createdBy);
+						setText('[data-detail-created-at]', entry.createdAt);
+						setOptionalRow('[data-detail-updated-by-row]', '[data-detail-updated-by]', entry.updatedBy);
+						setOptionalRow('[data-detail-updated-at-row]', '[data-detail-updated-at]', entry.updatedAt);
+
+						const linksSection = detailModal.querySelector('[data-detail-links-section]');
+						const linksList = detailModal.querySelector('[data-detail-links]');
+						if (linksSection instanceof HTMLElement && linksList) {
+							linksList.replaceChildren();
+							linksSection.hidden = entry.links.length === 0;
+							entry.links.forEach((link) => {
+								const item = document.createElement('li');
+								const anchor = document.createElement('a');
+								anchor.href = link.url;
+								anchor.textContent = link.label;
+								anchor.rel = 'noreferrer';
+								anchor.target = '_blank';
+								item.append(anchor);
+								linksList.append(item);
+							});
+						}
+
+						openDialog(detailModal, trigger);
+					};
+
+					document.querySelectorAll('[data-entry-id]').forEach((button) => {
+						button.addEventListener('click', (event) => {
+							const target = event.currentTarget;
+							if (!(target instanceof HTMLElement)) return;
+							const entry = entriesById.get(target.dataset.entryId);
+							if (entry) openDetail(entry, target);
+						});
+					});
+				</script>
 			</>
 		) : (
 			<section class="content-card" data-feature-unavailable-message>
@@ -159,7 +540,7 @@ const creatorName = (entry) => {
 	.narrative-hero__heading h1, .narrative-table-card__heading h2 { margin-bottom: 0.35rem; }
 	.narrative-hero__heading p:not(.eyebrow) { margin: 0; color: var(--muted-strong); }
 	.narrative-action { display: grid; justify-items: end; gap: 0.45rem; max-width: 21rem; text-align: right; }
-	.narrative-action [aria-disabled='true'] { opacity: 0.68; cursor: not-allowed; }
+	.narrative-action [disabled] { opacity: 0.68; cursor: not-allowed; }
 	.narrative-action small, .narrative-helper { color: var(--muted-strong); font-size: 0.85rem; }
 	.narrative-filters { display: grid; grid-template-columns: repeat(4, minmax(9rem, 1fr)); gap: 0.9rem; margin: 0; border: 0; padding: 0; }
 	.narrative-filters legend { grid-column: 1 / -1; margin-bottom: 0.15rem; color: var(--text); font-weight: 850; }
@@ -176,7 +557,7 @@ const creatorName = (entry) => {
 	.narrative-table th:nth-child(4) { width: 11rem; }
 	.narrative-table th:last-child { width: 12rem; }
 	.narrative-table td { vertical-align: top; }
-	.narrative-ref { border: 0; padding: 0.15rem 0.2rem; background: transparent; color: var(--accent-strong); font: inherit; font-weight: 900; text-decoration: underline; text-decoration-thickness: 0.08em; text-underline-offset: 0.18em; cursor: not-allowed; }
+	.narrative-ref { border: 0; padding: 0.15rem 0.2rem; background: transparent; color: var(--accent-strong); font: inherit; font-weight: 900; text-decoration: underline; text-decoration-thickness: 0.08em; text-underline-offset: 0.18em; cursor: pointer; }
 	.narrative-ref:focus-visible { border-radius: 0.25rem; outline: 3px solid var(--accent-strong); outline-offset: 3px; }
 	.attention-badge { display: inline-flex; align-items: center; gap: 0.45rem; border: 1px solid color-mix(in srgb, var(--attention-tone) 65%, transparent); border-radius: 999px; padding: 0.25rem 0.55rem; color: var(--text); font-size: 0.82rem; font-weight: 850; }
 	.attention-badge__dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--attention-tone); }
@@ -191,10 +572,47 @@ const creatorName = (entry) => {
 	.narrative-empty { border: 1px dashed var(--border); border-radius: 1rem; padding: clamp(1.2rem, 3vw, 2rem); background: rgba(4, 12, 24, 0.35); text-align: center; }
 	.narrative-empty h3 { margin-top: 0; }
 	.narrative-empty p { max-width: 48rem; margin-inline: auto; color: var(--muted-strong); }
+	.narrative-modal { width: min(92vw, 44rem); max-height: 88vh; overflow: auto; border: 1px solid var(--border); border-radius: 1rem; padding: 0; background: #0b1724; color: var(--text); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.46); }
+	.narrative-modal::backdrop { background: rgba(0, 0, 0, 0.68); }
+	.narrative-modal__close-form { position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end; padding: 0.65rem 0.75rem 0; background: linear-gradient(180deg, #0b1724 72%, rgba(11, 23, 36, 0)); }
+	.narrative-modal__close { border: 1px solid var(--border); border-radius: 999px; padding: 0.35rem 0.7rem; background: rgba(255, 255, 255, 0.06); color: var(--muted-strong); font: inherit; font-size: 0.82rem; font-weight: 850; cursor: pointer; }
+	.narrative-form, .narrative-detail { display: grid; gap: 0.9rem; padding: 0 1.25rem 1.25rem; }
+	.narrative-form h2, .narrative-detail h2 { margin: 0 0 0.35rem; font-size: 1.7rem; }
+	.narrative-form p, .narrative-detail p, .narrative-detail dd { color: var(--muted-strong); }
+	.narrative-form label, .narrative-links legend, .narrative-attention legend { color: var(--muted-strong); font-size: 0.86rem; font-weight: 850; }
+	.narrative-form input, .narrative-form textarea { width: 100%; border: 1px solid var(--border); border-radius: 0.75rem; padding: 0.75rem 0.85rem; background: #07111d; color: var(--text); font: inherit; }
+	.narrative-form input[aria-invalid='true'], .narrative-form textarea[aria-invalid='true'] { border-color: #ff817a; box-shadow: 0 0 0 2px rgba(255, 69, 58, 0.16); }
+	.narrative-form__message { margin: 0; }
+	.field-error { margin: -0.55rem 0 0; color: #ffb4ae; font-size: 0.84rem; font-weight: 750; }
+	.narrative-attention, .narrative-links { display: grid; gap: 0.65rem; margin: 0; border: 1px solid var(--border); border-radius: 0.9rem; padding: 0.85rem; }
+	.narrative-attention { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+	.narrative-attention legend, .narrative-links legend { padding-inline: 0.35rem; }
+	.narrative-attention label { display: flex; align-items: center; gap: 0.4rem; color: var(--text); font-size: 0.9rem; }
+	.narrative-links p { margin: 0; font-size: 0.86rem; }
+	.narrative-link-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.5rem; align-items: end; padding-top: 0.7rem; border-top: 1px solid var(--border); }
+	.narrative-link-row label:nth-of-type(1) { grid-column: 1; }
+	.narrative-link-row input:nth-of-type(1) { grid-column: 1; }
+	.narrative-link-row label:nth-of-type(2) { grid-column: 2; grid-row: 1; }
+	.narrative-link-row input:nth-of-type(2) { grid-column: 2; }
+	.narrative-link-row .button { grid-column: 3; grid-row: 2; white-space: nowrap; }
+	.narrative-link-row .field-error { grid-column: span 1; }
+	.narrative-add-link { justify-self: start; }
+	.narrative-form__actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.25rem; }
+	.narrative-detail section { display: grid; gap: 0.35rem; }
+	.narrative-detail h3 { margin: 0; font-size: 1rem; }
+	.narrative-detail ul { display: grid; gap: 0.4rem; margin: 0; padding-left: 1.1rem; }
+	.narrative-detail a { color: var(--accent-strong); font-weight: 850; }
+	.narrative-detail__meta { display: grid; gap: 0.65rem; margin: 0; padding-top: 0.85rem; border-top: 1px solid var(--border); }
+	.narrative-detail__meta div { display: grid; grid-template-columns: minmax(9rem, 0.45fr) 1fr; gap: 0.75rem; }
+	.narrative-detail__meta dt { color: var(--text); font-weight: 850; }
+	.narrative-detail__meta dd { margin: 0; overflow-wrap: anywhere; }
 	@media (max-width: 760px) {
 		.narrative-hero__heading, .narrative-table-card__heading { display: grid; }
 		.narrative-action { justify-items: start; max-width: none; text-align: left; }
 		.narrative-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+		.narrative-attention, .narrative-link-row, .narrative-detail__meta div { grid-template-columns: 1fr; }
+		.narrative-link-row label:nth-of-type(2), .narrative-link-row input:nth-of-type(2), .narrative-link-row .button { grid-column: 1; grid-row: auto; }
+		.narrative-form__actions { display: grid; }
 	}
 	@media (max-width: 460px) { .narrative-filters { grid-template-columns: 1fr; } }
 </style>
