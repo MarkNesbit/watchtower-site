@@ -1,15 +1,29 @@
 ---
 import SignOutButton from './auth/SignOutButton.astro';
 
-const navItems = [
+const publicNavItems = [
 	{ href: '/', label: 'Home' },
 	{ href: '/products', label: 'Products' },
 	{ href: '/roadmap', label: 'Roadmap' },
 	{ href: '/about', label: 'About' },
 ];
+const appNavItems = [
+	{ href: '/app', label: 'Dashboard', exact: true },
+	{ href: '/app/projects', label: 'Projects' },
+	{ label: 'Workspace' },
+	{ label: 'Account' },
+];
 
 const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/';
 const hasAuthCookie = Boolean(Astro.cookies.get('wt-access-token')?.value);
+
+const isActivePath = (href: string, exact = false) => {
+	const normalizedHref = href.replace(/\/$/, '') || '/';
+	if (exact) return currentPath === normalizedHref;
+	return normalizedHref === '/'
+		? currentPath === '/'
+		: currentPath === normalizedHref || currentPath.startsWith(`${normalizedHref}/`);
+};
 ---
 
 <header class="site-header">
@@ -17,20 +31,23 @@ const hasAuthCookie = Boolean(Astro.cookies.get('wt-access-token')?.value);
 		<img src="/images/watchtower-logo.svg" alt="WatchTower logo" />
 	</a>
 	<div class="header-actions">
-		<nav class="nav" aria-label="Primary navigation">
-			{navItems.map((item) => {
-				const normalizedHref = item.href.replace(/\/$/, '') || '/';
-				const isActive =
-					normalizedHref === '/'
-						? currentPath === '/'
-						: currentPath === normalizedHref || currentPath.startsWith(`${normalizedHref}/`);
-
-				return (
-					<a href={item.href} aria-current={isActive ? 'page' : undefined}>
-						{item.label}
-					</a>
-				);
-			})}
+		<nav class="nav" aria-label="Primary navigation" data-public-nav hidden={hasAuthCookie || undefined}>
+			{publicNavItems.map((item) => (
+				<a href={item.href} aria-current={isActivePath(item.href) ? 'page' : undefined}>
+					{item.label}
+				</a>
+			))}
+		</nav>
+		<nav class="nav" aria-label="App navigation" data-app-nav hidden={!hasAuthCookie || undefined}>
+			{appNavItems.map((item) => item.href ? (
+				<a href={item.href} aria-current={isActivePath(item.href, item.exact) ? 'page' : undefined}>
+					{item.label}
+				</a>
+			) : (
+				<span class="nav__item nav__item--disabled" aria-disabled="true" title={`${item.label} navigation is not available yet.`}>
+					{item.label}
+				</span>
+			))}
 		</nav>
 		<a class="login-slot" href="/login" data-header-login hidden={hasAuthCookie || undefined}>Login</a>
 		<div data-header-sign-out hidden={!hasAuthCookie || undefined}>
@@ -43,10 +60,14 @@ const hasAuthCookie = Boolean(Astro.cookies.get('wt-access-token')?.value);
 
 	const loginLink = document.querySelector('[data-header-login]');
 	const signOutAction = document.querySelector('[data-header-sign-out]');
+	const publicNav = document.querySelector('[data-public-nav]');
+	const appNav = document.querySelector('[data-app-nav]');
 
 	function setHeaderAuthState(session) {
 		loginLink?.toggleAttribute('hidden', Boolean(session));
 		signOutAction?.toggleAttribute('hidden', !session);
+		publicNav?.toggleAttribute('hidden', Boolean(session));
+		appNav?.toggleAttribute('hidden', !session);
 	}
 
 	const { data } = await supabase.auth.getSession();

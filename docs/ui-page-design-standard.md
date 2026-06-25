@@ -24,6 +24,10 @@ Authenticated project pages should normally use this order:
 
 The pattern is deliberately lightweight. Pages can omit optional regions when they do not apply, but they should not invent unrelated header, action, or empty-state structures.
 
+Authenticated pages should use the app navigation in the global header and should not add a second workspace/project navigation strip between the header and the project hero. The header-to-hero gap should follow the same compact rhythm used between the hero, control panel, and content panel.
+
+The authenticated header currently links Dashboard and Projects to implemented routes. Workspace and Account are visible as disabled navigation entries until dedicated routes exist; do not point them at unrelated pages.
+
 ## Hero And Context Panel
 
 Use `ProjectPageHero` for project-level pages that need the standard context panel.
@@ -54,7 +58,7 @@ The panel should provide:
 
 - Section label.
 - Section title.
-- Helper text.
+- Optional helper text, only when the content needs extra context.
 - A consistent top-right primary action slot on desktop.
 - A clearly reachable action position on mobile before the main content.
 

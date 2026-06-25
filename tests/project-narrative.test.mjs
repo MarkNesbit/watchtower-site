@@ -508,7 +508,6 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	const controlPanel = await readFile(new URL('../src/components/app/ProjectControlPanel.astro', import.meta.url), 'utf8');
 	const contentPanel = await readFile(new URL('../src/components/app/ProjectContentPanel.astro', import.meta.url), 'utf8');
 	const emptyState = await readFile(new URL('../src/components/app/EmptyState.astro', import.meta.url), 'utf8');
-	const disabledActionHint = await readFile(new URL('../src/components/app/DisabledActionHint.astro', import.meta.url), 'utf8');
 
 	assert.match(page, /data-project-narrative-route/);
 	assert.match(page, /<ProjectPageHero/);
@@ -523,11 +522,11 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /<ProjectContentPanel/);
 	assert.match(page, /label="Assurance timeline"/);
 	assert.match(page, /title="Narrative entries"/);
+	assert.doesNotMatch(page, /helper="Open an entry to inspect its full read-only details\."/);
 	assert.match(contentPanel, /<slot name="action" \/>/);
 	assert.match(page, />New Entry<\/button>/);
 	assert.match(page, /data-open-create-narrative/);
-	assert.match(page, /<DisabledActionHint/);
-	assert.match(disabledActionHint, /<small class="disabled-action-hint" id=\{id\}>/);
+	assert.doesNotMatch(page, /<DisabledActionHint|narrative-action-help|Capture a manual project update/);
 	assert.match(page, /data-create-narrative-modal/);
 	assert.match(page, /data-create-narrative-form/);
 	assert.match(page, /name="title"[\s\S]*?required/);
@@ -545,6 +544,7 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /data-detail-links/);
 	assert.match(page, /showModal\(\)/);
 	assert.match(page, /detailModal\?\.addEventListener\('close'/);
+	assert.doesNotMatch(page, /narrative-ref-help|Open an entry to inspect its full read-only details\./);
 	assert.match(page, /entriesLoadError/);
 	assert.match(page, /<EmptyState title="Project Narrative entries could not be loaded\."/);
 	assert.match(emptyState, /class=\{`empty-state empty-state--\$\{tone\}`\}/);
