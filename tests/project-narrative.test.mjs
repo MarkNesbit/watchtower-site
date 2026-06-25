@@ -516,6 +516,9 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /projectName=\{project\.name\}/);
 	assert.match(page, /title="Project Narrative"/);
 	assert.match(hero, /<h1 id=\{headingId\}>\{title\}<\/h1>/);
+	assert.match(hero, /min-height: clamp\(11\.5rem, 20vw, 14\.5rem\)/);
+	assert.match(hero, /font-size: clamp\(2rem, 3\.2vw, 3\.2rem\)/);
+	assert.match(hero, /width: min\(100%, 11\.5rem\)/);
 	assert.match(page, /A project-level timeline of key events, updates and decisions\./);
 	assert.match(page, /<ProjectContentPanel/);
 	assert.match(page, /label="Assurance timeline"/);

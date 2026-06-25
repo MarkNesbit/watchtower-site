@@ -1,12 +1,29 @@
-<button class="button button--secondary" type="button" data-sign-out>Sign out</button>
+---
+type Props = {
+	className?: string;
+	label?: string;
+};
+
+const { className = 'button button--secondary', label = 'Sign out' } = Astro.props;
+---
+
+<button class={className} type="button" data-sign-out>{label}</button>
 <script>
 	import { recordAuthAuditEvent } from '../../lib/authClient';
 	import { supabase } from '../../lib/supabaseClient';
-	document.querySelector('[data-sign-out]')?.addEventListener('click', async () => {
-		await recordAuthAuditEvent('user.logged_out');
-		await supabase.auth.signOut();
-		document.cookie = 'wt-access-token=; path=/; max-age=0; SameSite=Lax';
-		document.cookie = 'wt-refresh-token=; path=/; max-age=0; SameSite=Lax';
-		window.location.assign('/login');
-	});
+
+	const signOutBindingKey = '__watchtowerSignOutBound';
+	if (!Reflect.get(window, signOutBindingKey)) {
+		Reflect.set(window, signOutBindingKey, true);
+		document.addEventListener('click', async (event) => {
+			const target = event.target;
+			if (!(target instanceof Element) || !target.closest('[data-sign-out]')) return;
+
+			await recordAuthAuditEvent('user.logged_out');
+			await supabase.auth.signOut();
+			document.cookie = 'wt-access-token=; path=/; max-age=0; SameSite=Lax';
+			document.cookie = 'wt-refresh-token=; path=/; max-age=0; SameSite=Lax';
+			window.location.assign('/login');
+		});
+	}
 </script>
