@@ -56,7 +56,7 @@ Use `ProjectContentPanel` for the primary page content area.
 
 The panel should provide:
 
-- Section label.
+- Optional section label when it adds context not already present in the page title.
 - Section title.
 - Optional helper text, only when the content needs extra context.
 - A consistent top-right primary action slot on desktop.

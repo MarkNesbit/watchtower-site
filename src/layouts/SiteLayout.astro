@@ -362,11 +362,22 @@ const {
 	.button {
 		min-height: 3.15rem;
 		padding: 0.9rem 1.2rem;
+		cursor: pointer;
 	}
 
 	.button:hover,
 	.text-link:hover {
 		transform: translateY(-1px);
+	}
+
+	.button:focus-visible {
+		outline: 3px solid var(--accent-strong);
+		outline-offset: 3px;
+	}
+
+	.button:disabled,
+	.button[aria-disabled='true'] {
+		cursor: not-allowed;
 	}
 
 	.button--primary {

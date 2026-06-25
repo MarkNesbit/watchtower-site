@@ -90,14 +90,13 @@ The create modal captures Title, Attention level, Details, and optional Links. T
 Entries render newest first in an accessible, horizontally scrollable table with exactly these columns:
 
 1. Ref
-2. Attention
-3. Details
-4. Created by
-5. Created
+2. Details
+3. Created by
+4. Created
 
-There is deliberately no Type column. The internal `entry_number` remains audit/export-readiness data and is not a visible row-number column. Ref displays `source_ref` when present and otherwise `narrative_ref`. Clicking the Ref opens a read-only detail modal without navigating away from the Project Narrative page.
+There is deliberately no Type or separate Attention column. The internal `entry_number` remains audit/export-readiness data and is not a visible row-number column. Ref displays `source_ref` when present and otherwise `narrative_ref` as a RAG/attention pill with a visible attention label. Clicking the Ref opens a read-only detail modal without navigating away from the Project Narrative page.
 
-Attention displays both text and a colour treatment, including a quieter neutral state. Details render title and body as escaped Astro template content. Creator display uses profile name/email where the existing profile RLS relationship makes it available and otherwise shows `Workspace member`; UUIDs are not exposed. Creation timestamps currently use a simple explicit UTC display. A shared effective-viewer-timezone DTS helper remains future work.
+The Ref pill displays both text and a colour treatment, including a quieter neutral state, so attention is not conveyed by colour alone. Details render title and body as escaped Astro template content. Creator display uses profile name/email where the existing profile RLS relationship makes it available and otherwise shows `Workspace member`; UUIDs are not exposed. Creation timestamps currently use a simple explicit UTC display. A shared effective-viewer-timezone DTS helper remains future work.
 
 The detail modal displays the Narrative reference, title, attention level, details, links, source type, source reference when present, created by/at, and updated by/at when present. For manual entries the source type displays as `Manual`; an empty source reference row is not shown.
 
