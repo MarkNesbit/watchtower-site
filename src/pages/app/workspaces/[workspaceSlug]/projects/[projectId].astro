@@ -3,7 +3,7 @@ import AuthenticatedLayout from '../../../../../layouts/AuthenticatedLayout.astr
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../lib/featureFlags';
 import type { FeatureAccess, FeatureKey } from '../../../../../lib/featureFlags';
 import { can } from '../../../../../lib/permissions';
-import { buildProjectEditPath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
+import { buildProjectEditPath, buildProjectNarrativePath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -32,7 +32,7 @@ type ProjectTile = {
 	tone: string;
 	line: string;
 	href: string | null;
-	destination?: 'risks';
+	destination?: 'narrative' | 'risks';
 	featureKey?: FeatureKey;
 };
 
@@ -43,6 +43,7 @@ const projectTiles: ProjectTile[] = [
 		tone: 'blue',
 		line: 'View key project events, updates, decisions and history.',
 		href: null,
+		destination: 'narrative',
 		featureKey: 'projectDiary',
 	},
 	{ title: 'Timeline', icon: '▦', tone: 'blue', line: 'Not assessed', href: '#timeline' },
@@ -111,9 +112,11 @@ const visibleProjectTiles = projectTiles.flatMap((tile) => {
 		: null;
 	if (featureAccess && !featureAccess.isVisible) return [];
 
-	const href = tile.destination === 'risks' && project
+	const href = project && tile.destination === 'risks'
 		? buildProjectRisksPath(workspaceSlug ?? '', project.slug)
-		: tile.href;
+		: project && tile.destination === 'narrative'
+			? buildProjectNarrativePath(workspaceSlug ?? '', project.slug)
+			: tile.href;
 	const isAccessible = Boolean(href) && (!featureAccess || featureAccess.isAccessible);
 	const unavailableReason = featureAccess && !featureAccess.isAccessible
 		? featureAccess.unavailableReason

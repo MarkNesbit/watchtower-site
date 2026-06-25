@@ -1,10 +1,10 @@
-# Project Narrative Foundation
+# Project Narrative
 
-**Status:** WT-NARRATIVE-002 schema and data-access foundation
+**Status:** WT-NARRATIVE-001 table layout foundation on the WT-NARRATIVE-002 schema
 
 **Migration:** `20260624000400_project_narrative_schema_foundation.sql`
 
-**Scope:** Database records, reference allocation, audit fields, Row Level Security, and non-UI data-access helpers
+**Scope:** Workspace-isolated records, data access, permissions, and the first project-level assurance table
 
 ## Purpose and source-of-truth boundary
 
@@ -68,15 +68,33 @@ RLS and the application permission map enforce:
 
 The counter table has RLS enabled and no authenticated-client policies or grants. It is used only by the security-definer insert trigger and service-role maintenance.
 
+## Page and table layout
+
+The canonical route is `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/narrative`. It resolves active workspace membership and the project within that workspace, observes the internal `projectDiary` feature flag, checks `narrative.view`, and then uses the scoped Narrative list helper. The project dashboard's **Project Narrative** tile links to this route whenever the feature is accessible.
+
+The page hero contains the **Project Narrative** title, its helper text, the visible **Add narrative entry** action, and disabled foundation controls for entry/source type, attention, date range, and source. Manual entry creation and functional filtering remain deferred, so both areas explain their unavailable state. Viewers receive the same read access as other active members but no active mutation control.
+
+Entries render newest first in an accessible, horizontally scrollable table with exactly these columns:
+
+1. Ref
+2. Attention
+3. Details
+4. Created by
+5. Created
+
+There is deliberately no Type column. The internal `entry_number` remains audit/export-readiness data and is not a visible row-number column. Ref displays `source_ref` when present and otherwise `narrative_ref`. It is styled and focusable as the future detail interaction, while clearly marked unavailable until the source-record modal story is delivered.
+
+Attention displays both text and a colour treatment, including a quieter neutral state. Details render title and body as escaped Astro template content. Creator display uses profile name/email where the existing profile RLS relationship makes it available and otherwise shows `Workspace member`; UUIDs are not exposed. Creation timestamps currently use a simple explicit UTC display. A shared effective-viewer-timezone DTS helper remains future work.
+
+The empty state explains that future manual updates and RAID-linked activity will appear in one assurance timeline.
+
 ## Data-access foundation
 
-`src/lib/projectNarrative.ts` centralises the allowed source and attention values and provides scoped list/create helpers for later server-side routes. The list helper always filters by both workspace and project. The create helper applies role checks and safe defaults, while the database remains the final validation and security boundary.
-
-No Project Narrative page calls these helpers yet.
+`src/lib/projectNarrative.ts` centralises the allowed source and attention values and provides scoped list/create helpers. The page uses the list helper, which always filters by both workspace and project and sorts by `created_at` descending then `entry_number` descending. The create helper applies role checks and safe defaults, while the database remains the final validation and security boundary; the page does not call it because creation UI is outside this story.
 
 ## Validation
 
-Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, future source metadata, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, and absence of out-of-scope UI/integrations.
+Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, future source metadata, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, scoped newest-first listing, Ref selection, route/table structure, dashboard routing, and absence of out-of-scope integrations.
 
 For an environment with the Supabase CLI and local Docker runtime, validate the complete migration chain with:
 
@@ -89,4 +107,10 @@ Then exercise authenticated owner/member/viewer users in two workspaces to confi
 
 ## Explicitly deferred
 
-WT-NARRATIVE-002 does not implement a Project Narrative route or page, manual-entry form, table/modal/filter behaviour, RAID-to-Narrative generation, attention-item or notification delivery, digest logic, CSV export, AI analysis, or browser badges/counts. Those require separate product and implementation stories.
+- Manual Narrative entry creation.
+- Source-record modal behaviour from Ref.
+- Risk-to-Narrative and other RAID event integrations.
+- Functional/full filter and search behaviour.
+- Notification, digest, attention-item, CSV export, AI, and browser badge behaviour.
+- Edit and delete UI. Before any delete UI is introduced, confirm whether Members retain delete permission or whether deletion becomes Owner/Admin-only or archive-based.
+- A shared effective-viewer-timezone DTS display helper.

@@ -56,5 +56,6 @@ After deployment, test:
 - `/app/projects`
 - `/app/projects/new`
 - `/app/workspaces/{workspaceSlug}/projects/{projectSlug}` for an accessible project
+- `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/narrative` when Project Narrative is enabled or available in preview
 
 Also confirm that `https://watch-tower.co.uk` resolves to the Worker deployment, not the old Cloudflare Pages deployment.

@@ -25,6 +25,10 @@ export function isNarrativeAttentionLevel(value: unknown): value is NarrativeAtt
 	return typeof value === 'string' && NARRATIVE_ATTENTION_LEVELS.includes(value as NarrativeAttentionLevel);
 }
 
+export function getNarrativeDisplayRef(entry: { source_ref?: string | null; narrative_ref: string }): string {
+	return entry.source_ref?.trim() || entry.narrative_ref;
+}
+
 function cleanOptionalText(value: string | null | undefined): string | null {
 	return value?.trim() || null;
 }
@@ -40,7 +44,7 @@ export async function listProjectNarrativeEntries(
 	const { data, error } = await client
 		.from('project_narrative_entries')
 		.select(
-			'id, organisation_id, project_id, entry_number, narrative_ref, source_type, source_record_id, source_ref, attention_level, title, details, created_by, updated_by, created_at, updated_at, created_timezone, updated_timezone',
+			'id, organisation_id, project_id, entry_number, narrative_ref, source_type, source_record_id, source_ref, attention_level, title, details, created_by, updated_by, created_at, updated_at, created_timezone, updated_timezone, creator:profiles!project_narrative_entries_created_by_fkey(display_name, email)',
 		)
 		.eq('organisation_id', organisationId)
 		.eq('project_id', projectId)

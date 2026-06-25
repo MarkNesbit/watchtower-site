@@ -20,6 +20,8 @@ WatchTower is positioned around evidence-based forecasting and a future delivery
 - `/products/portfolio`
 - `/roadmap`
 
+Authenticated project capability routes include the feature-gated Project Narrative assurance table at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/narrative`.
+
 ## Development
 
 ```bash

@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { buildUniqueSlug, slugifyProjectName } from '../src/lib/projectSlugs.ts';
 import { can } from '../src/lib/permissions.ts';
-import { buildProjectEditPath, buildProjectPath, buildProjectRisksPath } from '../src/lib/projectRoutes.ts';
+import { buildProjectEditPath, buildProjectNarrativePath, buildProjectPath, buildProjectRisksPath } from '../src/lib/projectRoutes.ts';
 
 const migrationPath = new URL('../supabase/migrations/20260617000100_create_projects.sql', import.meta.url);
 const projectPolicyFixMigrationPath = new URL(
@@ -155,11 +155,11 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 
 	assert.notEqual(narrativeIndex, -1);
 	assert.match(detailSource, /line: 'View key project events, updates, decisions and history\.'/);
-	assert.match(detailSource, /title: 'Project Narrative'[\s\S]*?href: null,[\s\S]*?featureKey: 'projectDiary'/);
+	assert.match(detailSource, /title: 'Project Narrative'[\s\S]*?destination: 'narrative',[\s\S]*?featureKey: 'projectDiary'/);
 	assert.ok(narrativeIndex < timelineIndex);
 	assert.ok(timelineIndex < risksIndex);
 	assert.match(detailSource, /title: 'Timeline'.*href: '#timeline'/);
-	assert.doesNotMatch(detailSource, /href: ['"]\/app\/[^'"]*(?:narrative|diary)/i);
+	assert.match(detailSource, /buildProjectNarrativePath\(workspaceSlug \?\? '', project\.slug\)/);
 });
 
 test('Project dashboard tiles share hover and keyboard focus treatment without activating unavailable tiles', async () => {
@@ -232,6 +232,7 @@ test('Workspace-scoped project route builders use readable slugs for every proje
 	assert.equal(buildProjectPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check');
 	assert.equal(buildProjectEditPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/edit');
 	assert.equal(buildProjectRisksPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/risks');
+	assert.equal(buildProjectNarrativePath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/narrative');
 	for (const route of [
 		buildProjectPath('workspace-a', 'same-slug'),
 		buildProjectPath('workspace-b', 'same-slug'),
@@ -253,6 +254,7 @@ test('Every workspace-scoped project page binds project slug to the matched work
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro',
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/edit.astro',
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro',
+		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/narrative.astro',
 	]) {
 		const source = await readFile(new URL(pagePath, import.meta.url), 'utf8');
 		assert.match(source, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
