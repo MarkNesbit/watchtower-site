@@ -1,0 +1,123 @@
+---
+type Props = {
+	workspaceName?: string;
+	projectName?: string;
+	projectRef?: string | null;
+	title: string;
+	description?: string;
+	headingId?: string;
+};
+
+const {
+	workspaceName = '',
+	projectName = '',
+	projectRef = '',
+	title,
+	description = '',
+	headingId = 'project-page-heading',
+} = Astro.props;
+---
+
+<section class="content-card project-page-hero" aria-labelledby={headingId}>
+	<div class="project-page-hero__copy">
+		{workspaceName && (
+			<p class="project-page-hero__context">Workspace: <span>{workspaceName}</span></p>
+		)}
+		{projectName && (
+			<p class="project-page-hero__project">
+				Project: <strong>{projectName}</strong>
+				{projectRef && <span>{projectRef}</span>}
+			</p>
+		)}
+		<h1 id={headingId}>{title}</h1>
+		{description && <p class="project-page-hero__description">{description}</p>}
+	</div>
+	<div class="project-page-hero__mark" aria-hidden="true">
+		<img src="/images/watchtower-logo.svg" alt="" loading="lazy" />
+	</div>
+</section>
+
+<style>
+	.project-page-hero {
+		position: relative;
+		overflow: hidden;
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(10rem, 18rem);
+		align-items: center;
+		gap: clamp(1.2rem, 4vw, 3rem);
+		min-height: clamp(18rem, 34vw, 23rem);
+		background:
+			radial-gradient(circle at 88% 38%, rgba(0, 160, 255, 0.2), transparent 17rem),
+			linear-gradient(180deg, rgba(18, 31, 42, 0.94), rgba(8, 17, 27, 0.96));
+	}
+
+	.project-page-hero__copy {
+		position: relative;
+		z-index: 1;
+		display: grid;
+		gap: 0.7rem;
+	}
+
+	.project-page-hero__context,
+	.project-page-hero__project {
+		margin: 0;
+		color: var(--muted-strong);
+		font-weight: 800;
+	}
+
+	.project-page-hero__context span {
+		color: var(--accent-strong);
+	}
+
+	.project-page-hero__project strong {
+		color: var(--text);
+	}
+
+	.project-page-hero__project span {
+		display: inline-flex;
+		margin-left: 0.65rem;
+		border: 1px solid rgba(0, 160, 255, 0.32);
+		border-radius: 999px;
+		padding: 0.12rem 0.55rem;
+		background: rgba(0, 160, 255, 0.1);
+		color: var(--accent-strong);
+		font-size: 0.82rem;
+		font-weight: 900;
+	}
+
+	.project-page-hero h1 {
+		margin: 0;
+	}
+
+	.project-page-hero__description {
+		max-width: 62rem;
+		margin: 0;
+		color: var(--muted-strong);
+		font-size: 1.1rem;
+	}
+
+	.project-page-hero__mark {
+		position: relative;
+		z-index: 0;
+		display: grid;
+		place-items: center;
+		min-height: 13rem;
+		opacity: 0.2;
+		filter: drop-shadow(0 0 34px rgba(0, 160, 255, 0.38));
+	}
+
+	.project-page-hero__mark img {
+		width: min(100%, 16rem);
+	}
+
+	@media (max-width: 760px) {
+		.project-page-hero {
+			grid-template-columns: 1fr;
+			min-height: auto;
+		}
+
+		.project-page-hero__mark {
+			display: none;
+		}
+	}
+</style>

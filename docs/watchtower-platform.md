@@ -41,6 +41,8 @@ Global product features move through `hidden`, `disabled`, `preview` and `enable
 
 The website should feel credible, calm, data-led and professional for a senior delivery audience. The visual direction blends a dark navy / charcoal command-centre feel with clean light content sections, subtle beacon and early-warning motifs, rounded dashboard cards and the light blue from the WatchTower logo as the site accent colour (`#00A0FF`).
 
+Authenticated project pages follow the universal project-page layout standard in `docs/ui-page-design-standard.md`. Project-level pages should use a shared hero/context panel, optional control panel, main content panel, consistent primary action placement, permission-aware disabled actions, and reusable empty states rather than each route inventing its own structure.
+
 ## Workspace foundation
 
 WatchTower is built around workspaces. The database and internal implementation use the term `organisation`, while user-facing language should normally use `Workspace`. Every user starts with a default personal workspace, and projects belong to workspaces rather than directly to users.
@@ -60,6 +62,8 @@ The project dashboard presents the main operating areas without exposing the und
 Project Narrative uses the internal `projectDiary` feature flag. WT-US-0207 added the dashboard tile and shared feature-gated tile handling, WT-NARRATIVE-002 added structured, workspace-isolated storage and data access, and WT-NARRATIVE-001 linked accessible tiles to the guarded workspace/project Narrative route with a reverse-chronological assurance table.
 
 WT-NARRATIVE-003 adds manual Project Narrative entry creation for owners, admins, and members. Viewers retain read-only access and see the create action disabled with helper text. Manual entries can include structured links with required labels and safe `http://` or `https://` URLs. Clicking a Narrative Ref opens a read-only detail modal on the same page.
+
+WT-US-0209 introduced the authenticated project page design standard and lightweight reusable layout components for future project pages. Project Narrative is the first route to adopt the shared hero, filter/status panel, main content panel, primary action slot, disabled action hint, and empty state components.
 
 Risk, Issue, Dependency, and Assumption records remain authoritative. Future source-generated Narrative entries may reference them for assurance history, but must not become an alternative editing surface. The full schema and permission boundary are documented in `docs/project-narrative.md`.
 

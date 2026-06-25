@@ -1,0 +1,19 @@
+---
+type Props = {
+	id: string;
+	allowed: boolean;
+	allowedText: string;
+	disabledText: string;
+};
+
+const { id, allowed, allowedText, disabledText } = Astro.props;
+---
+
+<small class="disabled-action-hint" id={id}>{allowed ? allowedText : disabledText}</small>
+
+<style>
+	.disabled-action-hint {
+		color: var(--muted-strong);
+		font-size: 0.85rem;
+	}
+</style>

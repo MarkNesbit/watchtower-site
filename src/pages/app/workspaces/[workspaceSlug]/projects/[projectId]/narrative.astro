@@ -1,5 +1,10 @@
 ---
 import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
+import DisabledActionHint from '../../../../../../components/app/DisabledActionHint.astro';
+import EmptyState from '../../../../../../components/app/EmptyState.astro';
+import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
+import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
+import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import {
 	createProjectNarrativeEntry,
@@ -17,6 +22,7 @@ const workspaceSlug = Astro.params.workspaceSlug;
 const accessToken = getServerAccessToken(Astro.cookies);
 let project = null;
 let entries = [];
+let workspaceName = '';
 let workspaceRole = '';
 let message = '';
 let entriesLoadError = '';
@@ -74,6 +80,7 @@ try {
 		message = 'You do not have permission to view Project Narrative.';
 		Astro.response.status = 403;
 	} else {
+		workspaceName = organisation.name;
 		workspaceRole = workspace.role;
 		const { data, error } = await serverSupabase
 			.from('projects')
@@ -182,67 +189,58 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	<section class="narrative-page" data-project-narrative-route data-feature-state={featureAccess.state}>
 		{project ? (
 			<>
-				<section class="content-card narrative-hero" aria-labelledby="project-narrative-heading">
-					<div class="narrative-hero__heading">
-						<div>
-							<p class="eyebrow">{project.name}</p>
-							<h1 id="project-narrative-heading">Project Narrative</h1>
-							<p>A project-level timeline of key events, updates and decisions.</p>
-						</div>
-						<div class="narrative-action">
-							{canCreateNarrative ? (
-								<button
-									class="button button--primary"
-									type="button"
-									aria-describedby="narrative-action-help"
-									data-open-create-narrative
-								>Create Project Narrative Entry</button>
-							) : (
-								<button
-									class="button button--primary"
-									type="button"
-									disabled
-									aria-describedby="narrative-action-help"
-									data-viewer-read-only
-								>Create Project Narrative Entry</button>
-							)}
-							<small id="narrative-action-help">
-								{canCreateNarrative ? 'Capture a manual project update without creating or changing a RAID record.' : 'Viewer access is read-only. Your role does not allow entry creation.'}
-							</small>
-						</div>
-					</div>
+				<ProjectPageHero
+					workspaceName={workspaceName}
+					projectName={project.name}
+					projectRef={project.project_ref}
+					title="Project Narrative"
+					description="A project-level timeline of key events, updates and decisions."
+					headingId="project-narrative-heading"
+				/>
 
-					<fieldset class="narrative-filters" disabled aria-describedby="narrative-filter-help">
-						<legend>Filter narrative entries</legend>
-						<label>Entry/source type<select name="source-type"><option>All types</option></select></label>
-						<label>Attention<select name="attention"><option>All levels</option></select></label>
-						<label>Date range<select name="date-range"><option>All dates</option></select></label>
-						<label>Source<select name="source"><option>All sources</option></select></label>
-					</fieldset>
-					<p id="narrative-filter-help" class="narrative-helper">Filters will become available in a later story.</p>
-				</section>
+				<ProjectControlPanel title="Filters" status="Coming soon" headingId="narrative-filters-heading" />
 
-				<section class="content-card narrative-table-card" aria-labelledby="narrative-table-heading">
-					<div class="narrative-table-card__heading">
-						<div>
-							<p class="eyebrow">Assurance timeline</p>
-							<h2 id="narrative-table-heading">Narrative entries</h2>
-						</div>
-						<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
+				<ProjectContentPanel
+					label="Assurance timeline"
+					title="Narrative entries"
+					helper="Open an entry to inspect its full read-only details."
+					headingId="narrative-table-heading"
+				>
+					<div slot="action" class="narrative-action">
+						{canCreateNarrative ? (
+							<button
+								class="button button--primary"
+								type="button"
+								aria-describedby="narrative-action-help"
+								data-open-create-narrative
+							>New Entry</button>
+						) : (
+							<button
+								class="button button--primary"
+								type="button"
+								disabled
+								aria-describedby="narrative-action-help"
+								data-viewer-read-only
+							>New Entry</button>
+						)}
+						<DisabledActionHint
+							id="narrative-action-help"
+							allowed={canCreateNarrative}
+							allowedText="Capture a manual project update without creating or changing a RAID record."
+							disabledText="Viewer access is read-only. Your role does not allow entry creation."
+						/>
 					</div>
 
 					{entriesLoadError ? (
-						<div class="narrative-error" data-narrative-list-error role="alert">
-							<h3>Project Narrative entries could not be loaded.</h3>
+						<EmptyState title="Project Narrative entries could not be loaded." tone="error" data-narrative-list-error role="alert">
 							<p>{entriesLoadError}</p>
 							<p>Refresh the page, or try again after checking workspace access.</p>
-						</div>
+						</EmptyState>
 					) : entries.length === 0 ? (
-						<div class="narrative-empty" data-narrative-empty-state>
-							<h3>No narrative entries yet.</h3>
+						<EmptyState title="No narrative entries yet." data-narrative-empty-state>
 							<p>Project Narrative will show key project events, manual updates and future RAID-linked activity in one assurance timeline.</p>
 							<p>{canCreateNarrative ? 'Create the first manual entry when there is project context to capture.' : 'Viewer access is read-only, so entry creation is unavailable for your role.'}</p>
-						</div>
+						</EmptyState>
 					) : (
 						<>
 							<p id="narrative-ref-help" class="narrative-helper">Open an entry to inspect its full read-only details.</p>
@@ -266,7 +264,8 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							</div>
 						</>
 					)}
-				</section>
+					<a class="text-link narrative-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
+				</ProjectContentPanel>
 
 				<dialog class="narrative-modal" aria-labelledby="create-narrative-title" data-create-narrative-modal data-open-on-load={createModalOpen || undefined}>
 					<form method="dialog" class="narrative-modal__close-form">
@@ -547,21 +546,9 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 
 <style>
 	.narrative-page { display: grid; gap: 0.9rem; }
-	.narrative-hero { display: grid; gap: 1.5rem; background: radial-gradient(circle at 92% 8%, rgba(0, 160, 255, 0.16), transparent 18rem), linear-gradient(180deg, rgba(18, 31, 42, 0.94), rgba(8, 17, 27, 0.96)); }
-	.narrative-hero__heading, .narrative-table-card__heading { display: flex; align-items: start; justify-content: space-between; gap: 1.5rem; }
-	.narrative-hero__heading h1, .narrative-table-card__heading h2 { margin-bottom: 0.35rem; }
-	.narrative-hero__heading p:not(.eyebrow) { margin: 0; color: var(--muted-strong); }
-	.narrative-action { display: grid; justify-items: end; gap: 0.45rem; max-width: 21rem; text-align: right; }
+	.narrative-action { display: contents; }
 	.narrative-action [disabled] { opacity: 0.68; cursor: not-allowed; }
-	.narrative-action small, .narrative-helper { color: var(--muted-strong); font-size: 0.85rem; }
-	.narrative-filters { display: grid; grid-template-columns: repeat(4, minmax(9rem, 1fr)); gap: 0.9rem; margin: 0; border: 0; padding: 0; }
-	.narrative-filters legend { grid-column: 1 / -1; margin-bottom: 0.15rem; color: var(--text); font-weight: 850; }
-	.narrative-filters label { display: grid; gap: 0.4rem; color: var(--muted-strong); font-size: 0.82rem; font-weight: 800; }
-	.narrative-filters select { width: 100%; border: 1px solid var(--border); border-radius: 0.75rem; padding: 0.7rem 0.8rem; background: #07111d; color: var(--muted-strong); font: inherit; }
-	.narrative-filters[disabled] { opacity: 0.72; }
-	.narrative-helper { margin: -0.65rem 0 0; }
-	.narrative-table-card { padding: clamp(1rem, 2vw, 1.5rem); }
-	.narrative-table-card__heading { align-items: center; margin-bottom: 0.75rem; }
+	.narrative-helper { margin: -0.35rem 0 0.8rem; color: var(--muted-strong); font-size: 0.85rem; }
 	.narrative-table-scroll { overflow-x: auto; }
 	.narrative-table { min-width: 52rem; }
 	.narrative-table th:first-child { width: 10rem; }
@@ -581,10 +568,7 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-details strong, .narrative-details span { display: block; }
 	.narrative-details span { color: var(--muted-strong); }
 	.narrative-details strong + span { margin-top: 0.25rem; }
-	.narrative-empty, .narrative-error { border: 1px dashed var(--border); border-radius: 1rem; padding: clamp(1.2rem, 3vw, 2rem); background: rgba(4, 12, 24, 0.35); text-align: center; }
-	.narrative-error { border-color: rgba(255, 129, 122, 0.65); background: rgba(80, 20, 20, 0.2); }
-	.narrative-empty h3, .narrative-error h3 { margin-top: 0; }
-	.narrative-empty p, .narrative-error p { max-width: 48rem; margin-inline: auto; color: var(--muted-strong); }
+	.narrative-back-link { justify-self: start; }
 	.narrative-modal { width: min(92vw, 44rem); max-height: 88vh; overflow: auto; border: 1px solid var(--border); border-radius: 1rem; padding: 0; background: #0b1724; color: var(--text); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.46); }
 	.narrative-modal::backdrop { background: rgba(0, 0, 0, 0.68); }
 	.narrative-modal__close-form { position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end; padding: 0.65rem 0.75rem 0; background: linear-gradient(180deg, #0b1724 72%, rgba(11, 23, 36, 0)); }
@@ -620,12 +604,8 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-detail__meta dt { color: var(--text); font-weight: 850; }
 	.narrative-detail__meta dd { margin: 0; overflow-wrap: anywhere; }
 	@media (max-width: 760px) {
-		.narrative-hero__heading, .narrative-table-card__heading { display: grid; }
-		.narrative-action { justify-items: start; max-width: none; text-align: left; }
-		.narrative-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 		.narrative-attention, .narrative-link-row, .narrative-detail__meta div { grid-template-columns: 1fr; }
 		.narrative-link-row label:nth-of-type(2), .narrative-link-row input:nth-of-type(2), .narrative-link-row .button { grid-column: 1; grid-row: auto; }
 		.narrative-form__actions { display: grid; }
 	}
-	@media (max-width: 460px) { .narrative-filters { grid-template-columns: 1fr; } }
 </style>

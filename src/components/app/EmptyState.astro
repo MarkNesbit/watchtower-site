@@ -1,0 +1,38 @@
+---
+type Props = {
+	title: string;
+	tone?: 'neutral' | 'error';
+};
+
+const { title, tone = 'neutral', ...attrs } = Astro.props;
+---
+
+<div class={`empty-state empty-state--${tone}`} {...attrs}>
+	<h3>{title}</h3>
+	<slot />
+</div>
+
+<style>
+	.empty-state {
+		border: 1px dashed var(--border);
+		border-radius: 1rem;
+		padding: clamp(1.2rem, 3vw, 2rem);
+		background: rgba(4, 12, 24, 0.35);
+		text-align: center;
+	}
+
+	.empty-state--error {
+		border-color: rgba(255, 129, 122, 0.65);
+		background: rgba(80, 20, 20, 0.2);
+	}
+
+	.empty-state h3 {
+		margin-top: 0;
+	}
+
+	.empty-state p {
+		max-width: 48rem;
+		margin-inline: auto;
+		color: var(--muted-strong);
+	}
+</style>

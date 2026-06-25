@@ -1,0 +1,72 @@
+---
+type Props = {
+	label?: string;
+	title: string;
+	helper?: string;
+	headingId?: string;
+};
+
+const {
+	label = '',
+	title,
+	helper = '',
+	headingId = 'project-content-panel-heading',
+} = Astro.props;
+---
+
+<section class="content-card project-content-panel" aria-labelledby={headingId}>
+	<div class="project-content-panel__heading">
+		<div>
+			{label && <p class="eyebrow">{label}</p>}
+			<h2 id={headingId}>{title}</h2>
+			{helper && <p>{helper}</p>}
+		</div>
+		<div class="project-content-panel__action">
+			<slot name="action" />
+		</div>
+	</div>
+	<slot />
+</section>
+
+<style>
+	.project-content-panel {
+		padding: clamp(1rem, 2vw, 1.5rem);
+	}
+
+	.project-content-panel__heading {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1.5rem;
+		margin-bottom: 1rem;
+	}
+
+	.project-content-panel h2 {
+		margin-bottom: 0.35rem;
+	}
+
+	.project-content-panel__heading p:not(.eyebrow) {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.project-content-panel__action {
+		display: grid;
+		justify-items: end;
+		gap: 0.45rem;
+		max-width: 20rem;
+		text-align: right;
+	}
+
+	@media (max-width: 760px) {
+		.project-content-panel__heading {
+			display: grid;
+		}
+
+		.project-content-panel__action {
+			justify-items: stretch;
+			max-width: none;
+			text-align: left;
+		}
+	}
+</style>

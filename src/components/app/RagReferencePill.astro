@@ -1,0 +1,32 @@
+---
+type Props = {
+	tone?: 'blue' | 'green' | 'amber' | 'red' | 'neutral';
+	label: string;
+};
+
+const { tone = 'neutral', label } = Astro.props;
+---
+
+<span class={`rag-reference-pill rag-reference-pill--${tone}`}>{label}</span>
+
+<style>
+	.rag-reference-pill {
+		--rag-pill-tone: #7c8b98;
+		display: inline-flex;
+		align-items: center;
+		width: fit-content;
+		border: 1px solid color-mix(in srgb, var(--rag-pill-tone) 65%, transparent);
+		border-radius: 999px;
+		padding: 0.25rem 0.65rem;
+		background: color-mix(in srgb, var(--rag-pill-tone) 14%, transparent);
+		color: var(--text);
+		font-size: 0.82rem;
+		font-weight: 850;
+	}
+
+	.rag-reference-pill--blue { --rag-pill-tone: #00a0ff; }
+	.rag-reference-pill--green { --rag-pill-tone: #21d36b; }
+	.rag-reference-pill--amber { --rag-pill-tone: #f6a400; }
+	.rag-reference-pill--red { --rag-pill-tone: #ff453a; }
+	.rag-reference-pill--neutral { --rag-pill-tone: #7c8b98; color: var(--muted-strong); }
+</style>
