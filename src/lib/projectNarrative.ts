@@ -28,6 +28,20 @@ export type NormalisedProjectNarrativeLink = {
 	url: string;
 };
 
+type NarrativeProfile = {
+	id: string;
+	display_name?: string | null;
+	email?: string | null;
+};
+
+type NarrativeLink = {
+	id: string;
+	narrative_entry_id: string;
+	label: string;
+	url: string;
+	created_at?: string | null;
+};
+
 export function isNarrativeSourceType(value: unknown): value is NarrativeSourceType {
 	return typeof value === 'string' && NARRATIVE_SOURCE_TYPES.includes(value as NarrativeSourceType);
 }
@@ -42,6 +56,10 @@ export function getNarrativeDisplayRef(entry: { source_ref?: string | null; narr
 
 function cleanOptionalText(value: string | null | undefined): string | null {
 	return value?.trim() || null;
+}
+
+function uniqueValues(values: Array<string | null | undefined>): string[] {
+	return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }
 
 export function normaliseProjectNarrativeLinkUrl(value: string | null | undefined): string {
@@ -86,7 +104,7 @@ export async function listProjectNarrativeEntries(
 	const { data, error } = await client
 		.from('project_narrative_entries')
 		.select(
-			'id, organisation_id, project_id, entry_number, narrative_ref, source_type, source_record_id, source_ref, attention_level, title, details, created_by, updated_by, created_at, updated_at, created_timezone, updated_timezone, creator:profiles!project_narrative_entries_created_by_fkey(display_name, email), updater:profiles!project_narrative_entries_updated_by_fkey(display_name, email), links:project_narrative_entry_links(id, label, url, created_at)',
+			'id, organisation_id, project_id, entry_number, narrative_ref, source_type, source_record_id, source_ref, attention_level, title, details, created_by, updated_by, created_at, updated_at, created_timezone, updated_timezone',
 		)
 		.eq('organisation_id', organisationId)
 		.eq('project_id', projectId)
@@ -94,7 +112,51 @@ export async function listProjectNarrativeEntries(
 		.order('entry_number', { ascending: false });
 
 	if (error) throw error;
-	return data ?? [];
+	const entries = data ?? [];
+	if (entries.length === 0) return [];
+
+	const profileIds = uniqueValues(entries.flatMap((entry) => [entry.created_by, entry.updated_by]));
+	const profileById = new Map<string, NarrativeProfile>();
+	if (profileIds.length > 0) {
+		try {
+			const { data: profiles } = await client
+				.from('profiles')
+				.select('id, display_name, email')
+				.in('id', profileIds);
+			for (const profile of profiles ?? []) {
+				profileById.set(profile.id, profile);
+			}
+		} catch {
+			// Profile display names are optional enrichment; base entries must still render.
+		}
+	}
+
+	const linksByEntryId = new Map<string, NarrativeLink[]>();
+	const entryIds = entries.map((entry) => entry.id);
+	if (entryIds.length > 0) {
+		try {
+			const { data: links } = await client
+				.from('project_narrative_entry_links')
+				.select('id, narrative_entry_id, label, url, created_at')
+				.eq('organisation_id', organisationId)
+				.eq('project_id', projectId)
+				.in('narrative_entry_id', entryIds);
+			for (const link of links ?? []) {
+				const entryLinks = linksByEntryId.get(link.narrative_entry_id) ?? [];
+				entryLinks.push(link);
+				linksByEntryId.set(link.narrative_entry_id, entryLinks);
+			}
+		} catch {
+			// Link rows are optional enrichment; base entries must still render.
+		}
+	}
+
+	return entries.map((entry) => ({
+		...entry,
+		creator: profileById.get(entry.created_by) ?? null,
+		updater: entry.updated_by ? profileById.get(entry.updated_by) ?? null : null,
+		links: linksByEntryId.get(entry.id) ?? [],
+	}));
 }
 
 export async function createProjectNarrativeEntry(

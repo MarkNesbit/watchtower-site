@@ -296,35 +296,165 @@ test('data access saves validated links against the created narrative entry scop
 
 test('narrative list stays workspace and project scoped and sorts newest first', async () => {
 	const calls = [];
-	const query = {
+	const baseRows = [{
+		id: 'entry-2',
+		organisation_id: 'workspace-id',
+		project_id: 'project-id',
+		narrative_ref: 'NAR-HHH-002',
+		created_by: 'creator-id',
+		updated_by: null,
+	}];
+	const baseQuery = {
 		select(columns) {
-			calls.push(['select', columns]);
+			calls.push(['select', 'project_narrative_entries', columns]);
 			return this;
 		},
 		eq(column, value) {
-			calls.push(['eq', column, value]);
+			calls.push(['eq', 'project_narrative_entries', column, value]);
 			return this;
 		},
 		order(column, options) {
-			calls.push(['order', column, options]);
+			calls.push(['order', 'project_narrative_entries', column, options]);
 			if (calls.filter(([name]) => name === 'order').length === 2) {
-				return Promise.resolve({ data: [{ narrative_ref: 'NAR-HHH-002' }], error: null });
+				return Promise.resolve({ data: baseRows, error: null });
 			}
 			return this;
 		},
 	};
-	const client = { from: (table) => (calls.push(['from', table]), query) };
+	const profileQuery = {
+		select(columns) {
+			calls.push(['select', 'profiles', columns]);
+			return this;
+		},
+		in(column, values) {
+			calls.push(['in', 'profiles', column, values]);
+			return Promise.resolve({ data: [{ id: 'creator-id', display_name: 'Creator Name', email: 'creator@example.com' }], error: null });
+		},
+	};
+	const linkQuery = {
+		select(columns) {
+			calls.push(['select', 'project_narrative_entry_links', columns]);
+			return this;
+		},
+		eq(column, value) {
+			calls.push(['eq', 'project_narrative_entry_links', column, value]);
+			return this;
+		},
+		in(column, values) {
+			calls.push(['in', 'project_narrative_entry_links', column, values]);
+			return Promise.resolve({ data: [{ id: 'link-id', narrative_entry_id: 'entry-2', label: 'Evidence', url: 'https://example.com', created_at: '2026-06-25T10:00:00Z' }], error: null });
+		},
+	};
+	const client = {
+		from(table) {
+			calls.push(['from', table]);
+			if (table === 'project_narrative_entries') return baseQuery;
+			if (table === 'profiles') return profileQuery;
+			if (table === 'project_narrative_entry_links') return linkQuery;
+			assert.fail(`Unexpected table ${table}`);
+		},
+	};
 
 	const result = await listProjectNarrativeEntries('workspace-id', 'project-id', 'viewer', client);
-	assert.deepEqual(result, [{ narrative_ref: 'NAR-HHH-002' }]);
+	assert.equal(result[0].narrative_ref, 'NAR-HHH-002');
+	assert.deepEqual(result[0].creator, { id: 'creator-id', display_name: 'Creator Name', email: 'creator@example.com' });
+	assert.deepEqual(result[0].links, [{ id: 'link-id', narrative_entry_id: 'entry-2', label: 'Evidence', url: 'https://example.com', created_at: '2026-06-25T10:00:00Z' }]);
 	assert.deepEqual(calls.filter(([name]) => name === 'eq'), [
-		['eq', 'organisation_id', 'workspace-id'],
-		['eq', 'project_id', 'project-id'],
+		['eq', 'project_narrative_entries', 'organisation_id', 'workspace-id'],
+		['eq', 'project_narrative_entries', 'project_id', 'project-id'],
+		['eq', 'project_narrative_entry_links', 'organisation_id', 'workspace-id'],
+		['eq', 'project_narrative_entry_links', 'project_id', 'project-id'],
 	]);
 	assert.deepEqual(calls.filter(([name]) => name === 'order'), [
-		['order', 'created_at', { ascending: false }],
-		['order', 'entry_number', { ascending: false }],
+		['order', 'project_narrative_entries', 'created_at', { ascending: false }],
+		['order', 'project_narrative_entries', 'entry_number', { ascending: false }],
 	]);
+	assert.deepEqual(calls.filter(([name]) => name === 'in'), [
+		['in', 'profiles', 'id', ['creator-id']],
+		['in', 'project_narrative_entry_links', 'narrative_entry_id', ['entry-2']],
+	]);
+});
+
+test('related profile and link enrichment cannot suppress valid base narrative entries', async () => {
+	const baseRows = [{
+		id: 'entry-1',
+		organisation_id: 'workspace-id',
+		project_id: 'project-id',
+		narrative_ref: 'NAR-HHH-001',
+		created_by: 'creator-id',
+		updated_by: 'updater-id',
+	}];
+	const client = {
+		from(table) {
+			if (table === 'project_narrative_entries') {
+				return {
+					select: () => ({
+						eq: () => ({
+							eq: () => ({
+								order: () => ({
+									order: () => Promise.resolve({ data: baseRows, error: null }),
+								}),
+							}),
+						}),
+					}),
+				};
+			}
+			if (table === 'profiles') {
+				return {
+					select: () => ({
+						in: () => {
+							throw new Error('Profile enrichment failed.');
+						},
+					}),
+				};
+			}
+			if (table === 'project_narrative_entry_links') {
+				return {
+					select: () => ({
+						eq: () => ({
+							eq: () => ({
+								in: () => {
+									throw new Error('Link enrichment failed.');
+								},
+							}),
+						}),
+					}),
+				};
+			}
+			assert.fail(`Unexpected table ${table}`);
+		},
+	};
+
+	const result = await listProjectNarrativeEntries('workspace-id', 'project-id', 'viewer', client);
+	assert.equal(result.length, 1);
+	assert.equal(result[0].narrative_ref, 'NAR-HHH-001');
+	assert.equal(result[0].creator, null);
+	assert.equal(result[0].updater, null);
+	assert.deepEqual(result[0].links, []);
+});
+
+test('base narrative list query errors are surfaced', async () => {
+	const client = {
+		from(table) {
+			assert.equal(table, 'project_narrative_entries');
+			return {
+				select: () => ({
+					eq: () => ({
+						eq: () => ({
+							order: () => ({
+								order: () => Promise.resolve({ data: null, error: new Error('Narrative list query failed.') }),
+							}),
+						}),
+					}),
+				}),
+			};
+		},
+	};
+
+	await assert.rejects(
+		listProjectNarrativeEntries('workspace-id', 'project-id', 'viewer', client),
+		/Narrative list query failed/,
+	);
 });
 
 test('display reference prefers a source reference and otherwise uses the Narrative reference', () => {
@@ -396,6 +526,10 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /data-detail-links/);
 	assert.match(page, /showModal\(\)/);
 	assert.match(page, /detailModal\?\.addEventListener\('close'/);
+	assert.match(page, /entriesLoadError/);
+	assert.match(page, /data-narrative-list-error/);
+	assert.match(page, /Project Narrative entries could not be loaded\./);
+	assert.match(page, /entriesLoadError \? \(/);
 	assert.match(page, /class="narrative-filters"/);
 	for (const label of ['Entry/source type', 'Attention', 'Date range', 'Source']) {
 		assert.match(page, new RegExp(`<label>${label}`));

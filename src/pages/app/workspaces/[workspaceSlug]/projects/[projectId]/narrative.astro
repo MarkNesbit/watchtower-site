@@ -19,6 +19,7 @@ let project = null;
 let entries = [];
 let workspaceRole = '';
 let message = '';
+let entriesLoadError = '';
 let featureAccess = getFeatureAccess('projectDiary');
 let createModalOpen = false;
 let saveMessage = '';
@@ -130,7 +131,12 @@ try {
 					}
 					saveMessage = formErrors.general ?? 'Please fix the highlighted fields.';
 				}
-				entries = await listProjectNarrativeEntries(organisation.id, data.id, workspace.role, serverSupabase);
+				try {
+					entries = await listProjectNarrativeEntries(organisation.id, data.id, workspace.role, serverSupabase);
+				} catch (error) {
+					entries = [];
+					entriesLoadError = error instanceof Error ? error.message : 'Unable to load Project Narrative entries.';
+				}
 			}
 		}
 	}
@@ -225,7 +231,13 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 						<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
 					</div>
 
-					{entries.length === 0 ? (
+					{entriesLoadError ? (
+						<div class="narrative-error" data-narrative-list-error role="alert">
+							<h3>Project Narrative entries could not be loaded.</h3>
+							<p>{entriesLoadError}</p>
+							<p>Refresh the page, or try again after checking workspace access.</p>
+						</div>
+					) : entries.length === 0 ? (
 						<div class="narrative-empty" data-narrative-empty-state>
 							<h3>No narrative entries yet.</h3>
 							<p>Project Narrative will show key project events, manual updates and future RAID-linked activity in one assurance timeline.</p>
@@ -569,9 +581,10 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-details strong, .narrative-details span { display: block; }
 	.narrative-details span { color: var(--muted-strong); }
 	.narrative-details strong + span { margin-top: 0.25rem; }
-	.narrative-empty { border: 1px dashed var(--border); border-radius: 1rem; padding: clamp(1.2rem, 3vw, 2rem); background: rgba(4, 12, 24, 0.35); text-align: center; }
-	.narrative-empty h3 { margin-top: 0; }
-	.narrative-empty p { max-width: 48rem; margin-inline: auto; color: var(--muted-strong); }
+	.narrative-empty, .narrative-error { border: 1px dashed var(--border); border-radius: 1rem; padding: clamp(1.2rem, 3vw, 2rem); background: rgba(4, 12, 24, 0.35); text-align: center; }
+	.narrative-error { border-color: rgba(255, 129, 122, 0.65); background: rgba(80, 20, 20, 0.2); }
+	.narrative-empty h3, .narrative-error h3 { margin-top: 0; }
+	.narrative-empty p, .narrative-error p { max-width: 48rem; margin-inline: auto; color: var(--muted-strong); }
 	.narrative-modal { width: min(92vw, 44rem); max-height: 88vh; overflow: auto; border: 1px solid var(--border); border-radius: 1rem; padding: 0; background: #0b1724; color: var(--text); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.46); }
 	.narrative-modal::backdrop { background: rgba(0, 0, 0, 0.68); }
 	.narrative-modal__close-form { position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end; padding: 0.65rem 0.75rem 0; background: linear-gradient(180deg, #0b1724 72%, rgba(11, 23, 36, 0)); }
