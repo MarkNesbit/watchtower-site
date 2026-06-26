@@ -369,10 +369,34 @@ test('Project UI displays and protects project reference', async () => {
 	assert.match(newSource, /Watchtower will assign this fixed project reference when the project is created/);
 	assert.doesNotMatch(newSource, /name="project_ref"|formData\.get\('project_ref'\)|projectRef:/);
 	assert.match(listSource, /project_ref/);
-	assert.match(listSource, /<th>Reference<\/th>/);
+	assert.match(listSource, /<th scope="col">Reference<\/th>/);
+	assert.match(listSource, /<RagReferencePill[\s\S]*label=\{project\.project_ref \?\? 'Not assigned'\}/);
 	assert.match(detailSource, /projectRef=\{project\.project_ref\}/);
 	assert.match(editSource, /project\.project_ref/);
 	assert.match(editSource, /read-only and cannot be edited after creation in MVP/);
 	assert.doesNotMatch(editSource, /name="project_ref"/);
 	assert.match(newSource, /Astro\.redirect\(buildProjectPath\(project\.workspaceSlug, project\.slug\)\)/);
+});
+
+test('Project list uses shared authenticated page patterns without changing routing or create permissions', async () => {
+	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
+	assert.match(listSource, /import ProjectContentPanel/);
+	assert.match(listSource, /import EmptyState/);
+	assert.match(listSource, /import DisabledActionHint/);
+	assert.match(listSource, /import RagReferencePill/);
+	assert.match(listSource, /<h1 id="projects-page-heading">Projects<\/h1>/);
+	assert.match(listSource, /View and open projects in the current workspace\./);
+	assert.match(listSource, /<ProjectContentPanel[\s\S]*title="Project list"[\s\S]*helper="Open a project dashboard or review its current delivery status\."/);
+	assert.match(listSource, /slot="action"[\s\S]*href="\/app\/projects\/new">New project<\/a>/);
+	assert.match(listSource, /canCreateProject = can\(workspace\.role, 'project\.create'\)/);
+	assert.match(listSource, /\.from\('organisation_settings'\)[\s\S]*allow_member_project_creation/);
+	assert.match(listSource, /aria-disabled="true" aria-describedby="create-project-restriction"/);
+	assert.match(listSource, /<DisabledActionHint[\s\S]*disabledText=\{createProjectRestriction\}/);
+	assert.match(listSource, /<EmptyState title="Projects could not be loaded\." tone="error"/);
+	assert.match(listSource, /<EmptyState title="No projects yet\."/);
+	assert.match(listSource, /<table class="simple-table projects-table">/);
+	assert.match(listSource, /<th scope="col">Action<\/th>/);
+	assert.match(listSource, /Open project/);
+	assert.match(listSource, /buildProjectPath\(workspaceSlug, project\.slug\)/);
+	assert.match(listSource, /\.select\('name, project_ref, slug, status, health, updated_at'\)/);
 });

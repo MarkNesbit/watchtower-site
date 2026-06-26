@@ -197,6 +197,8 @@ For MVP, `project_ref` is immutable after creation. The project edit page displa
 
 Future risk references will use the authoritative project reference in the compound format `Risk-{PROJECT_REF}-{NNN}`, for example `Risk-HHH-003`. Existing early projects that do not yet have a valid project reference should be assigned one through a controlled future process or recreated before Risk records can be created against them.
 
+The authenticated project list displays `project_ref` with the shared reference-pill treatment and continues to route project names and row actions through the workspace-scoped project slug path. Create-project affordances remain governed by workspace role and `organisation_settings.allow_member_project_creation`; read-only users see an unavailable action with explanatory copy rather than a working create link.
+
 ## WT-US-0205 workspace-safe project routing
 
 Project slugs are unique only within a workspace, so project destinations include both readable routing slugs:

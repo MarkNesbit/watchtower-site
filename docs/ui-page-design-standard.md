@@ -172,7 +172,7 @@ WT-US-0209 introduced these lightweight components in `src/components/app/`:
 - `DisabledActionHint.astro`
 - `RagReferencePill.astro`
 
-Project Narrative uses the shared hero, control panel, content panel, disabled-action helper, and empty state. The project dashboard now also uses the shared hero, status/control panel, and content panel shell while preserving its existing capability tile behaviour. The Risk placeholder retains its existing markup for this slice and is a clear candidate for later incremental adoption.
+Project Narrative uses the shared hero, control panel, content panel, disabled-action helper, and empty state. The project dashboard now also uses the shared hero, status/control panel, and content panel shell while preserving its existing capability tile behaviour. The project list page uses the shared content panel, empty state, disabled-action hint, and reference pill treatment without adding a single-project hero. The Risk placeholder retains its existing markup for this slice and is a clear candidate for later incremental adoption.
 
 ## Duplication Opportunities Identified
 

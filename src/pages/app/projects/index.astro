@@ -1,5 +1,10 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
+import DisabledActionHint from '../../../components/app/DisabledActionHint.astro';
+import EmptyState from '../../../components/app/EmptyState.astro';
+import ProjectContentPanel from '../../../components/app/ProjectContentPanel.astro';
+import RagReferencePill from '../../../components/app/RagReferencePill.astro';
+import { can } from '../../../lib/permissions';
 import { buildProjectPath, getCurrentWorkspace } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
@@ -8,6 +13,9 @@ let workspaceMessage = 'No active workspace is available for your account.';
 let loadError = '';
 let projects = [];
 let workspaceSlug = '';
+let workspaceName = '';
+let canCreateProject = false;
+let createProjectRestriction = 'Select an active workspace before creating a project.';
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -15,7 +23,20 @@ try {
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (workspace && organisation) {
 		workspaceSlug = organisation.slug;
-		workspaceMessage = `Current workspace: ${organisation.name}`;
+		workspaceName = organisation.name;
+		workspaceMessage = `Projects in ${organisation.name}.`;
+		canCreateProject = can(workspace.role, 'project.create');
+		createProjectRestriction = 'Your workspace role does not permit project creation.';
+		if (canCreateProject && workspace.role === 'member') {
+			const { data: settings, error: settingsError } = await serverSupabase
+				.from('organisation_settings')
+				.select('allow_member_project_creation')
+				.eq('organisation_id', organisation.id)
+				.maybeSingle();
+			if (settingsError) throw settingsError;
+			canCreateProject = Boolean(settings?.allow_member_project_creation);
+			createProjectRestriction = 'Members cannot create projects in this workspace.';
+		}
 		const { data, error } = await serverSupabase
 			.from('projects')
 			.select('name, project_ref, slug, status, health, updated_at')
@@ -29,38 +50,203 @@ try {
 } catch (error) {
 	loadError = error instanceof Error ? error.message : 'Unable to load projects.';
 }
+
+const formatDate = (value) => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
+	: 'Not available';
+const formatLabel = (value, fallback = 'Not available') => value ? value.charAt(0).toUpperCase() + value.slice(1) : fallback;
+const healthTone = (value) => {
+	const health = value?.toLowerCase();
+	if (health === 'green') return 'green';
+	if (health === 'amber') return 'amber';
+	if (health === 'red') return 'red';
+	return 'neutral';
+};
 ---
 <AuthenticatedLayout title="Projects | WatchTower">
-	<section class="content-card" data-projects-page>
-		<div class="app-page-header">
+	<section class="projects-page" data-projects-page>
+		<div class="projects-page__header" aria-labelledby="projects-page-heading">
 			<div>
 				<p class="eyebrow">Projects</p>
-				<h1>Projects</h1>
-				<p>{workspaceMessage}</p>
+				<h1 id="projects-page-heading">Projects</h1>
+				<p>{workspaceMessage} View and open projects in the current workspace.</p>
 			</div>
-			<a class="button button--primary" href="/app/projects/new">Create Project</a>
+			{workspaceName && <RagReferencePill tone="blue" label={workspaceName} ariaLabel={`Current workspace: ${workspaceName}`} />}
 		</div>
-		{loadError ? (
-			<p>{loadError}</p>
-		) : projects.length === 0 ? (
-			<p>No projects yet. <a href="/app/projects/new">Create the first project</a>.</p>
-		) : (
-			<table class="simple-table">
-				<thead>
-					<tr><th>Reference</th><th>Name</th><th>Status</th><th>Health</th><th>Last updated</th></tr>
-				</thead>
-				<tbody>
-					{projects.map((project) => (
-						<tr>
-							<td>{project.project_ref ?? 'Not assigned'}</td>
-							<td><a href={buildProjectPath(workspaceSlug, project.slug)}>{project.name}</a></td>
-							<td>{project.status}</td>
-							<td>{project.health}</td>
-							<td>{new Date(project.updated_at).toLocaleString()}</td>
-						</tr>
-					))}
-				</tbody>
-			</table>
-		)}
+
+		<ProjectContentPanel
+			title="Project list"
+			helper="Open a project dashboard or review its current delivery status."
+			headingId="project-list-heading"
+		>
+			<div slot="action" class="projects-page__action">
+				{canCreateProject ? (
+					<a class="button button--primary" href="/app/projects/new">New project</a>
+				) : (
+					<>
+						<span class="button button--primary projects-page__disabled-action" aria-disabled="true" aria-describedby="create-project-restriction">New project</span>
+						<DisabledActionHint
+							id="create-project-restriction"
+							allowed={false}
+							allowedText=""
+							disabledText={createProjectRestriction}
+						/>
+					</>
+				)}
+			</div>
+
+			{loadError ? (
+				<EmptyState title="Projects could not be loaded." tone="error" data-projects-list-error role="alert">
+					<p>{loadError}</p>
+					<p>Refresh the page, or check that your workspace access is still active.</p>
+				</EmptyState>
+			) : projects.length === 0 ? (
+				<EmptyState title="No projects yet." data-projects-empty-state>
+					<p>This workspace does not have any active projects yet.</p>
+					<p>{canCreateProject ? 'Create the first project when there is delivery work to track.' : createProjectRestriction}</p>
+				</EmptyState>
+			) : (
+				<div class="projects-table-scroll">
+					<table class="simple-table projects-table">
+						<thead>
+							<tr><th scope="col">Reference</th><th scope="col">Project</th><th scope="col">Status</th><th scope="col">Health</th><th scope="col">Last updated</th><th scope="col">Action</th></tr>
+						</thead>
+						<tbody>
+							{projects.map((project) => (
+								<tr>
+									<td>
+										<RagReferencePill
+											tone={project.project_ref ? 'blue' : 'neutral'}
+											label={project.project_ref ?? 'Not assigned'}
+										/>
+									</td>
+									<td class="projects-table__name"><a href={buildProjectPath(workspaceSlug, project.slug)}>{project.name}</a></td>
+									<td><span class="projects-table__status">{formatLabel(project.status, 'Unknown')}</span></td>
+									<td>
+										<RagReferencePill
+											tone={healthTone(project.health)}
+											label={formatLabel(project.health, 'Not assessed')}
+										/>
+									</td>
+									<td><time datetime={project.updated_at}>{formatDate(project.updated_at)}</time></td>
+									<td><a class="text-link" href={buildProjectPath(workspaceSlug, project.slug)}>Open project</a></td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			)}
+		</ProjectContentPanel>
 	</section>
 </AuthenticatedLayout>
+
+<style>
+	.projects-page {
+		display: grid;
+		gap: 0.9rem;
+	}
+
+	.projects-page__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		border: 1px solid var(--border);
+		border-radius: 1.35rem;
+		padding: clamp(1rem, 2vw, 1.5rem);
+		background: linear-gradient(135deg, rgba(5, 14, 25, 0.95), rgba(4, 12, 24, 0.74));
+		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+	}
+
+	.projects-page__header h1 {
+		margin-bottom: 0.35rem;
+		font-size: clamp(2rem, 4vw, 3.3rem);
+	}
+
+	.projects-page__header p:not(.eyebrow) {
+		max-width: 50rem;
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.projects-page :global(#project-list-heading) {
+		font-size: clamp(1.45rem, 2.4vw, 2rem);
+	}
+
+	.projects-page__action {
+		display: contents;
+	}
+
+	.projects-page__disabled-action {
+		opacity: 0.68;
+		cursor: not-allowed;
+	}
+
+	.projects-table-scroll {
+		overflow-x: auto;
+	}
+
+	.projects-table {
+		min-width: 54rem;
+	}
+
+	.projects-table th:first-child {
+		width: 12rem;
+	}
+
+	.projects-table th:nth-child(3),
+	.projects-table th:nth-child(4) {
+		width: 9rem;
+	}
+
+	.projects-table th:nth-child(5) {
+		width: 13rem;
+	}
+
+	.projects-table th:last-child {
+		width: 9rem;
+	}
+
+	.projects-table th {
+		color: var(--muted-strong);
+		font-size: 0.78rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+	}
+
+	.projects-table td {
+		vertical-align: middle;
+	}
+
+	.projects-table__name {
+		min-width: 14rem;
+		font-weight: 850;
+	}
+
+	.projects-table__name a {
+		color: var(--text);
+		text-decoration: none;
+	}
+
+	.projects-table__name a:hover,
+	.projects-table__name a:focus-visible,
+	.projects-table .text-link:hover,
+	.projects-table .text-link:focus-visible {
+		color: var(--accent-strong);
+	}
+
+	.projects-table__status {
+		color: var(--muted-strong);
+		font-weight: 800;
+	}
+
+	.projects-table time {
+		color: var(--muted-strong);
+	}
+
+	@media (max-width: 760px) {
+		.projects-page__header {
+			display: grid;
+		}
+	}
+</style>
