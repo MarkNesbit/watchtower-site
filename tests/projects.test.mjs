@@ -138,7 +138,9 @@ test('Project dashboard is read-only and displays metadata including description
 	assert.match(detailSource, /import RagReferencePill/);
 	assert.match(detailSource, /<ProjectPageHero[\s\S]*workspaceName=\{workspaceName\}[\s\S]*projectName=\{project\.name\}[\s\S]*projectRef=\{project\.project_ref\}[\s\S]*title="Project Dashboard"/);
 	assert.match(detailSource, /<ProjectControlPanel title="Project status"/);
-	assert.match(detailSource, /<ProjectContentPanel[\s\S]*label="Capability hub"[\s\S]*title="Project areas"/);
+	assert.match(detailSource, /<ProjectContentPanel[\s\S]*title="Project areas"[\s\S]*helper="Open a project capability or review its current availability\."/);
+	assert.doesNotMatch(detailSource, /label="Capability hub"|CAPABILITY HUB|Capability hub/);
+	assert.match(detailSource, /project-dashboard-areas-heading\) \{\s*font-size: clamp\(1\.45rem, 2\.4vw, 2rem\);/);
 	assert.match(detailSource, /<ProjectContentPanel[\s\S]*label="Read-only metadata"[\s\S]*title="Key details"/);
 	assert.match(detailSource, /<RagReferencePill[\s\S]*tone=\{healthTone\(project\.health\)\}/);
 	assert.doesNotMatch(detailSource, /project-dashboard__bar|project-dashboard__workspace|project-hero-card|project-pills|rag-timeline/);
