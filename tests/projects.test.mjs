@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { buildUniqueSlug, slugifyProjectName } from '../src/lib/projectSlugs.ts';
 import { can } from '../src/lib/permissions.ts';
-import { buildProjectEditPath, buildProjectNarrativePath, buildProjectPath, buildProjectRisksPath } from '../src/lib/projectRoutes.ts';
+import { buildProjectEditPath, buildProjectNarrativePath, buildProjectPath, buildProjectRiskPath, buildProjectRisksPath } from '../src/lib/projectRoutes.ts';
 
 const migrationPath = new URL('../supabase/migrations/20260617000100_create_projects.sql', import.meta.url);
 const projectPolicyFixMigrationPath = new URL(
@@ -15,6 +15,15 @@ test('Project slug generation creates URL-safe slugs', () => {
 	assert.equal(slugifyProjectName(' Watchtower Test Project '), 'watchtower-test-project');
 	assert.equal(slugifyProjectName('München / Delivery!'), 'munchen-delivery');
 	assert.equal(slugifyProjectName('***'), 'project');
+});
+
+test('Project route helpers build workspace-safe risk paths', () => {
+	assert.equal(buildProjectPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub');
+	assert.equal(buildProjectRisksPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub/risks');
+	assert.equal(
+		buildProjectRiskPath('alpha workspace', 'delivery hub', 'risk/id'),
+		'/app/workspaces/alpha%20workspace/projects/delivery%20hub/risks/risk%2Fid',
+	);
 });
 
 test('Safe unique slug handling appends the next available suffix', () => {

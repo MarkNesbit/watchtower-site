@@ -1,5 +1,5 @@
 import { assertCan } from './permissions';
-import { buildProjectEditPath, buildProjectNarrativePath, buildProjectPath, buildProjectRisksPath } from './projectRoutes';
+import { buildProjectEditPath, buildProjectNarrativePath, buildProjectPath, buildProjectRiskPath, buildProjectRisksPath } from './projectRoutes';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
 import { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from './projectRefs';
 
@@ -21,6 +21,7 @@ export {
 	buildProjectEditPath,
 	buildProjectNarrativePath,
 	buildProjectPath,
+	buildProjectRiskPath,
 	buildProjectRisksPath,
 	buildUniqueProjectRef,
 	normaliseProjectRef,

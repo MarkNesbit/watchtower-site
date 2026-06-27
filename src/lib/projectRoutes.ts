@@ -10,6 +10,10 @@ export function buildProjectRisksPath(workspaceSlug: string, projectSlug: string
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/risks`;
 }
 
+export function buildProjectRiskPath(workspaceSlug: string, projectSlug: string, riskId: string): string {
+	return `${buildProjectRisksPath(workspaceSlug, projectSlug)}/${encodeURIComponent(riskId)}`;
+}
+
 export function buildProjectNarrativePath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/narrative`;
 }
