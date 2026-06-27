@@ -65,6 +65,8 @@ WT-NARRATIVE-003 adds manual Project Narrative entry creation for owners, admins
 
 WT-US-0209 introduced the authenticated project page design standard and lightweight reusable layout components for future project pages. Project Narrative is the reference implementation for the shared hero, filter/status panel, main content panel, primary action slot, disabled action hint, and empty state components. The project dashboard now follows the same shell for its project context, status summary, capability hub, and read-only detail panels while retaining its existing feature-gated tile behaviour.
 
+WT-RISK-002A adds the read-only Risk Register and read-only risk detail foundation behind the `riskManagement` feature flag. The project dashboard Risk tile routes to the register when available, but dashboard risk roll-ups remain deferred. The register and detail pages display existing source-of-truth risk records only; risk creation/editing, notes/replies, Risk-to-Diary integration, attention items and notification or digest behaviour are not implemented in this slice.
+
 Risk, Issue, Dependency, and Assumption records remain authoritative. Future source-generated Narrative entries may reference them for assurance history, but must not become an alternative editing surface. The full schema and permission boundary are documented in `docs/project-narrative.md`.
 
 ## Project relationship readiness

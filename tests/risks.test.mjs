@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
+import {
+	getProjectRisk,
+	listProjectRisks,
+	riskDisplayLabel,
+	riskProfileName,
+	riskRagTone,
+} from '../src/lib/projectRisks.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260620000100_create_project_risks.sql', import.meta.url);
 const migrationSql = async () => readFile(migrationUrl, 'utf8');
@@ -10,6 +17,51 @@ const allMigrationSql = async () => {
 	const parts = await Promise.all(files.map((file) => readFile(new URL(file, dir), 'utf8')));
 	return parts.join('\n');
 };
+
+function createRiskClient(rows = []) {
+	const calls = [];
+	const riskQuery = {
+		data: rows,
+		error: null,
+		select(value) {
+			calls.push(['select', value]);
+			return this;
+		},
+		eq(column, value) {
+			calls.push(['eq', column, value]);
+			return this;
+		},
+		is(column, value) {
+			calls.push(['is', column, value]);
+			return this;
+		},
+		order(column, options) {
+			calls.push(['order', column, options]);
+			return this;
+		},
+		maybeSingle() {
+			calls.push(['maybeSingle']);
+			return { data: rows[0] ?? null, error: null };
+		},
+	};
+	const profileQuery = {
+		select(value) {
+			calls.push(['profileSelect', value]);
+			return this;
+		},
+		in(column, values) {
+			calls.push(['profileIn', column, values]);
+			return { data: [], error: null };
+		},
+	};
+	return {
+		calls,
+		from(table) {
+			calls.push(['from', table]);
+			return table === 'profiles' ? profileQuery : riskQuery;
+		},
+	};
+}
 
 test('Risk migration creates explicit risk and note tables with non-generic primary keys', async () => {
 	const sql = await migrationSql();
@@ -155,5 +207,119 @@ test('Risk foundation does not add out-of-scope RAID, notification, email, or da
 	}
 	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	assert.doesNotMatch(dashboard, /project_risks/);
+	assert.doesNotMatch(dashboard, /risk_ref/);
+});
+
+test('Risk helper labels and profile fallbacks are stakeholder-friendly', () => {
+	assert.equal(riskDisplayLabel('mitigating'), 'Mitigating');
+	assert.equal(riskDisplayLabel('not_started'), 'Not Started');
+	assert.equal(riskDisplayLabel(null, 'Not available'), 'Not available');
+	assert.equal(riskRagTone('red'), 'red');
+	assert.equal(riskRagTone('amber'), 'amber');
+	assert.equal(riskRagTone('green'), 'green');
+	assert.equal(riskRagTone('unexpected'), 'neutral');
+	assert.equal(riskProfileName({ id: '1', display_name: 'Aisha Khan', email: 'aisha@example.com' }), 'Aisha Khan');
+	assert.equal(riskProfileName(null), 'Unassigned');
+});
+
+test('Risk Register data access filters by selected workspace and project', async () => {
+	const client = createRiskClient([
+		{
+			risk_id: 'risk-1',
+			organisation_id: 'workspace-1',
+			project_id: 'project-1',
+			risk_ref: 'Risk-HHH-001',
+			risk_sequence: 1,
+			title: 'Supplier delay',
+			status: 'open',
+			probability: 'medium',
+			impact: 'high',
+			rag_status: 'amber',
+			created_by: 'user-1',
+			created_at: '2026-06-01T10:00:00Z',
+			updated_at: '2026-06-02T10:00:00Z',
+		},
+	]);
+
+	const risks = await listProjectRisks('workspace-1', 'project-1', 'viewer', client);
+	assert.equal(risks.length, 1);
+	assert.deepEqual(
+		client.calls.filter((call) => call[0] === 'eq'),
+		[
+			['eq', 'organisation_id', 'workspace-1'],
+			['eq', 'project_id', 'project-1'],
+		],
+	);
+	assert.deepEqual(
+		client.calls.filter((call) => call[0] === 'is'),
+		[
+			['is', 'deleted_at', null],
+			['is', 'archived_at', null],
+		],
+	);
+	assert.ok(client.calls.some((call) => call[0] === 'from' && call[1] === 'project_risks'));
+});
+
+test('Risk detail data access blocks cross-project and cross-workspace URL tampering', async () => {
+	const client = createRiskClient([]);
+	const risk = await getProjectRisk('workspace-1', 'project-1', 'risk-elsewhere', 'viewer', client);
+
+	assert.equal(risk, null);
+	assert.deepEqual(
+		client.calls.filter((call) => call[0] === 'eq'),
+		[
+			['eq', 'organisation_id', 'workspace-1'],
+			['eq', 'project_id', 'project-1'],
+			['eq', 'risk_id', 'risk-elsewhere'],
+		],
+	);
+	assert.ok(client.calls.some((call) => call[0] === 'maybeSingle'));
+});
+
+test('Risk Register route renders a read-only scoped table and empty state', async () => {
+	const route = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
+
+	assert.match(route, /data-risk-register-route/);
+	assert.match(route, /ProjectPageHero/);
+	assert.match(route, /title="Risk Register"/);
+	assert.match(route, /listProjectRisks\(organisation\.id, data\.id, workspace\.role, serverSupabase\)/);
+	assert.match(route, /\.eq\('slug', projectSlug\)/);
+	assert.match(route, /\.eq\('organisation_id', organisation\.id\)/);
+	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
+	for (const heading of ['Ref', 'Risk', 'RAG', 'Status', 'Owner', 'Actioner', 'Review date', 'Updated']) {
+		assert.match(route, new RegExp(`<th scope="col">${heading}</th>`));
+	}
+	assert.match(route, /No risks have been recorded for this project yet\./);
+	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
+	assert.match(route, /disabled[\s\S]*data-risk-create-disabled/);
+	assert.match(route, /Viewer access is read-only, so risk creation is unavailable for your role\./);
+	assert.match(route, /Viewer access is read-only\. Risk creation is unavailable\./);
+	assert.doesNotMatch(route, /<form\b|<input\b|<select\b|<textarea\b|type="submit"/);
+	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
+});
+
+test('Risk detail route is read-only and requires the risk to belong to the selected project', async () => {
+	const route = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId].astro', import.meta.url), 'utf8');
+
+	assert.match(route, /data-risk-detail-route/);
+	assert.match(route, /getProjectRisk\(organisation\.id, data\.id, riskId, workspace\.role, serverSupabase\)/);
+	assert.match(route, /Risk not found or you do not have access\./);
+	assert.match(route, /Read-only source-of-truth record/);
+	for (const label of ['Risk reference', 'Status', 'RAG', 'Exposure', 'Risk owner', 'Actioner', 'Review date', 'Due date', 'Created by', 'Created at', 'Updated by', 'Updated at']) {
+		assert.match(route, new RegExp(`<dt>${label}</dt>`));
+	}
+	assert.match(route, /Mitigation plan/);
+	assert.match(route, /Contingency plan/);
+	assert.match(route, /disabled[\s\S]*data-risk-edit-disabled/);
+	assert.match(route, /Viewer access is read-only\. Risk editing is unavailable\./);
+	assert.doesNotMatch(route, /<form\b|<input\b|<select\b|<textarea\b|type="submit"/);
+	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
+});
+
+test('Project dashboard Risk tile routes to the Risk Register without loading risk records', async () => {
+	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+	assert.match(dashboard, /title: 'Risks'[\s\S]*destination: 'risks'[\s\S]*featureKey: 'riskManagement'/);
+	assert.match(dashboard, /buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\)/);
+	assert.doesNotMatch(dashboard, /from\('project_risks'\)/);
 	assert.doesNotMatch(dashboard, /risk_ref/);
 });

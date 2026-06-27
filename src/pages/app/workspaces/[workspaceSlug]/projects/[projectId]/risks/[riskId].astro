@@ -1,0 +1,285 @@
+---
+import AuthenticatedLayout from '../../../../../../../layouts/AuthenticatedLayout.astro';
+import ProjectContentPanel from '../../../../../../../components/app/ProjectContentPanel.astro';
+import ProjectControlPanel from '../../../../../../../components/app/ProjectControlPanel.astro';
+import ProjectPageHero from '../../../../../../../components/app/ProjectPageHero.astro';
+import RagReferencePill from '../../../../../../../components/app/RagReferencePill.astro';
+import { getFeatureAccess, loadFeatureAccess } from '../../../../../../../lib/featureFlags';
+import { can } from '../../../../../../../lib/permissions';
+import {
+	getProjectRisk,
+	riskDisplayLabel,
+	riskProfileName,
+	riskRagTone,
+} from '../../../../../../../lib/projectRisks';
+import { buildProjectPath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../../lib/supabaseServer';
+
+const projectSlug = Astro.params.projectId;
+const riskId = Astro.params.riskId;
+const workspaceSlug = Astro.params.workspaceSlug;
+const accessToken = getServerAccessToken(Astro.cookies);
+let project = null;
+let risk = null;
+let workspaceName = '';
+let workspaceRole = '';
+let message = '';
+let featureAccess = getFeatureAccess('riskManagement');
+
+const formatDate = (value, fallback = 'Not available') => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value))
+	: fallback;
+const formatDateTime = (value, fallback = 'Not available') => value
+	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
+	: fallback;
+const formatText = (value, fallback = 'Not available') => value?.trim?.() || fallback;
+const ownerName = (record) => riskProfileName(record.owner, 'Unassigned');
+const actionerName = () => 'Unassigned';
+const creatorName = (record) => riskProfileName(record.creator, 'Workspace member');
+const updaterName = (record) => record.updated_by ? riskProfileName(record.updater, 'Workspace member') : 'Not available';
+
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug ?? '', accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+
+	if (!workspace || !organisation) {
+		message = 'Risk not found or you do not have access.';
+		Astro.response.status = 404;
+	} else if (!can(workspace.role, 'risk.view')) {
+		message = 'You do not have permission to view project risks.';
+		Astro.response.status = 403;
+	} else {
+		workspaceName = organisation.name;
+		workspaceRole = workspace.role;
+		const { data, error } = await serverSupabase
+			.from('projects')
+			.select('id, name, project_ref, slug')
+			.eq('slug', projectSlug)
+			.eq('organisation_id', organisation.id)
+			.is('deleted_at', null)
+			.is('archived_at', null)
+			.maybeSingle();
+		if (error) throw error;
+
+		if (!data) {
+			message = 'Risk not found or you do not have access.';
+			Astro.response.status = 404;
+		} else {
+			featureAccess = await loadFeatureAccess(serverSupabase, 'riskManagement', accessToken);
+			if (!featureAccess.isAccessible) {
+				message = featureAccess.unavailableReason ?? 'This feature is not currently available to your account.';
+				Astro.response.status = featureAccess.state === 'hidden' ? 404 : 403;
+			} else {
+				project = data;
+				risk = riskId
+					? await getProjectRisk(organisation.id, data.id, riskId, workspace.role, serverSupabase)
+					: null;
+				if (!risk) {
+					message = 'Risk not found or you do not have access.';
+					Astro.response.status = 404;
+				}
+			}
+		}
+	}
+} catch (error) {
+	message = error instanceof Error ? error.message : 'Unable to load risk detail.';
+	Astro.response.status = 500;
+}
+
+const canEditRisk = can(workspaceRole, 'risk.edit');
+---
+<AuthenticatedLayout title={risk && project ? `${risk.risk_ref} — ${project.name} | WatchTower` : 'Risk detail | WatchTower'}>
+	<section class="risk-detail-page" data-risk-detail-route data-feature-state={featureAccess.state}>
+		{project && risk ? (
+			<>
+				<ProjectPageHero
+					workspaceName={workspaceName}
+					projectName={project.name}
+					projectRef={project.project_ref}
+					title={risk.risk_ref}
+					description={risk.title}
+					headingId="risk-detail-heading"
+				/>
+
+				<ProjectControlPanel title="Risk detail" status="Read-only foundation" headingId="risk-detail-controls-heading">
+					<div class="risk-detail-summary">
+						<RagReferencePill
+							tone={riskRagTone(risk.rag_status)}
+							label={riskDisplayLabel(risk.rag_status)}
+							statusLabel="RAG"
+						/>
+						<span>Status: <strong>{riskDisplayLabel(risk.status)}</strong></span>
+						<span>Owner: <strong>{ownerName(risk)}</strong></span>
+					</div>
+				</ProjectControlPanel>
+
+				<ProjectContentPanel
+					title="Read-only source-of-truth record"
+					helper="This page displays the risk record without create, edit, delete, notes, diary or notification actions."
+					headingId="risk-detail-record-heading"
+				>
+					<div slot="action" class="risk-detail-action">
+						<button
+							class="button button--primary"
+							type="button"
+							disabled
+							aria-describedby="risk-edit-unavailable"
+							data-risk-edit-disabled
+							data-viewer-read-only={!canEditRisk || undefined}
+						>Edit Risk</button>
+						<small id="risk-edit-unavailable">{canEditRisk ? 'Risk editing is coming in WT-RISK-002B.' : 'Viewer access is read-only. Risk editing is unavailable.'}</small>
+					</div>
+
+					<section class="risk-detail-section" aria-labelledby="risk-detail-description-heading">
+						<h3 id="risk-detail-description-heading">Description</h3>
+						<p>{formatText(risk.description, 'No description recorded.')}</p>
+					</section>
+
+					<dl class="risk-detail-grid">
+						<div><dt>Risk reference</dt><dd>{risk.risk_ref}</dd></div>
+						<div><dt>Status</dt><dd>{riskDisplayLabel(risk.status)}</dd></div>
+						<div><dt>RAG</dt><dd>{riskDisplayLabel(risk.rag_status)}</dd></div>
+						<div><dt>Exposure</dt><dd>{riskDisplayLabel(risk.probability)} probability / {riskDisplayLabel(risk.impact)} impact</dd></div>
+						<div><dt>Risk owner</dt><dd>{ownerName(risk)}</dd></div>
+						<div><dt>Actioner</dt><dd>{actionerName()}</dd></div>
+						<div><dt>Review date</dt><dd>{formatDate(risk.review_date, 'No review date')}</dd></div>
+						<div><dt>Due date</dt><dd>{formatDate(risk.due_date, 'No due date')}</dd></div>
+						<div><dt>Created by</dt><dd>{creatorName(risk)}</dd></div>
+						<div><dt>Created at</dt><dd><time datetime={risk.created_at}>{formatDateTime(risk.created_at)}</time></dd></div>
+						<div><dt>Updated by</dt><dd>{updaterName(risk)}</dd></div>
+						<div><dt>Updated at</dt><dd><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></dd></div>
+					</dl>
+
+					<section class="risk-detail-section risk-detail-section--plans" aria-labelledby="risk-detail-plans-heading">
+						<h3 id="risk-detail-plans-heading">Plans</h3>
+						<dl class="risk-detail-grid risk-detail-grid--wide">
+							<div><dt>Mitigation plan</dt><dd>{formatText(risk.mitigation_plan, 'No mitigation plan recorded.')}</dd></div>
+							<div><dt>Contingency plan</dt><dd>{formatText(risk.contingency_plan, 'No contingency plan recorded.')}</dd></div>
+						</dl>
+					</section>
+
+					<div class="risk-detail-links">
+						<a class="text-link" href={buildProjectRisksPath(workspaceSlug ?? '', project.slug)}>Back to Risk Register</a>
+						<a class="text-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
+					</div>
+				</ProjectContentPanel>
+			</>
+		) : (
+			<section class="content-card" data-risk-detail-unavailable-message>
+				<p class="eyebrow">Risk Management</p>
+				<h1>Risk unavailable</h1>
+				<p>{message}</p>
+				<a class="button button--secondary" href={workspaceSlug && projectSlug ? buildProjectRisksPath(workspaceSlug, projectSlug) : '/app/projects'}>Back to Risk Register</a>
+			</section>
+		)}
+	</section>
+</AuthenticatedLayout>
+
+<style>
+	.risk-detail-page {
+		display: grid;
+		gap: 0.9rem;
+	}
+
+	.risk-detail-page :global(.project-content-panel h2) {
+		font-size: clamp(1.45rem, 2.4vw, 2rem);
+	}
+
+	.risk-detail-summary {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem 1rem;
+		margin-top: 0.75rem;
+		color: var(--muted-strong);
+	}
+
+	.risk-detail-summary strong {
+		color: var(--text);
+	}
+
+	.risk-detail-action {
+		display: grid;
+		justify-items: end;
+		gap: 0.45rem;
+	}
+
+	.risk-detail-action [disabled] {
+		opacity: 0.68;
+		cursor: not-allowed;
+	}
+
+	.risk-detail-action small {
+		color: var(--muted-strong);
+		font-size: 0.85rem;
+	}
+
+	.risk-detail-section {
+		display: grid;
+		gap: 0.35rem;
+		margin-bottom: 1rem;
+	}
+
+	.risk-detail-section h3 {
+		margin: 0;
+		font-size: 1rem;
+	}
+
+	.risk-detail-section p {
+		margin: 0;
+		color: var(--muted-strong);
+		overflow-wrap: anywhere;
+	}
+
+	.risk-detail-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.65rem;
+		margin: 0;
+	}
+
+	.risk-detail-grid div {
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 0.8rem;
+		background: rgba(4, 12, 24, 0.28);
+	}
+
+	.risk-detail-grid dt {
+		color: var(--text);
+		font-size: 0.84rem;
+		font-weight: 850;
+	}
+
+	.risk-detail-grid dd {
+		margin: 0.25rem 0 0;
+		color: var(--muted-strong);
+		overflow-wrap: anywhere;
+	}
+
+	.risk-detail-section--plans {
+		margin-top: 1rem;
+	}
+
+	.risk-detail-grid--wide {
+		grid-template-columns: 1fr;
+	}
+
+	.risk-detail-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.8rem;
+		margin-top: 1rem;
+	}
+
+	@media (max-width: 760px) {
+		.risk-detail-action {
+			justify-items: stretch;
+		}
+
+		.risk-detail-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>

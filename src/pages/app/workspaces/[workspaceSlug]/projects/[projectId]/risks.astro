@@ -1,17 +1,41 @@
 ---
 import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
+import DisabledActionHint from '../../../../../../components/app/DisabledActionHint.astro';
+import EmptyState from '../../../../../../components/app/EmptyState.astro';
+import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
+import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
+import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
+import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import { can } from '../../../../../../lib/permissions';
-import { buildProjectPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
+import {
+	listProjectRisks,
+	riskDisplayLabel,
+	riskProfileName,
+	riskRagTone,
+} from '../../../../../../lib/projectRisks';
+import { buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
 const workspaceSlug = Astro.params.workspaceSlug;
 const accessToken = getServerAccessToken(Astro.cookies);
 let project = null;
+let risks = [];
+let workspaceName = '';
 let workspaceRole = '';
 let message = '';
+let risksLoadError = '';
 let featureAccess = getFeatureAccess('riskManagement');
+
+const formatDate = (value, fallback = 'Not available') => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value))
+	: fallback;
+const formatDateTime = (value, fallback = 'Not available') => value
+	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
+	: fallback;
+const ownerName = (risk) => riskProfileName(risk.owner, 'Unassigned');
+const actionerName = () => 'Unassigned';
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -25,10 +49,11 @@ try {
 		message = 'You do not have permission to view project risks.';
 		Astro.response.status = 403;
 	} else {
+		workspaceName = organisation.name;
 		workspaceRole = workspace.role;
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('name, project_ref, slug')
+			.select('id, name, project_ref, slug')
 			.eq('slug', projectSlug)
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
@@ -46,55 +71,216 @@ try {
 				Astro.response.status = featureAccess.state === 'hidden' ? 404 : 403;
 			} else {
 				project = data;
+				try {
+					risks = await listProjectRisks(organisation.id, data.id, workspace.role, serverSupabase);
+				} catch (error) {
+					risks = [];
+					risksLoadError = error instanceof Error ? error.message : 'Unable to load the Risk Register.';
+				}
 			}
 		}
 	}
 } catch (error) {
-	message = error instanceof Error ? error.message : 'Unable to load risk management.';
+	message = error instanceof Error ? error.message : 'Unable to load Risk Management.';
 	Astro.response.status = 500;
 }
 
 const canCreateRisk = can(workspaceRole, 'risk.create');
 ---
-<AuthenticatedLayout title={project ? `Risks — ${project.name} | WatchTower` : 'Risks | WatchTower'}>
-	<section class="content-card" data-risk-management-route data-feature-state={featureAccess.state}>
+<AuthenticatedLayout title={project ? `Risk Register — ${project.name} | WatchTower` : 'Risk Register | WatchTower'}>
+	<section class="risk-register-page" data-risk-management-route data-risk-register-route data-feature-state={featureAccess.state}>
 		{project ? (
 			<>
-				<p class="eyebrow">Risk management</p>
-				<h1>{project.name} risks</h1>
-				<p>Project reference: <strong>{project.project_ref ?? 'Not assigned'}</strong></p>
-				<p>Risk management is available for this account. The risk workspace will be delivered in a later slice.</p>
-				<div class="feature-route-actions">
-					<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
-					{canCreateRisk ? (
-						<span class="button button--primary" aria-disabled="true">Add risk — not available yet</span>
+				<ProjectPageHero
+					workspaceName={workspaceName}
+					projectName={project.name}
+					projectRef={project.project_ref}
+					title="Risk Register"
+					description="A read-only register of source-of-truth project risks."
+					headingId="risk-register-heading"
+				/>
+
+				<ProjectControlPanel title="Risk controls" status="Read-only foundation" headingId="risk-register-controls-heading">
+					<p class="risk-register-controls__copy">Create, edit, notes, diary integration, attention items and notifications are deferred to later Risk Management slices.</p>
+				</ProjectControlPanel>
+
+				<ProjectContentPanel
+					title="Project risks"
+					helper="Review current project risks and open each reference for read-only details."
+					headingId="risk-register-table-heading"
+				>
+					<div slot="action" class="risk-register-action">
+						<button
+							class="button button--primary"
+							type="button"
+							disabled
+							aria-describedby="risk-create-unavailable"
+							data-risk-create-disabled
+							data-viewer-read-only={!canCreateRisk || undefined}
+						>New Risk</button>
+						<DisabledActionHint
+							id="risk-create-unavailable"
+							allowed={canCreateRisk}
+							allowedText="Risk creation is coming in WT-RISK-002B."
+							disabledText="Viewer access is read-only. Risk creation is unavailable."
+						/>
+					</div>
+
+					{risksLoadError ? (
+						<EmptyState title="The Risk Register could not be loaded." tone="error" data-risk-list-error role="alert">
+							<p>{risksLoadError}</p>
+							<p>Refresh the page, or try again after checking workspace access.</p>
+						</EmptyState>
+					) : risks.length === 0 ? (
+						<EmptyState title="No risks have been recorded for this project yet." data-risk-empty-state>
+							<p>When risks are recorded, this register will show the project’s source-of-truth risk reference, status, owner, review date and latest update.</p>
+							<p>{canCreateRisk ? 'Risk creation is not available until WT-RISK-002B.' : 'Viewer access is read-only, so risk creation is unavailable for your role.'}</p>
+						</EmptyState>
 					) : (
-						<span class="button button--primary" aria-disabled="true" data-viewer-read-only>Add risk</span>
+						<div class="risk-register-table-scroll">
+							<table class="simple-table risk-register-table">
+								<thead>
+									<tr>
+										<th scope="col">Ref</th>
+										<th scope="col">Risk</th>
+										<th scope="col">RAG</th>
+										<th scope="col">Status</th>
+										<th scope="col">Owner</th>
+										<th scope="col">Actioner</th>
+										<th scope="col">Review date</th>
+										<th scope="col">Updated</th>
+									</tr>
+								</thead>
+								<tbody>
+									{risks.map((risk) => (
+										<tr>
+											<td>
+												<a
+													class="risk-reference-link"
+													href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
+													aria-label={`Open ${risk.risk_ref}, ${riskDisplayLabel(risk.rag_status)} risk`}
+												>
+													<RagReferencePill
+														tone={riskRagTone(risk.rag_status)}
+														label={risk.risk_ref}
+														statusLabel={riskDisplayLabel(risk.rag_status)}
+													/>
+												</a>
+											</td>
+											<td class="risk-register-table__risk"><strong>{risk.title}</strong>{risk.description && <span>{risk.description}</span>}</td>
+											<td>{riskDisplayLabel(risk.rag_status)}</td>
+											<td>{riskDisplayLabel(risk.status)}</td>
+											<td>{ownerName(risk)}</td>
+											<td>{actionerName()}</td>
+											<td>{formatDate(risk.review_date, 'No review date')}</td>
+											<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
 					)}
-				</div>
-				{!canCreateRisk && <p data-permission-message>Viewer access is read-only.</p>}
+					<a class="text-link risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
+				</ProjectContentPanel>
 			</>
 		) : (
-			<>
-				<p class="eyebrow">Risk management</p>
+			<section class="content-card" data-feature-unavailable-message>
+				<p class="eyebrow">Risk Management</p>
 				<h1>Feature unavailable</h1>
-				<p data-feature-unavailable-message>{message}</p>
+				<p>{message}</p>
 				<a class="button button--secondary" href={workspaceSlug && projectSlug ? buildProjectPath(workspaceSlug, projectSlug) : '/app/projects'}>Back to project</a>
-			</>
+			</section>
 		)}
 	</section>
 </AuthenticatedLayout>
 
 <style>
-	.feature-route-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.8rem;
-		margin-top: 1.25rem;
+	.risk-register-page {
+		display: grid;
+		gap: 0.9rem;
 	}
 
-	[aria-disabled='true'] {
+	.risk-register-page :global(.project-content-panel h2) {
+		font-size: clamp(1.45rem, 2.4vw, 2rem);
+	}
+
+	.risk-register-controls__copy {
+		margin: 0.7rem 0 0;
+		color: var(--muted-strong);
+	}
+
+	.risk-register-action {
+		display: grid;
+		justify-items: end;
+		gap: 0.45rem;
+	}
+
+	.risk-register-action [disabled] {
 		opacity: 0.68;
 		cursor: not-allowed;
+	}
+
+	.risk-register-table-scroll {
+		overflow-x: auto;
+	}
+
+	.risk-register-table {
+		min-width: 64rem;
+	}
+
+	.risk-register-table th:first-child {
+		width: 12rem;
+	}
+
+	.risk-register-table th:nth-child(2) {
+		min-width: 18rem;
+	}
+
+	.risk-register-table td {
+		vertical-align: top;
+	}
+
+	.risk-reference-link {
+		display: inline-flex;
+		border-radius: 999px;
+		text-decoration: none;
+	}
+
+	.risk-reference-link:hover :global(.rag-reference-pill) {
+		transform: translateY(-1px);
+		background: color-mix(in srgb, var(--rag-pill-tone) 22%, transparent);
+	}
+
+	.risk-reference-link:focus-visible {
+		outline: 3px solid var(--accent-strong);
+		outline-offset: 3px;
+	}
+
+	.risk-register-table__risk {
+		max-width: 32rem;
+		overflow-wrap: anywhere;
+	}
+
+	.risk-register-table__risk strong,
+	.risk-register-table__risk span {
+		display: block;
+	}
+
+	.risk-register-table__risk span {
+		color: var(--muted-strong);
+	}
+
+	.risk-register-table__risk strong + span {
+		margin-top: 0.25rem;
+	}
+
+	.risk-register-back-link {
+		justify-self: start;
+	}
+
+	@media (max-width: 760px) {
+		.risk-register-action {
+			justify-items: stretch;
+		}
 	}
 </style>

@@ -1,11 +1,11 @@
 # Watchtower Risk Foundation
 
-**Status:** WT-RISK-001 schema foundation  
-**Scope:** Database, Row Level Security, constraints, indexes, and migration tests only
+**Status:** WT-RISK-002A read-only register and detail foundation
+**Scope:** Database, Row Level Security, constraints, indexes, migration tests, read-only Risk Register and read-only detail pages
 
 ## Purpose
 
-The risk foundation introduces the minimum database model needed for project-scoped risk management while preserving Watchtower's workspace isolation model. It does not introduce the full Risk user interface, dashboard roll-ups, email notification delivery, action approval, AI scoring, or non-risk RAID tables.
+The risk foundation introduces the minimum database model needed for project-scoped risk management while preserving Watchtower's workspace isolation model. WT-RISK-002A adds the first usable read-only Risk Management UI surface for existing risk records. It does not introduce risk creation, risk editing, dashboard roll-ups, risk notes/replies, Risk-to-Diary integration, attention item generation, email notification delivery, action approval, AI scoring, or non-risk RAID tables.
 
 ## Identifiers and references
 
@@ -38,6 +38,8 @@ Actioners are intentionally separate from owners. Actioners are people responsib
 
 A risk raiser may propose themselves as an actioner in a later slice, but the risk owner should be able to approve, replace, or reassign that actioner. `project_risk_actions` is future scope and is not built in WT-RISK-001.
 
+WT-RISK-002A therefore shows an actioner fallback of `Unassigned` rather than storing or editing an actioner on the risk record.
+
 ## Risk fields
 
 The foundation supports:
@@ -67,6 +69,8 @@ The schema permits threaded parent linking. A future UI may still choose to keep
 
 Notes and replies capture `created_by`, `created_at`, optional `updated_by`, optional `updated_at`, and optional `deleted_at` so they can act as audit records.
 
+WT-RISK-002A does not expose risk notes or replies in the user interface.
+
 ## Attention levels and notification future scope
 
 Risk notes and replies include `attention_level` values:
@@ -90,7 +94,7 @@ When the integration is implemented, a Narrative entry may retain the authoritat
 
 ## Dashboard and RAID future scope
 
-The project dashboard Risk tile remains a navigation/signal placeholder in this foundation slice. It is not connected to live `project_risks` data.
+The project dashboard Risk tile routes to the project Risk Register when Risk Management is available. The dashboard remains simple and is not connected to live `project_risks` data, roll-ups, counts or summaries in WT-RISK-002A.
 
 The following are also future scope and are not created by this foundation:
 
@@ -101,6 +105,26 @@ The following are also future scope and are not created by this foundation:
 - Actions tables;
 - Timeline or milestone tables;
 - automatic RAG scoring or AI scoring.
+
+## WT-RISK-002A read-only Risk Register
+
+The canonical route is:
+
+```text
+/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks
+```
+
+The single-risk detail route is:
+
+```text
+/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/{riskId}
+```
+
+Both routes resolve the signed-in user's active workspace membership by workspace slug, resolve the active project inside that workspace, and fetch risk records with matching `organisation_id` and `project_id`. The detail route also requires the requested `risk_id` to belong to the resolved project and workspace. Users cannot access another workspace or unrelated project's risks by changing the URL.
+
+The Risk Register displays MVP fields where available: risk reference, title/summary, RAG, status, owner, actioner fallback, review date and last updated timestamp. Missing owner, actioner and review date values render as clear fallbacks. The detail page displays the same source-of-truth risk record read-only, including description, probability/impact exposure, plans and audit metadata where available.
+
+All active workspace roles, including Viewer, may read available risk pages when the `riskManagement` feature flag permits access. No role can create, edit, delete, update, add notes, trigger Diary integration, generate attention items or send notifications from WT-RISK-002A.
 
 ## Project relationship ambiguity readiness
 

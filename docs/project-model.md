@@ -206,14 +206,23 @@ Project slugs are unique only within a workspace, so project destinations includ
 - `/app/workspaces/{workspaceSlug}/projects/{projectSlug}`
 - `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/edit`
 - `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks`
+- `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/{riskId}`
 
 Every scoped page first requires an active membership in the workspace identified by `organisations.slug`, then resolves the active project using both `projects.organisation_id` and `projects.slug`. Deleted and archived projects remain unavailable. This keeps copied links and bookmarks pinned to the intended workspace without exposing organisation or project UUIDs. RBAC remains unchanged: Viewers can open the dashboard and an available Risk Management preview, but cannot edit project details or create risks.
 
 `/app/projects/{projectSlug}` and its former edit and Risks variants remain transitional compatibility routes. They search only projects visible through the signed-in user's active memberships. One accessible match redirects to the corresponding workspace-scoped URL, multiple accessible matches show a workspace choice instead of selecting silently, and no match returns the same not-found/no-access response without revealing inaccessible project existence. New app-generated project links do not use these transitional routes.
 
+## WT-RISK-002A Risk Register foundation
+
+WT-RISK-002A makes Risk Management available as a project-scoped, read-only register and detail foundation. The Risk tile on the project dashboard routes to `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks` when the `riskManagement` feature flag and workspace RBAC allow access.
+
+The register and detail route both preserve workspace-safe routing: the route workspace is resolved first, the project is then resolved by `organisation_id` and project slug, and risk records are fetched by both `organisation_id` and `project_id`. A single-risk detail page returns not found/no access if the requested `risk_id` does not belong to that selected project and workspace.
+
+Viewer users can read the Risk Register and detail pages, but write controls remain disabled. Owners, admins and members can also read the pages, but create/edit remains deferred to WT-RISK-002B. WT-RISK-002A does not implement risk notes/replies, Risk-to-Diary integration, attention items, notifications, digest behaviour or dashboard risk roll-ups.
+
 ## Feature-gated project capabilities
 
-WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and the direct `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks` route. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. The route is a release-control placeholder and does not expand the risk UI scope described in `docs/risk-foundation.md`.
+WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and the direct `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks` route. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. WT-RISK-002A expands the accessible route from placeholder to read-only register/detail only, without adding write behaviour.
 
 WT-US-0207 adds **Project Narrative** near the start of the dashboard capability tiles. Project Narrative is the user-facing project event, update, decision and history layer: it explains what happened, what changed and why it matters. It remains distinct from **Timeline**, which represents dates, milestones and key project stages.
 

@@ -48,3 +48,9 @@ WatchTower is built around workspaces. Projects belong to workspaces, and every 
 Projects are the core objects users navigate, review and progressively enrich. Future project intelligence should help users understand project risk, dependencies, delivery confidence and governance clarity. Project health will eventually use both explicit data and missing or uncertain data as signals; optional project fields should therefore not be treated as unimportant.
 
 The project model includes a workspace-isolated relationship foundation for future dependency, prerequisite, programme and portfolio visibility. This readiness layer is not a relationship management interface or a programme/portfolio reporting feature. Non-specific `relates_to` links are reserved as possible future ambiguity signals and do not automatically create risks or change project health.
+
+## Risk Management MVP
+
+WT-RISK-002A introduces the first usable Risk Management surface: a project-scoped, read-only Risk Register and read-only risk detail page. The register displays existing source-of-truth project risk records with their human-readable risk reference, title, RAG/exposure signal, status, owner, actioner fallback, review date and latest update where those fields exist.
+
+Risk creation and editing remain deferred to WT-RISK-002B. Risk notes/replies, Risk-to-Diary integration, attention items, notifications and digest behaviour remain future slices. The Project Narrative can reference risk context in a later workflow, but it is not the source of truth for risks.
