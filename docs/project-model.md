@@ -228,13 +228,21 @@ WT-RISK-002B adds project-scoped risk creation at `/app/workspaces/{workspaceSlu
 
 Create and edit actions re-check the route workspace, project, feature flag and central `risk.create`/`risk.edit` permissions server-side. Create derives `organisation_id`, `project_id`, `risk_sequence` and `risk_ref` from the resolved workspace/project rather than trusting form data. Edit fetches the target risk by `organisation_id`, `project_id` and `risk_id`, so copied or altered URLs cannot move risk records across projects or workspaces.
 
-The form captures title, description, status, RAG, owner and review date. `owner_id` may be assigned only to an active workspace member. Actioner remains displayed as `Unassigned` because the WT-RISK-001 schema intentionally reserves actioners for a future `project_risk_actions` model. Risk references remain system-generated in `Risk-{PROJECT_REF}-{NNN}` format and read-only.
+The form captures title, description, lifecycle status, a transitional concern signal, owner, review date, due date, mitigation plan and contingency plan. `owner_id` may be assigned only to an active workspace member. Actioner remains displayed as `Unassigned` because the WT-RISK-001 schema intentionally reserves actioners for a future `project_risk_actions` model. Risk references remain system-generated in `Risk-{PROJECT_REF}-{NNN}` format and read-only.
 
 WT-RISK-002B does not implement risk delete, notes/replies, Risk-to-Diary integration, attention items, notifications, digest behaviour, dashboard roll-ups or health scoring.
 
+## WT-RISK-002C Risk register cleanup and assurance blocks
+
+WT-RISK-002C simplifies the Risk Register table to keep it stakeholder-readable: Ref, Risk, Status, Review date and Updated. The separate RAG, Owner and Actioner columns are removed from the register, and the Risk column shows title only. The risk reference pill remains the compact visual indicator, while detailed ownership and action quality now live on the risk detail page.
+
+The risk detail page becomes an assurance view. It still displays the source-of-truth record, but key sections are shown as block-level quality signals with accessible Green, Amber, Red or Unknown labels. The MVP-derived blocks cover summary, lifecycle status, exposure, risk owner, action responsibility, review cadence, due date, mitigation plan, contingency plan and latest update. Prompts such as “Set owner”, “Add review date” and “Add mitigation plan” link to the existing edit route for users with `risk.edit`; Viewers see the same concerns as read-only guidance.
+
+These indicators are deliberately simple derived checks over existing fields. They do not replace the database RAG field, create a Governance Profile engine, alter project health, generate attention items or create notifications. Manual RAG is de-emphasised in the create/edit form as a transitional concern signal until a fuller scoring model exists.
+
 ## Feature-gated project capabilities
 
-WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and direct Risk Management routes. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. WT-RISK-002B keeps the same feature-gate model while adding create/edit behaviour for permitted roles.
+WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and direct Risk Management routes. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. WT-RISK-002B and WT-RISK-002C keep the same feature-gate model while adding create/edit behaviour and assurance view improvements for permitted roles.
 
 WT-US-0207 adds **Project Narrative** near the start of the dashboard capability tiles. Project Narrative is the user-facing project event, update, decision and history layer: it explains what happened, what changed and why it matters. It remains distinct from **Timeline**, which represents dates, milestones and key project stages.
 

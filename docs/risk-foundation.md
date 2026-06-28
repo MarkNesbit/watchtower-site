@@ -1,11 +1,11 @@
 # Watchtower Risk Foundation
 
-**Status:** WT-RISK-002B create/edit flow
-**Scope:** Database, Row Level Security, constraints, indexes, migration tests, Risk Register, risk detail, risk create and risk edit pages
+**Status:** WT-RISK-002C register cleanup and assurance blocks
+**Scope:** Database, Row Level Security, constraints, indexes, migration tests, Risk Register, risk assurance detail, risk create and risk edit pages
 
 ## Purpose
 
-The risk foundation introduces the minimum database model needed for project-scoped risk management while preserving Watchtower's workspace isolation model. WT-RISK-002A added the first Risk Management UI surface for existing risk records; WT-RISK-002B adds create and edit flows for permitted workspace roles. It does not introduce risk delete, dashboard roll-ups, risk notes/replies, Risk-to-Diary integration, attention item generation, email notification delivery, action approval, health scoring, AI scoring, or non-risk RAID tables.
+The risk foundation introduces the minimum database model needed for project-scoped risk management while preserving Watchtower's workspace isolation model. WT-RISK-002A added the first Risk Management UI surface for existing risk records, WT-RISK-002B added create/edit flows for permitted workspace roles, and WT-RISK-002C simplifies the register while introducing block-level assurance signals on the detail page. It does not introduce risk delete, dashboard roll-ups, risk notes/replies, Risk-to-Diary integration, attention item generation, email notification delivery, action approval, health scoring, configurable governance scoring, AI scoring, or non-risk RAID tables.
 
 ## Identifiers and references
 
@@ -38,7 +38,7 @@ Actioners are intentionally separate from owners. Actioners are people responsib
 
 A risk raiser may propose themselves as an actioner in a later slice, but the risk owner should be able to approve, replace, or reassign that actioner. `project_risk_actions` is future scope and is not built in WT-RISK-001.
 
-WT-RISK-002B continues to show an actioner fallback of `Unassigned` rather than storing or editing an actioner on the risk record.
+WT-RISK-002C continues to show an actioner fallback of `Unassigned` rather than storing or editing an actioner on the risk record. The detail page flags action responsibility as a concern, but no actioner schema or workflow is introduced.
 
 ## Risk fields
 
@@ -50,7 +50,7 @@ The foundation supports:
 - status values: `open`, `monitoring`, `mitigating`, `accepted`, `closed`;
 - probability values: `low`, `medium`, `high`;
 - impact values: `low`, `medium`, `high`;
-- RAG status values: `blue`, `green`, `amber`, `red`;
+- transitional RAG/concern values: `blue`, `green`, `amber`, `red`;
 - owner accountability through `owner_id`;
 - review and due dates;
 - mitigation and contingency planning;
@@ -104,9 +104,10 @@ The following are also future scope and are not created by this foundation:
 - Decisions tables;
 - Actions tables;
 - Timeline or milestone tables;
-- automatic RAG scoring or AI scoring.
+- automatic or configurable RAG/governance scoring;
+- AI scoring.
 
-## WT-RISK-002A Risk Register and WT-RISK-002B create/edit
+## WT-RISK-002A/002B/002C Risk Management UI
 
 The canonical route is:
 
@@ -134,11 +135,13 @@ The edit route is:
 
 All routes resolve the signed-in user's active workspace membership by workspace slug, resolve the active project inside that workspace, and fetch or mutate risk records with matching `organisation_id` and `project_id`. The detail and edit routes also require the requested `risk_id` to belong to the resolved project and workspace. Users cannot access another workspace or unrelated project's risks by changing the URL or by altering submitted payloads.
 
-The Risk Register displays MVP fields where available: risk reference, title/summary, RAG, status, owner, actioner fallback, review date and last updated timestamp. Missing owner, actioner and review date values render as clear fallbacks. The detail page displays the same source-of-truth risk record, including description, probability/impact exposure, plans and audit metadata where available.
+The WT-RISK-002C Risk Register displays a concise table: Ref, Risk, Status, Review date and Updated. The Risk column shows the title only, not the description. The separate RAG, Owner and Actioner columns are intentionally removed from the primary register table. The risk reference pill remains the compact visual concern indicator, while detailed quality and ownership concerns are handled on the risk detail page.
 
-Owner, Admin and Member roles may create and edit risks when the `riskManagement` feature flag permits access. Create captures title, description, status, RAG, owner and review date, then generates the next project-scoped reference in `Risk-{PROJECT_REF}-{NNN}` format. Edit allows those same MVP fields to be updated while preserving immutable scope and creation fields. The database audit trigger binds `created_by` and `updated_by` to the authenticated user.
+The risk detail page is now an assurance view. It displays simple Green, Amber, Red and Unknown indicators for description, lifecycle status, exposure, owner, action responsibility, review cadence, due date, mitigation plan, contingency plan and latest update. These are MVP-derived quality signals from existing fields. They are not the final Governance Profile engine and do not alter project health or create attention/notification side effects.
 
-All active workspace roles, including Viewer, may read available risk pages when the `riskManagement` feature flag permits access. Viewer users cannot create or edit risks and see disabled write actions with read-only helper text. No role can delete risks, add notes, trigger Diary integration, generate attention items, send notifications or change health scoring from WT-RISK-002B.
+Owner, Admin and Member roles may create and edit risks when the `riskManagement` feature flag permits access. Create captures title, description, lifecycle status, a transitional concern signal, owner, review date, due date, mitigation plan and contingency plan, then generates the next project-scoped reference in `Risk-{PROJECT_REF}-{NNN}` format. Edit allows those same editable fields to be updated while preserving immutable scope and creation fields. The database audit trigger binds `created_by` and `updated_by` to the authenticated user.
+
+All active workspace roles, including Viewer, may read available risk pages when the `riskManagement` feature flag permits access. Viewer users cannot create or edit risks and see disabled write actions or read-only action prompts. No role can delete risks, add notes, trigger Diary integration, generate attention items, send notifications or change health scoring from WT-RISK-002C.
 
 ## Project relationship ambiguity readiness
 
