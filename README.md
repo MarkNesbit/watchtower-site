@@ -22,7 +22,7 @@ WatchTower is positioned around evidence-based forecasting and a future delivery
 
 Authenticated project capability routes include the feature-gated Project Narrative assurance table at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/narrative`, with manual entry creation for permitted workspace roles and read-only entry detail modals.
 
-Risk Management now has a feature-gated register at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks`, single-risk detail pages at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/{riskId}`, plus create and edit routes for owner, admin and member roles. WT-RISK-002B keeps risk references system-generated and read-only; risk delete, notes/replies, Risk-to-Diary integration, attention items, notifications and health scoring remain deferred.
+Risk Management now has a feature-gated register at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks`, single-risk assurance detail pages at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/{riskId}`, plus create and edit routes for owner, admin and member roles. WT-RISK-002C keeps the register concise and starts deriving block-level assurance indicators from record quality. Risk references remain system-generated and read-only; risk delete, notes/replies, Risk-to-Diary integration, attention items, notifications, configurable scoring and health scoring remain deferred.
 
 Authenticated project pages should follow the reusable layout, action, empty-state and restricted-action guidance in `docs/ui-page-design-standard.md`.
 

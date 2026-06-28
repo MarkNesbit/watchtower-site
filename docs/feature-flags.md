@@ -100,7 +100,7 @@ Use the progression `hidden` → `disabled` → `preview` → `enabled` when it 
 2. Set it to `disabled`: confirm the tile is visible but inactive with “This capability is not available yet.” and the direct route is blocked.
 3. Set it to `preview`: confirm a normal account sees an inactive tile and cannot enter the route; grant preview eligibility to a nominated account and confirm it can enter.
 4. While using a preview-enabled Viewer account, confirm the New Risk and Edit Risk actions remain inactive and read-only helper text is shown.
-5. While using a preview-enabled Owner, Admin or Member account, confirm the New Risk form opens and saves a risk with a generated reference.
+5. While using a preview-enabled Owner, Admin or Member account, confirm the New Risk form opens and saves a risk with a generated reference, and that the detail page shows assurance blocks.
 6. Set it to `enabled`: confirm active workspace members can enter while Viewer write restrictions remain.
 7. Delete the test row or set an invalid state in an isolated test database and confirm the helper treats the capability as hidden. Restore the reviewed state afterwards.
 

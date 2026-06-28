@@ -5,6 +5,7 @@ import {
 	buildRiskReference,
 	createProjectRisk,
 	getProjectRisk,
+	getRiskAssuranceBlocks,
 	isRiskReviewDate,
 	listProjectRisks,
 	riskDisplayLabel,
@@ -355,12 +356,50 @@ test('Risk create/edit validation covers references, required fields and dates',
 		status: 'unknown',
 		ragStatus: 'purple',
 		reviewDate: '2026-02-31',
+		dueDate: '2026-13-01',
 	}), {
 		title: 'Risk title is required.',
 		status: 'Select a valid risk status.',
 		ragStatus: 'Select a valid RAG status.',
 		reviewDate: 'Enter a valid review date.',
+		dueDate: 'Enter a valid due date.',
 	});
+});
+
+test('Risk assurance blocks derive MVP quality signals without using manual RAG as truth', () => {
+	const blocks = getRiskAssuranceBlocks({
+		risk_id: 'risk-1',
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		title: 'Supplier delay',
+		description: '',
+		status: 'open',
+		probability: 'high',
+		impact: 'high',
+		rag_status: 'green',
+		owner_id: null,
+		review_date: '2026-06-01',
+		due_date: null,
+		mitigation_plan: '',
+		contingency_plan: '',
+		created_by: 'user-1',
+		created_at: '2026-06-01T10:00:00Z',
+		updated_at: '2026-04-01T10:00:00Z',
+	}, new Date('2026-06-28T12:00:00Z'));
+	const byId = new Map(blocks.map((block) => [block.id, block]));
+
+	assert.equal(byId.get('description').tone, 'red');
+	assert.equal(byId.get('owner').tone, 'red');
+	assert.equal(byId.get('review-date').tone, 'red');
+	assert.equal(byId.get('exposure').tone, 'red');
+	assert.equal(byId.get('mitigation').tone, 'red');
+	assert.equal(byId.get('contingency').tone, 'red');
+	assert.equal(byId.get('updated').tone, 'red');
+	assert.equal(byId.get('actioner').tone, 'amber');
+	assert.equal(byId.get('owner').prompt, 'Set owner');
+	assert.equal(byId.get('review-date').prompt, 'Update review date');
 });
 
 test('Risk Register data access filters by selected workspace and project', async () => {
@@ -426,6 +465,9 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		ragStatus: 'amber',
 		ownerId: 'owner-1',
 		reviewDate: '2026-07-10',
+		dueDate: '2026-08-01',
+		mitigationPlan: 'Confirm alternative supplier.',
+		contingencyPlan: 'Escalate to steering group.',
 	}, client);
 
 	assert.equal(risk.risk_ref, 'Risk-HHH-002');
@@ -442,6 +484,9 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		rag_status: 'amber',
 		owner_id: 'owner-1',
 		review_date: '2026-07-10',
+		due_date: '2026-08-01',
+		mitigation_plan: 'Confirm alternative supplier.',
+		contingency_plan: 'Escalate to steering group.',
 	});
 	assert.ok(!client.calls.some((call) => call[0] === 'from' && ['project_narrative_entries', 'project_risk_notes', 'notification_events', 'attention_items'].includes(call[1])));
 });
@@ -455,6 +500,9 @@ test('Risk edit helper updates only scoped editable fields', async () => {
 		ragStatus: 'red',
 		ownerId: '',
 		reviewDate: '',
+		dueDate: '',
+		mitigationPlan: '',
+		contingencyPlan: '',
 	}, client);
 
 	assert.equal(risk.title, 'Supplier delay updated');
@@ -466,6 +514,9 @@ test('Risk edit helper updates only scoped editable fields', async () => {
 		rag_status: 'red',
 		owner_id: null,
 		review_date: null,
+		due_date: null,
+		mitigation_plan: null,
+		contingency_plan: null,
 	});
 	assert.deepEqual(
 		client.calls.filter((call) => call[0] === 'eq' && call[1] === 'project_risks').map((call) => call.slice(2)),
@@ -527,7 +578,7 @@ test('Expired risk create/edit sessions fail before mutation', async () => {
 	assert.ok(!updateClient.calls.some((call) => call[0] === 'update'));
 });
 
-test('Risk Register route renders a scoped table and create access state', async () => {
+test('Risk Register route renders a cleaned scoped table and create access state', async () => {
 	const route = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
 
 	assert.match(route, /data-risk-register-route/);
@@ -537,12 +588,17 @@ test('Risk Register route renders a scoped table and create access state', async
 	assert.match(route, /\.eq\('slug', projectSlug\)/);
 	assert.match(route, /\.eq\('organisation_id', organisation\.id\)/);
 	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
-	for (const heading of ['Ref', 'Risk', 'RAG', 'Status', 'Owner', 'Actioner', 'Review date', 'Updated']) {
+	for (const heading of ['Ref', 'Risk', 'Status', 'Review date', 'Updated']) {
 		assert.match(route, new RegExp(`<th scope="col">${heading}</th>`));
+	}
+	for (const removedHeading of ['RAG', 'Owner', 'Actioner']) {
+		assert.doesNotMatch(route, new RegExp(`<th scope="col">${removedHeading}</th>`));
 	}
 	assert.match(route, /No risks have been recorded for this project yet\./);
 	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
 	assert.match(route, /buildProjectNewRiskPath\(workspaceSlug \?\? '', project\.slug\)/);
+	assert.match(route, /<td class="risk-register-table__risk"><strong>\{risk\.title\}<\/strong><\/td>/);
+	assert.doesNotMatch(route, /risk\.description && <span>/);
 	assert.match(route, /data-risk-create-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-create-disabled/);
 	assert.match(route, /Viewer access is read-only, so risk creation is unavailable for your role\./);
@@ -557,12 +613,16 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /data-risk-detail-route/);
 	assert.match(route, /getProjectRisk\(organisation\.id, data\.id, riskId, workspace\.role, serverSupabase\)/);
 	assert.match(route, /Risk not found or you do not have access\./);
-	assert.match(route, /Source-of-truth record/);
-	for (const label of ['Risk reference', 'Status', 'RAG', 'Exposure', 'Risk owner', 'Actioner', 'Review date', 'Due date', 'Created by', 'Created at', 'Updated by', 'Updated at']) {
+	assert.match(route, /Risk assurance view/);
+	assert.match(route, /getRiskAssuranceBlocks\(risk, new Date\(\)\)/);
+	assert.match(route, /data-risk-assurance-blocks/);
+	for (const block of ['description', 'status', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
+		assert.match(route, new RegExp(`data-risk-assurance-block=\\{block\\.id\\}`));
+	}
+	for (const label of ['Risk reference', 'Created by', 'Created at', 'Updated by', 'Updated at', 'Transitional concern signal']) {
 		assert.match(route, new RegExp(`<dt>${label}</dt>`));
 	}
-	assert.match(route, /Mitigation plan/);
-	assert.match(route, /Contingency plan/);
+	assert.match(route, /data-viewer-read-only/);
 	assert.match(route, /buildProjectRiskEditPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
 	assert.match(route, /data-risk-edit-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-edit-disabled/);
@@ -595,9 +655,14 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(editRoute, /isSupabaseAuthSessionError\(error\)[\s\S]*Astro\.redirect\(sessionRedirectPath\)/);
 	assert.match(editRoute, /Viewer access is read-only\. Risk editing is unavailable\./);
 
-	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="rag_status"', 'name="owner_id"', 'name="review_date"']) {
+	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="rag_status"', 'name="owner_id"', 'name="review_date"', 'name="due_date"', 'name="mitigation_plan"', 'name="contingency_plan"']) {
 		assert.match(form, new RegExp(field));
 	}
+	assert.match(form, /Concern signal/);
+	assert.match(form, /Transitional signal only/);
+	assert.match(form, /data-review-date-offset="7"/);
+	assert.match(form, /data-review-date-offset="14"/);
+	assert.match(form, /data-review-date-manual/);
 	assert.match(form, /Actioner[\s\S]*Unassigned/);
 	assert.match(form, /Actioners will be handled through risk actions in a later slice\./);
 	assert.match(form, /supabase\.auth\.getSession\(\)/);

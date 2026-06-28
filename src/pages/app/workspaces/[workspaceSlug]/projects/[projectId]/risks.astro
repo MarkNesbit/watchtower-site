@@ -11,7 +11,6 @@ import { can } from '../../../../../../lib/permissions';
 import {
 	listProjectRisks,
 	riskDisplayLabel,
-	riskProfileName,
 	riskRagTone,
 } from '../../../../../../lib/projectRisks';
 import { buildProjectNewRiskPath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
@@ -34,8 +33,6 @@ const formatDate = (value, fallback = 'Not available') => value
 const formatDateTime = (value, fallback = 'Not available') => value
 	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
 	: fallback;
-const ownerName = (risk) => riskProfileName(risk.owner, 'Unassigned');
-const actionerName = () => 'Unassigned';
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -96,7 +93,7 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 					projectName={project.name}
 					projectRef={project.project_ref}
 					title="Risk Register"
-					description="A read-only register of source-of-truth project risks."
+					description="A clean register of source-of-truth project risks."
 					headingId="risk-register-heading"
 				/>
 
@@ -106,7 +103,7 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 
 				<ProjectContentPanel
 					title="Project risks"
-					helper="Review current project risks and open each reference for read-only details."
+					helper="Review current project risks and open each reference for the assurance view."
 					headingId="risk-register-table-heading"
 				>
 					<div slot="action" class="risk-register-action">
@@ -141,7 +138,7 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 						</EmptyState>
 					) : risks.length === 0 ? (
 						<EmptyState title="No risks have been recorded for this project yet." data-risk-empty-state>
-							<p>When risks are recorded, this register will show the project’s source-of-truth risk reference, status, owner, review date and latest update.</p>
+							<p>When risks are recorded, this register will show the project’s source-of-truth risk reference, title, status, review date and latest update.</p>
 							<p>{canCreateRisk ? 'Create the first risk when there is a delivery concern to manage.' : 'Viewer access is read-only, so risk creation is unavailable for your role.'}</p>
 						</EmptyState>
 					) : (
@@ -151,10 +148,7 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 									<tr>
 										<th scope="col">Ref</th>
 										<th scope="col">Risk</th>
-										<th scope="col">RAG</th>
 										<th scope="col">Status</th>
-										<th scope="col">Owner</th>
-										<th scope="col">Actioner</th>
 										<th scope="col">Review date</th>
 										<th scope="col">Updated</th>
 									</tr>
@@ -175,11 +169,8 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 													/>
 												</a>
 											</td>
-											<td class="risk-register-table__risk"><strong>{risk.title}</strong>{risk.description && <span>{risk.description}</span>}</td>
-											<td>{riskDisplayLabel(risk.rag_status)}</td>
+											<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
 											<td>{riskDisplayLabel(risk.status)}</td>
-											<td>{ownerName(risk)}</td>
-											<td>{actionerName()}</td>
 											<td>{formatDate(risk.review_date, 'No review date')}</td>
 											<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
 										</tr>
@@ -233,7 +224,7 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 	}
 
 	.risk-register-table {
-		min-width: 64rem;
+		min-width: 46rem;
 	}
 
 	.risk-register-table th:first-child {
@@ -241,7 +232,7 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 	}
 
 	.risk-register-table th:nth-child(2) {
-		min-width: 18rem;
+		min-width: 22rem;
 	}
 
 	.risk-register-table td {
@@ -269,13 +260,8 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 		overflow-wrap: anywhere;
 	}
 
-	.risk-register-table__risk strong,
-	.risk-register-table__risk span {
+	.risk-register-table__risk strong {
 		display: block;
-	}
-
-	.risk-register-table__risk span {
-		color: var(--muted-strong);
 	}
 
 	.risk-register-table__risk strong + span {

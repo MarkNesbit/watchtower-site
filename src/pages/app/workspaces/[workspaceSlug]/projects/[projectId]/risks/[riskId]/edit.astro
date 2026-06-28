@@ -37,6 +37,9 @@ let formValues = {
 	ragStatus: 'blue',
 	ownerId: '',
 	reviewDate: '',
+	dueDate: '',
+	mitigationPlan: '',
+	contingencyPlan: '',
 };
 
 const formDataToValues = (formData) => ({
@@ -46,6 +49,9 @@ const formDataToValues = (formData) => ({
 	ragStatus: String(formData.get('rag_status') ?? 'blue'),
 	ownerId: String(formData.get('owner_id') ?? ''),
 	reviewDate: String(formData.get('review_date') ?? ''),
+	dueDate: String(formData.get('due_date') ?? ''),
+	mitigationPlan: String(formData.get('mitigation_plan') ?? ''),
+	contingencyPlan: String(formData.get('contingency_plan') ?? ''),
 });
 
 const riskToValues = (record) => ({
@@ -55,6 +61,9 @@ const riskToValues = (record) => ({
 	ragStatus: record?.rag_status ?? 'blue',
 	ownerId: record?.owner_id ?? '',
 	reviewDate: record?.review_date ?? '',
+	dueDate: record?.due_date ?? '',
+	mitigationPlan: record?.mitigation_plan ?? '',
+	contingencyPlan: record?.contingency_plan ?? '',
 });
 
 try {

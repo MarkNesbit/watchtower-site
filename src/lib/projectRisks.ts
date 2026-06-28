@@ -9,6 +9,7 @@ export type RiskLevel = (typeof RISK_LEVELS)[number];
 
 export const RISK_RAG_STATUSES = ['blue', 'green', 'amber', 'red'] as const;
 export type RiskRagStatus = (typeof RISK_RAG_STATUSES)[number];
+export type RiskAssuranceTone = 'green' | 'amber' | 'red' | 'neutral';
 
 const RISK_SEQUENCE_CONSTRAINT = 'project_risks_project_sequence_key';
 const RISK_REF_CONSTRAINT = 'project_risks_project_ref_key';
@@ -47,6 +48,15 @@ export type ProjectRisk = {
 	updater?: RiskProfile | null;
 };
 
+export type RiskAssuranceBlock = {
+	id: string;
+	title: string;
+	tone: RiskAssuranceTone;
+	statusLabel: string;
+	value: string;
+	prompt?: string;
+};
+
 export type RiskOwnerOption = RiskProfile & {
 	role?: WorkspaceRole | string;
 };
@@ -58,6 +68,9 @@ export type RiskFormInput = {
 	ragStatus: string;
 	ownerId?: string;
 	reviewDate?: string;
+	dueDate?: string;
+	mitigationPlan?: string;
+	contingencyPlan?: string;
 };
 
 type DatabaseError = { code?: string; message?: string; details?: string; hint?: string };
@@ -162,12 +175,20 @@ export function validateRiskFormInput(input: RiskFormInput): Record<string, stri
 	if (!isRiskStatus(input.status)) errors.status = 'Select a valid risk status.';
 	if (!isRiskRagStatus(input.ragStatus)) errors.ragStatus = 'Select a valid RAG status.';
 	if (!isRiskReviewDate(input.reviewDate)) errors.reviewDate = 'Enter a valid review date.';
+	if (!isRiskReviewDate(input.dueDate)) errors.dueDate = 'Enter a valid due date.';
 	return errors;
 }
 
 export function riskRagTone(value: unknown): RiskRagStatus | 'neutral' {
 	if (value === 'green' || value === 'amber' || value === 'red' || value === 'blue') return value;
 	return 'neutral';
+}
+
+export function riskAssuranceToneLabel(tone: RiskAssuranceTone): string {
+	if (tone === 'green') return 'Green';
+	if (tone === 'amber') return 'Amber';
+	if (tone === 'red') return 'Red';
+	return 'Unknown';
 }
 
 export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
@@ -181,6 +202,151 @@ export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
 
 export function riskProfileName(profile: RiskProfile | null | undefined, fallback = 'Unassigned'): string {
 	return profile?.display_name || profile?.email || fallback;
+}
+
+function trimmedText(value: unknown): string {
+	return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseUtcDate(value: unknown): Date | null {
+	if (!isRiskReviewDate(value)) return null;
+	const text = trimmedText(value);
+	return text ? new Date(`${text}T00:00:00Z`) : null;
+}
+
+function startOfUtcDay(date: Date): Date {
+	return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function dateTone(value: unknown, now: Date, missingTone: RiskAssuranceTone, missingValue: string) {
+	const date = parseUtcDate(value);
+	if (!date) return { tone: missingTone, value: missingValue };
+	return date < startOfUtcDay(now)
+		? { tone: 'red' as RiskAssuranceTone, value: 'Overdue' }
+		: { tone: 'green' as RiskAssuranceTone, value: 'Scheduled' };
+}
+
+function exposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
+	if (!RISK_LEVELS.includes(probability as RiskLevel) || !RISK_LEVELS.includes(impact as RiskLevel)) return 'neutral';
+	if (probability === 'high' && impact === 'high') return 'red';
+	if (probability === 'low' && impact === 'low') return 'green';
+	if (probability === 'high' || impact === 'high' || probability === 'medium' || impact === 'medium') return 'amber';
+	return 'green';
+}
+
+function lifecycleStatusTone(status: unknown): RiskAssuranceTone {
+	const normalised = trimmedText(status).toLowerCase();
+	if (!normalised) return 'neutral';
+	if (normalised === 'draft') return 'amber';
+	if (normalised === 'materialised') return 'red';
+	if (normalised === 'closed' || normalised === 'accepted' || normalised === 'open' || normalised === 'monitoring' || normalised === 'mitigating' || normalised === 'escalated') return 'green';
+	return 'neutral';
+}
+
+function staleUpdateTone(updatedAt: unknown, now: Date): RiskAssuranceTone {
+	const text = trimmedText(updatedAt);
+	const updated = text ? new Date(text) : null;
+	if (!updated || Number.isNaN(updated.getTime())) return 'neutral';
+	const ageDays = Math.floor((now.getTime() - updated.getTime()) / 86_400_000);
+	if (ageDays > 60) return 'red';
+	if (ageDays > 30) return 'amber';
+	return 'green';
+}
+
+export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): RiskAssuranceBlock[] {
+	const description = trimmedText(risk.description);
+	const descriptionTone: RiskAssuranceTone = !description ? 'red' : description.length < 30 ? 'amber' : 'green';
+	const exposure = exposureTone(risk.probability, risk.impact);
+	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
+	const due = dateTone(risk.due_date, now, 'neutral', 'No due date');
+	const mitigation = trimmedText(risk.mitigation_plan);
+	const contingency = trimmedText(risk.contingency_plan);
+	const mitigationTone: RiskAssuranceTone = mitigation ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'neutral';
+	const contingencyTone: RiskAssuranceTone = contingency ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'neutral';
+	const updatedTone = staleUpdateTone(risk.updated_at, now);
+
+	return [
+		{
+			id: 'description',
+			title: 'Summary',
+			tone: descriptionTone,
+			statusLabel: riskAssuranceToneLabel(descriptionTone),
+			value: description || 'No description recorded.',
+			prompt: !description ? 'Add description' : descriptionTone === 'amber' ? 'Strengthen description' : undefined,
+		},
+		{
+			id: 'status',
+			title: 'Lifecycle status',
+			tone: lifecycleStatusTone(risk.status),
+			statusLabel: riskAssuranceToneLabel(lifecycleStatusTone(risk.status)),
+			value: riskDisplayLabel(risk.status),
+			prompt: lifecycleStatusTone(risk.status) === 'red' ? 'Review status' : lifecycleStatusTone(risk.status) === 'amber' ? 'Confirm status' : undefined,
+		},
+		{
+			id: 'exposure',
+			title: 'Exposure',
+			tone: exposure,
+			statusLabel: riskAssuranceToneLabel(exposure),
+			value: `${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact`,
+			prompt: exposure === 'neutral' ? 'Review exposure' : exposure === 'red' ? 'Add mitigation plan' : undefined,
+		},
+		{
+			id: 'owner',
+			title: 'Risk owner',
+			tone: risk.owner_id ? 'green' : 'red',
+			statusLabel: riskAssuranceToneLabel(risk.owner_id ? 'green' : 'red'),
+			value: riskProfileName(risk.owner, 'Unassigned'),
+			prompt: risk.owner_id ? undefined : 'Set owner',
+		},
+		{
+			id: 'actioner',
+			title: 'Action responsibility',
+			tone: 'amber',
+			statusLabel: riskAssuranceToneLabel('amber'),
+			value: 'Unassigned',
+			prompt: 'Review action responsibility',
+		},
+		{
+			id: 'review-date',
+			title: 'Review cadence',
+			tone: review.tone,
+			statusLabel: riskAssuranceToneLabel(review.tone),
+			value: review.value,
+			prompt: review.tone === 'red' ? 'Update review date' : review.tone === 'amber' ? 'Add review date' : undefined,
+		},
+		{
+			id: 'due-date',
+			title: 'Due date',
+			tone: due.tone,
+			statusLabel: riskAssuranceToneLabel(due.tone),
+			value: due.value,
+			prompt: due.tone === 'red' ? 'Review due date' : undefined,
+		},
+		{
+			id: 'mitigation',
+			title: 'Mitigation plan',
+			tone: mitigationTone,
+			statusLabel: riskAssuranceToneLabel(mitigationTone),
+			value: mitigation || 'No mitigation plan recorded.',
+			prompt: mitigation ? undefined : 'Add mitigation plan',
+		},
+		{
+			id: 'contingency',
+			title: 'Contingency plan',
+			tone: contingencyTone,
+			statusLabel: riskAssuranceToneLabel(contingencyTone),
+			value: contingency || 'No contingency plan recorded.',
+			prompt: contingency ? undefined : 'Add contingency plan',
+		},
+		{
+			id: 'updated',
+			title: 'Latest update',
+			tone: updatedTone,
+			statusLabel: riskAssuranceToneLabel(updatedTone),
+			value: updatedTone === 'red' ? 'Stale' : updatedTone === 'amber' ? 'Needs review' : updatedTone === 'green' ? 'Recent' : 'Not available',
+			prompt: updatedTone === 'red' || updatedTone === 'amber' ? 'Review risk record' : undefined,
+		},
+	];
 }
 
 export async function listProjectRisks(
@@ -344,6 +510,9 @@ function normaliseRiskPayload(input: RiskFormInput) {
 		rag_status: input.ragStatus as RiskRagStatus,
 		owner_id: input.ownerId?.trim() || null,
 		review_date: input.reviewDate?.trim() || null,
+		due_date: input.dueDate?.trim() || null,
+		mitigation_plan: input.mitigationPlan?.trim() || null,
+		contingency_plan: input.contingencyPlan?.trim() || null,
 	};
 }
 
