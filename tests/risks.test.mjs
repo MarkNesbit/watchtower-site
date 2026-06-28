@@ -2,11 +2,16 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+	buildRiskReference,
+	createProjectRisk,
 	getProjectRisk,
+	isRiskReviewDate,
 	listProjectRisks,
 	riskDisplayLabel,
 	riskProfileName,
 	riskRagTone,
+	updateProjectRisk,
+	validateRiskFormInput,
 } from '../src/lib/projectRisks.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260620000100_create_project_risks.sql', import.meta.url);
@@ -39,6 +44,10 @@ function createRiskClient(rows = []) {
 			calls.push(['order', column, options]);
 			return this;
 		},
+		limit(value) {
+			calls.push(['limit', value]);
+			return this;
+		},
 		maybeSingle() {
 			calls.push(['maybeSingle']);
 			return { data: rows[0] ?? null, error: null };
@@ -59,6 +68,119 @@ function createRiskClient(rows = []) {
 		from(table) {
 			calls.push(['from', table]);
 			return table === 'profiles' ? profileQuery : riskQuery;
+		},
+	};
+}
+
+function createRiskMutationClient({ role = 'member', existingSequence = 1, ownerIsActive = true } = {}) {
+	const calls = [];
+	const membershipWithWorkspace = {
+		role,
+		organisations: { id: 'workspace-1', name: 'Alpha Workspace', slug: 'alpha' },
+	};
+	const project = { id: 'project-1', name: 'Delivery Hub', project_ref: 'HHH', slug: 'delivery-hub' };
+
+	const makeQuery = (table) => {
+		const query = {
+			table,
+			selectValue: '',
+			insertPayload: null,
+			updatePayload: null,
+			select(value) {
+				this.selectValue = value;
+				calls.push(['select', table, value]);
+				return this;
+			},
+			insert(payload) {
+				this.insertPayload = payload;
+				calls.push(['insert', table, payload]);
+				return this;
+			},
+			update(payload) {
+				this.updatePayload = payload;
+				calls.push(['update', table, payload]);
+				return this;
+			},
+			eq(column, value) {
+				calls.push(['eq', table, column, value]);
+				return this;
+			},
+			is(column, value) {
+				calls.push(['is', table, column, value]);
+				return this;
+			},
+			order(column, options) {
+				calls.push(['order', table, column, options]);
+				return this;
+			},
+			limit(value) {
+				calls.push(['limit', table, value]);
+				return this;
+			},
+			in(column, values) {
+				calls.push(['in', table, column, values]);
+				return { data: [], error: null };
+			},
+			maybeSingle() {
+				calls.push(['maybeSingle', table, this.selectValue]);
+				if (table === 'organisation_members' && this.selectValue.includes('organisations')) {
+					return { data: membershipWithWorkspace, error: null };
+				}
+				if (table === 'organisation_members') {
+					return { data: ownerIsActive ? { user_id: 'owner-1' } : null, error: null };
+				}
+				if (table === 'projects') return { data: project, error: null };
+				if (table === 'project_risks' && this.updatePayload) {
+					return {
+						data: {
+							risk_id: 'risk-1',
+							organisation_id: 'workspace-1',
+							project_id: 'project-1',
+							risk_ref: 'Risk-HHH-001',
+							risk_sequence: 1,
+							probability: 'medium',
+							impact: 'medium',
+							created_by: 'user-1',
+							created_at: '2026-06-01T10:00:00Z',
+							updated_at: '2026-06-02T10:00:00Z',
+							...this.updatePayload,
+						},
+						error: null,
+					};
+				}
+				if (table === 'project_risks') return { data: { risk_sequence: existingSequence }, error: null };
+				return { data: null, error: null };
+			},
+			single() {
+				calls.push(['single', table]);
+				return {
+					data: {
+						risk_id: 'risk-2',
+						probability: 'medium',
+						impact: 'medium',
+						created_by: 'user-1',
+						created_at: '2026-06-01T10:00:00Z',
+						updated_at: '2026-06-01T10:00:00Z',
+						...this.insertPayload,
+					},
+					error: null,
+				};
+			},
+		};
+		return query;
+	};
+
+	return {
+		calls,
+		auth: {
+			getUser() {
+				calls.push(['getUser']);
+				return { data: { user: { id: 'user-1' } }, error: null };
+			},
+		},
+		from(table) {
+			calls.push(['from', table]);
+			return makeQuery(table);
 		},
 	};
 }
@@ -222,6 +344,24 @@ test('Risk helper labels and profile fallbacks are stakeholder-friendly', () => 
 	assert.equal(riskProfileName(null), 'Unassigned');
 });
 
+test('Risk create/edit validation covers references, required fields and dates', () => {
+	assert.equal(buildRiskReference('HHH', 3), 'Risk-HHH-003');
+	assert.throws(() => buildRiskReference('bad slug', 1), /valid project reference/);
+	assert.equal(isRiskReviewDate('2026-02-28'), true);
+	assert.equal(isRiskReviewDate('2026-02-31'), false);
+	assert.deepEqual(validateRiskFormInput({
+		title: ' ',
+		status: 'unknown',
+		ragStatus: 'purple',
+		reviewDate: '2026-02-31',
+	}), {
+		title: 'Risk title is required.',
+		status: 'Select a valid risk status.',
+		ragStatus: 'Select a valid RAG status.',
+		reviewDate: 'Enter a valid review date.',
+	});
+});
+
 test('Risk Register data access filters by selected workspace and project', async () => {
 	const client = createRiskClient([
 		{
@@ -276,7 +416,92 @@ test('Risk detail data access blocks cross-project and cross-workspace URL tampe
 	assert.ok(client.calls.some((call) => call[0] === 'maybeSingle'));
 });
 
-test('Risk Register route renders a read-only scoped table and empty state', async () => {
+test('Risk create helper writes a project-scoped risk with a generated reference', async () => {
+	const client = createRiskMutationClient({ existingSequence: 1 });
+	const risk = await createProjectRisk('alpha', 'delivery-hub', {
+		title: 'Supplier delay',
+		description: 'Critical supplier date is moving.',
+		status: 'open',
+		ragStatus: 'amber',
+		ownerId: 'owner-1',
+		reviewDate: '2026-07-10',
+	}, client);
+
+	assert.equal(risk.risk_ref, 'Risk-HHH-002');
+	const insertCall = client.calls.find((call) => call[0] === 'insert' && call[1] === 'project_risks');
+	assert.ok(insertCall);
+	assert.deepEqual(insertCall[2], {
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		title: 'Supplier delay',
+		description: 'Critical supplier date is moving.',
+		status: 'open',
+		rag_status: 'amber',
+		owner_id: 'owner-1',
+		review_date: '2026-07-10',
+	});
+	assert.ok(!client.calls.some((call) => call[0] === 'from' && ['project_narrative_entries', 'project_risk_notes', 'notification_events', 'attention_items'].includes(call[1])));
+});
+
+test('Risk edit helper updates only scoped editable fields', async () => {
+	const client = createRiskMutationClient();
+	const risk = await updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
+		title: 'Supplier delay updated',
+		description: 'New mitigation agreed.',
+		status: 'mitigating',
+		ragStatus: 'red',
+		ownerId: '',
+		reviewDate: '',
+	}, client);
+
+	assert.equal(risk.title, 'Supplier delay updated');
+	const updateCall = client.calls.find((call) => call[0] === 'update' && call[1] === 'project_risks');
+	assert.deepEqual(updateCall[2], {
+		title: 'Supplier delay updated',
+		description: 'New mitigation agreed.',
+		status: 'mitigating',
+		rag_status: 'red',
+		owner_id: null,
+		review_date: null,
+	});
+	assert.deepEqual(
+		client.calls.filter((call) => call[0] === 'eq' && call[1] === 'project_risks').map((call) => call.slice(2)),
+		[
+			['organisation_id', 'workspace-1'],
+			['project_id', 'project-1'],
+			['risk_id', 'risk-1'],
+		],
+	);
+});
+
+test('Viewer writes and inactive owner assignments are rejected before risk mutation', async () => {
+	const viewerClient = createRiskMutationClient({ role: 'viewer' });
+	await assert.rejects(
+		createProjectRisk('alpha', 'delivery-hub', {
+			title: 'No write',
+			status: 'open',
+			ragStatus: 'blue',
+		}, viewerClient),
+		/risk creation/,
+	);
+	assert.ok(!viewerClient.calls.some((call) => call[0] === 'insert'));
+
+	const ownerClient = createRiskMutationClient({ ownerIsActive: false });
+	await assert.rejects(
+		updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
+			title: 'Owner mismatch',
+			status: 'open',
+			ragStatus: 'blue',
+			ownerId: 'owner-1',
+		}, ownerClient),
+		/active workspace member/,
+	);
+	assert.ok(!ownerClient.calls.some((call) => call[0] === 'update'));
+});
+
+test('Risk Register route renders a scoped table and create access state', async () => {
 	const route = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
 
 	assert.match(route, /data-risk-register-route/);
@@ -291,6 +516,8 @@ test('Risk Register route renders a read-only scoped table and empty state', asy
 	}
 	assert.match(route, /No risks have been recorded for this project yet\./);
 	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
+	assert.match(route, /buildProjectNewRiskPath\(workspaceSlug \?\? '', project\.slug\)/);
+	assert.match(route, /data-risk-create-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-create-disabled/);
 	assert.match(route, /Viewer access is read-only, so risk creation is unavailable for your role\./);
 	assert.match(route, /Viewer access is read-only\. Risk creation is unavailable\./);
@@ -298,22 +525,64 @@ test('Risk Register route renders a read-only scoped table and empty state', asy
 	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
 });
 
-test('Risk detail route is read-only and requires the risk to belong to the selected project', async () => {
+test('Risk detail route renders edit access state and requires the risk to belong to the selected project', async () => {
 	const route = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId].astro', import.meta.url), 'utf8');
 
 	assert.match(route, /data-risk-detail-route/);
 	assert.match(route, /getProjectRisk\(organisation\.id, data\.id, riskId, workspace\.role, serverSupabase\)/);
 	assert.match(route, /Risk not found or you do not have access\./);
-	assert.match(route, /Read-only source-of-truth record/);
+	assert.match(route, /Source-of-truth record/);
 	for (const label of ['Risk reference', 'Status', 'RAG', 'Exposure', 'Risk owner', 'Actioner', 'Review date', 'Due date', 'Created by', 'Created at', 'Updated by', 'Updated at']) {
 		assert.match(route, new RegExp(`<dt>${label}</dt>`));
 	}
 	assert.match(route, /Mitigation plan/);
 	assert.match(route, /Contingency plan/);
+	assert.match(route, /buildProjectRiskEditPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
+	assert.match(route, /data-risk-edit-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-edit-disabled/);
 	assert.match(route, /Viewer access is read-only\. Risk editing is unavailable\./);
 	assert.doesNotMatch(route, /<form\b|<input\b|<select\b|<textarea\b|type="submit"/);
 	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
+});
+
+test('Risk create and edit routes enforce permissions, validation and scoped mutations', async () => {
+	const createRoute = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/new.astro', import.meta.url), 'utf8');
+	const editRoute = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId]/edit.astro', import.meta.url), 'utf8');
+	const form = await readFile(new URL('../src/components/app/RiskForm.astro', import.meta.url), 'utf8');
+
+	assert.match(createRoute, /data-risk-new-route/);
+	assert.match(createRoute, /can\(workspace\.role, 'risk\.create'\)/);
+	assert.match(createRoute, /Astro\.request\.method === 'POST'/);
+	assert.match(createRoute, /validateRiskFormInput\(formValues\)/);
+	assert.match(createRoute, /createProjectRisk\(workspaceSlug \?\? '', projectSlug \?\? '', formValues, serverSupabase, accessToken\)/);
+	assert.match(createRoute, /buildProjectRiskPath\(workspaceSlug \?\? '', data\.slug, risk\.risk_id\)/);
+	assert.match(createRoute, /\.eq\('slug', projectSlug\)[\s\S]*\.eq\('organisation_id', organisation\.id\)/);
+	assert.match(createRoute, /Viewer access is read-only\. Risk creation is unavailable\./);
+
+	assert.match(editRoute, /data-risk-edit-route/);
+	assert.match(editRoute, /can\(workspace\.role, 'risk\.edit'\)/);
+	assert.match(editRoute, /getProjectRisk\(organisation\.id, data\.id, riskId, workspace\.role, serverSupabase\)/);
+	assert.match(editRoute, /updateProjectRisk\(workspaceSlug \?\? '', projectSlug \?\? '', risk\.risk_id, formValues, serverSupabase, accessToken\)/);
+	assert.match(editRoute, /Viewer access is read-only\. Risk editing is unavailable\./);
+
+	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="rag_status"', 'name="owner_id"', 'name="review_date"']) {
+		assert.match(form, new RegExp(field));
+	}
+	assert.match(form, /Actioner[\s\S]*Unassigned/);
+	assert.match(form, /Actioners will be handled through risk actions in a later slice\./);
+});
+
+test('Risk create/edit source avoids deferred side effects', async () => {
+	const sources = await Promise.all([
+		readFile(new URL('../src/lib/projectRisks.ts', import.meta.url), 'utf8'),
+		readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/new.astro', import.meta.url), 'utf8'),
+		readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId]/edit.astro', import.meta.url), 'utf8'),
+	]);
+	const combined = sources.join('\n');
+	for (const table of ['project_narrative_entries', 'project_risk_notes', 'attention_items', 'notification_events', 'email_notifications']) {
+		assert.doesNotMatch(combined, new RegExp(`from\\('${table}'\\)|insert\\([\\s\\S]*${table}`, 'i'));
+	}
+	assert.doesNotMatch(combined, /health\s*:/i);
 });
 
 test('Project dashboard Risk tile routes to the Risk Register without loading risk records', async () => {

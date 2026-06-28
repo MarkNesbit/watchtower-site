@@ -23,7 +23,7 @@ Feature flags are product controls, not a replacement for authentication or auth
 
 Unknown keys, missing rows and malformed states resolve to `hidden`. This is the production-safe, fail-closed default.
 
-The first end-to-end integration is `riskManagement`. Its project dashboard tile uses the central helper and `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks` repeats the check on direct access. The guarded route also requires an active membership in the workspace named by the route and the `risk.view` permission. Viewers may view the available read-only Risk Register and detail pages, but all risk create/edit actions remain disabled.
+The first end-to-end integration is `riskManagement`. Its project dashboard tile uses the central helper and the project Risk Management routes repeat the check on direct access. Guarded routes also require an active membership in the workspace named by the route and the relevant `risk.view`, `risk.create` or `risk.edit` permission. Viewers may view the available Risk Register and detail pages, but all risk create/edit actions remain disabled.
 
 The project dashboard also uses `projectDiary` for the user-facing **Project Narrative** tile. Project Narrative is the project event/history/story layer and is separate from the date-and-milestone **Timeline** tile. Feature-gated tile handling is shared across both capability keys. WT-US-0207 does not add a Project Narrative route, so a visible tile stays inactive with the normal capability-unavailable treatment even when its flag would otherwise permit access; it never links to a missing destination.
 
@@ -99,8 +99,9 @@ Use the progression `hidden` → `disabled` → `preview` → `enabled` when it 
 1. Set `riskManagement` to `hidden`: confirm the tile is absent and the direct route returns the unavailable page with a blocked response.
 2. Set it to `disabled`: confirm the tile is visible but inactive with “This capability is not available yet.” and the direct route is blocked.
 3. Set it to `preview`: confirm a normal account sees an inactive tile and cannot enter the route; grant preview eligibility to a nominated account and confirm it can enter.
-4. While using a preview-enabled Viewer account, confirm the New Risk action remains inactive and read-only helper text is shown.
-5. Set it to `enabled`: confirm active workspace members can enter while Viewer write restrictions remain.
-6. Delete the test row or set an invalid state in an isolated test database and confirm the helper treats the capability as hidden. Restore the reviewed state afterwards.
+4. While using a preview-enabled Viewer account, confirm the New Risk and Edit Risk actions remain inactive and read-only helper text is shown.
+5. While using a preview-enabled Owner, Admin or Member account, confirm the New Risk form opens and saves a risk with a generated reference.
+6. Set it to `enabled`: confirm active workspace members can enter while Viewer write restrictions remain.
+7. Delete the test row or set an invalid state in an isolated test database and confirm the helper treats the capability as hidden. Restore the reviewed state afterwards.
 
 Subscription tiers, billing, organisation purchases, A/B testing, analytics and a feature-flag administration UI remain out of scope.

@@ -1,0 +1,182 @@
+---
+import AuthenticatedLayout from '../../../../../../../layouts/AuthenticatedLayout.astro';
+import ProjectContentPanel from '../../../../../../../components/app/ProjectContentPanel.astro';
+import ProjectControlPanel from '../../../../../../../components/app/ProjectControlPanel.astro';
+import ProjectPageHero from '../../../../../../../components/app/ProjectPageHero.astro';
+import RiskForm from '../../../../../../../components/app/RiskForm.astro';
+import { getFeatureAccess, loadFeatureAccess } from '../../../../../../../lib/featureFlags';
+import { can } from '../../../../../../../lib/permissions';
+import {
+	createProjectRisk,
+	isValidRiskProjectRef,
+	listRiskOwnerOptions,
+	validateRiskFormInput,
+} from '../../../../../../../lib/projectRisks';
+import { buildProjectPath, buildProjectRiskPath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../../lib/supabaseServer';
+
+const projectSlug = Astro.params.projectId;
+const workspaceSlug = Astro.params.workspaceSlug;
+const accessToken = getServerAccessToken(Astro.cookies);
+let project = null;
+let ownerOptions = [];
+let workspaceName = '';
+let workspaceRole = '';
+let message = '';
+let saveMessage = '';
+let formErrors = {};
+let featureAccess = getFeatureAccess('riskManagement');
+let canCreateRisk = false;
+let formValues = {
+	title: '',
+	description: '',
+	status: 'open',
+	ragStatus: 'blue',
+	ownerId: '',
+	reviewDate: '',
+};
+
+const formDataToValues = (formData) => ({
+	title: String(formData.get('title') ?? ''),
+	description: String(formData.get('description') ?? ''),
+	status: String(formData.get('status') ?? 'open'),
+	ragStatus: String(formData.get('rag_status') ?? 'blue'),
+	ownerId: String(formData.get('owner_id') ?? ''),
+	reviewDate: String(formData.get('review_date') ?? ''),
+});
+
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug ?? '', accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+
+	if (!workspace || !organisation) {
+		message = 'Project not found or you do not have access.';
+		Astro.response.status = 404;
+	} else if (!can(workspace.role, 'risk.view')) {
+		message = 'You do not have permission to view project risks.';
+		Astro.response.status = 403;
+	} else {
+		workspaceName = organisation.name;
+		workspaceRole = workspace.role;
+		canCreateRisk = can(workspace.role, 'risk.create');
+		const { data, error } = await serverSupabase
+			.from('projects')
+			.select('id, name, project_ref, slug')
+			.eq('slug', projectSlug)
+			.eq('organisation_id', organisation.id)
+			.is('deleted_at', null)
+			.is('archived_at', null)
+			.maybeSingle();
+		if (error) throw error;
+
+		if (!data) {
+			message = 'Project not found or you do not have access.';
+			Astro.response.status = 404;
+		} else {
+			featureAccess = await loadFeatureAccess(serverSupabase, 'riskManagement', accessToken);
+			if (!featureAccess.isAccessible) {
+				message = featureAccess.unavailableReason ?? 'This feature is not currently available to your account.';
+				Astro.response.status = featureAccess.state === 'hidden' ? 404 : 403;
+			} else {
+				project = data;
+				if (!canCreateRisk) {
+					message = 'Viewer access is read-only. Risk creation is unavailable.';
+					Astro.response.status = 403;
+				} else if (!isValidRiskProjectRef(data.project_ref)) {
+					message = 'This project needs a valid project reference before risks can be created.';
+					canCreateRisk = false;
+					Astro.response.status = 403;
+				} else {
+					try {
+						ownerOptions = await listRiskOwnerOptions(organisation.id, workspace.role, serverSupabase);
+					} catch {
+						ownerOptions = [];
+					}
+
+					if (Astro.request.method === 'POST') {
+						const formData = await Astro.request.formData();
+						formValues = formDataToValues(formData);
+						formErrors = validateRiskFormInput(formValues);
+
+						if (Object.keys(formErrors).length === 0) {
+							try {
+								const risk = await createProjectRisk(workspaceSlug ?? '', projectSlug ?? '', formValues, serverSupabase, accessToken);
+								return Astro.redirect(buildProjectRiskPath(workspaceSlug ?? '', data.slug, risk.risk_id));
+							} catch (error) {
+								const errorMessage = error instanceof Error ? error.message : 'Unable to create risk.';
+								formErrors = errorMessage.includes('owner')
+									? { ownerId: errorMessage }
+									: { general: errorMessage };
+							}
+						}
+						saveMessage = formErrors.general ?? 'Please fix the highlighted fields.';
+					}
+				}
+			}
+		}
+	}
+} catch (error) {
+	message = error instanceof Error ? error.message : 'Unable to load Risk Management.';
+	Astro.response.status = 500;
+}
+---
+<AuthenticatedLayout title={project ? `New Risk — ${project.name} | WatchTower` : 'New Risk | WatchTower'}>
+	<section class="risk-form-page" data-risk-new-route data-feature-state={featureAccess.state}>
+		{project && canCreateRisk ? (
+			<>
+				<ProjectPageHero
+					workspaceName={workspaceName}
+					projectName={project.name}
+					projectRef={project.project_ref}
+					title="New Risk"
+					description="Create a project-level source-of-truth risk record."
+					headingId="risk-new-heading"
+				/>
+
+				<ProjectControlPanel title="Risk controls" status="Create risk" headingId="risk-new-controls-heading">
+					<p class="risk-form-page__copy">Saving this form creates a Risk record only. It does not create diary entries, attention items, notifications or health score changes.</p>
+				</ProjectControlPanel>
+
+				<ProjectContentPanel
+					title="Risk details"
+					helper="Capture the minimum fields needed to manage this project risk."
+					headingId="risk-new-form-heading"
+				>
+					<RiskForm
+						mode="create"
+						values={formValues}
+						errors={formErrors}
+						ownerOptions={ownerOptions}
+						projectRef={project.project_ref}
+						message={saveMessage}
+						cancelHref={buildProjectRisksPath(workspaceSlug ?? '', project.slug)}
+					/>
+				</ProjectContentPanel>
+			</>
+		) : (
+			<section class="content-card" data-risk-create-unavailable-message>
+				<p class="eyebrow">Risk Management</p>
+				<h1>Risk creation unavailable</h1>
+				<p>{message || saveMessage}</p>
+				<a class="button button--secondary" href={project ? buildProjectRisksPath(workspaceSlug ?? '', project.slug) : (workspaceSlug && projectSlug ? buildProjectPath(workspaceSlug, projectSlug) : '/app/projects')}>Back to Risk Register</a>
+			</section>
+		)}
+	</section>
+</AuthenticatedLayout>
+
+<style>
+	.risk-form-page {
+		display: grid;
+		gap: 0.9rem;
+	}
+
+	.risk-form-page :global(.project-content-panel h2) {
+		font-size: clamp(1.45rem, 2.4vw, 2rem);
+	}
+
+	.risk-form-page__copy {
+		margin: 0.7rem 0 0;
+		color: var(--muted-strong);
+	}
+</style>

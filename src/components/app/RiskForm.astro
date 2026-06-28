@@ -1,0 +1,288 @@
+---
+import {
+	RISK_RAG_STATUSES,
+	RISK_STATUSES,
+	riskDisplayLabel,
+	riskProfileName,
+	type RiskOwnerOption,
+} from '../../lib/projectRisks';
+
+type RiskFormValues = {
+	title: string;
+	description: string;
+	status: string;
+	ragStatus: string;
+	ownerId: string;
+	reviewDate: string;
+};
+
+const {
+	mode = 'create',
+	values,
+	errors = {},
+	ownerOptions = [],
+	projectRef = '',
+	riskRef = '',
+	message = '',
+	cancelHref = '',
+} = Astro.props as {
+	mode: 'create' | 'edit';
+	values: RiskFormValues;
+	errors?: Record<string, string>;
+	ownerOptions?: RiskOwnerOption[];
+	projectRef?: string;
+	riskRef?: string;
+	message?: string;
+	cancelHref: string;
+};
+
+const title = mode === 'edit' ? 'Edit Risk' : 'Create Risk';
+const submitLabel = mode === 'edit' ? 'Save risk' : 'Create risk';
+const describedBy = [
+	message ? 'risk-form-message' : '',
+	errors.general ? 'risk-form-general-error' : '',
+].filter(Boolean).join(' ') || undefined;
+---
+
+<form class="risk-form" method="post" novalidate data-risk-form data-risk-create-form={mode === 'create' || undefined} data-risk-edit-form={mode === 'edit' || undefined} aria-describedby={describedBy}>
+	<div>
+		<p class="eyebrow">{mode === 'edit' ? riskRef : 'New Risk'}</p>
+		<h2>{title}</h2>
+		<p>Risk references are assigned by Watchtower and cannot be edited.</p>
+	</div>
+
+	<div class="risk-form__reference" aria-label="Risk reference">
+		<span>Project reference</span>
+		<strong>{projectRef || 'Not available'}</strong>
+		{riskRef ? (
+			<>
+				<span>Risk reference</span>
+				<strong>{riskRef}</strong>
+			</>
+		) : (
+			<>
+				<span>Next risk reference</span>
+				<strong>Assigned on save</strong>
+			</>
+		)}
+	</div>
+
+	{message && <p class="form-message risk-form__message" id="risk-form-message" role="alert">{message}</p>}
+	{errors.general && <p class="field-error" id="risk-form-general-error">{errors.general}</p>}
+
+	<label for="risk-title">Title <span aria-hidden="true">*</span></label>
+	<input
+		id="risk-title"
+		name="title"
+		value={values.title}
+		required
+		aria-required="true"
+		aria-invalid={Boolean(errors.title) || undefined}
+		aria-describedby={errors.title ? 'risk-title-error' : undefined}
+		autocomplete="off"
+	/>
+	{errors.title && <p class="field-error" id="risk-title-error">{errors.title}</p>}
+
+	<label for="risk-description">Description</label>
+	<textarea
+		id="risk-description"
+		name="description"
+		rows="6"
+		aria-invalid={Boolean(errors.description) || undefined}
+		aria-describedby={errors.description ? 'risk-description-error' : undefined}
+	>{values.description}</textarea>
+	{errors.description && <p class="field-error" id="risk-description-error">{errors.description}</p>}
+
+	<div class="risk-form__grid">
+		<div>
+			<label for="risk-status">Status <span aria-hidden="true">*</span></label>
+			<select
+				id="risk-status"
+				name="status"
+				required
+				aria-required="true"
+				aria-invalid={Boolean(errors.status) || undefined}
+				aria-describedby={errors.status ? 'risk-status-error' : undefined}
+			>
+				{RISK_STATUSES.map((status) => <option value={status} selected={values.status === status}>{riskDisplayLabel(status)}</option>)}
+			</select>
+			{errors.status && <p class="field-error" id="risk-status-error">{errors.status}</p>}
+		</div>
+
+		<div>
+			<label for="risk-rag-status">RAG <span aria-hidden="true">*</span></label>
+			<select
+				id="risk-rag-status"
+				name="rag_status"
+				required
+				aria-required="true"
+				aria-invalid={Boolean(errors.ragStatus) || undefined}
+				aria-describedby={errors.ragStatus ? 'risk-rag-status-error' : undefined}
+			>
+				{RISK_RAG_STATUSES.map((ragStatus) => <option value={ragStatus} selected={values.ragStatus === ragStatus}>{riskDisplayLabel(ragStatus)}</option>)}
+			</select>
+			{errors.ragStatus && <p class="field-error" id="risk-rag-status-error">{errors.ragStatus}</p>}
+		</div>
+
+		<div>
+			<label for="risk-owner-id">Owner</label>
+			<select
+				id="risk-owner-id"
+				name="owner_id"
+				aria-invalid={Boolean(errors.ownerId) || undefined}
+				aria-describedby={errors.ownerId ? 'risk-owner-id-error' : 'risk-owner-id-help'}
+			>
+				<option value="">Unassigned</option>
+				{ownerOptions.map((owner) => (
+					<option value={owner.id} selected={values.ownerId === owner.id}>{riskProfileName(owner, `Workspace member ${owner.id.slice(0, 8)}`)}</option>
+				))}
+			</select>
+			<p class="form-help" id="risk-owner-id-help">Choose an active workspace member when ownership is known.</p>
+			{errors.ownerId && <p class="field-error" id="risk-owner-id-error">{errors.ownerId}</p>}
+		</div>
+
+		<div>
+			<label for="risk-review-date">Review date</label>
+			<input
+				id="risk-review-date"
+				name="review_date"
+				type="date"
+				value={values.reviewDate}
+				aria-invalid={Boolean(errors.reviewDate) || undefined}
+				aria-describedby={errors.reviewDate ? 'risk-review-date-error' : undefined}
+			/>
+			{errors.reviewDate && <p class="field-error" id="risk-review-date-error">{errors.reviewDate}</p>}
+		</div>
+	</div>
+
+	<div class="risk-form__readonly">
+		<span>Actioner</span>
+		<strong>Unassigned</strong>
+		<p>Actioners will be handled through risk actions in a later slice.</p>
+	</div>
+
+	<div class="risk-form__actions">
+		<a class="button button--secondary" href={cancelHref}>Cancel</a>
+		<button class="button button--primary" type="submit">{submitLabel}</button>
+	</div>
+</form>
+
+<style>
+	.risk-form {
+		display: grid;
+		gap: 0.9rem;
+	}
+
+	.risk-form h2 {
+		margin: 0 0 0.35rem;
+		font-size: 1.7rem;
+	}
+
+	.risk-form p {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.risk-form label {
+		color: var(--muted-strong);
+		font-size: 0.86rem;
+		font-weight: 850;
+	}
+
+	.risk-form input,
+	.risk-form textarea,
+	.risk-form select {
+		width: 100%;
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 0.75rem 0.85rem;
+		background: #07111d;
+		color: var(--text);
+		font: inherit;
+	}
+
+	.risk-form input[aria-invalid='true'],
+	.risk-form textarea[aria-invalid='true'],
+	.risk-form select[aria-invalid='true'] {
+		border-color: #ff817a;
+		box-shadow: 0 0 0 2px rgba(255, 69, 58, 0.16);
+	}
+
+	.risk-form__reference,
+	.risk-form__readonly {
+		display: grid;
+		grid-template-columns: minmax(9rem, 0.35fr) 1fr;
+		gap: 0.35rem 0.75rem;
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 0.8rem;
+		background: rgba(4, 12, 24, 0.28);
+	}
+
+	.risk-form__reference span,
+	.risk-form__readonly span {
+		color: var(--muted-strong);
+		font-size: 0.84rem;
+		font-weight: 850;
+	}
+
+	.risk-form__reference strong,
+	.risk-form__readonly strong {
+		color: var(--text);
+	}
+
+	.risk-form__readonly p {
+		grid-column: 1 / -1;
+		font-size: 0.86rem;
+	}
+
+	.risk-form__grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.9rem;
+	}
+
+	.risk-form__grid > div {
+		display: grid;
+		gap: 0.35rem;
+		align-content: start;
+	}
+
+	.risk-form__message {
+		margin: 0;
+	}
+
+	.form-help {
+		font-size: 0.82rem;
+	}
+
+	.field-error {
+		margin: -0.55rem 0 0;
+		color: #ffb4ae;
+		font-size: 0.84rem;
+		font-weight: 750;
+	}
+
+	.risk-form__grid .field-error {
+		margin: 0;
+	}
+
+	.risk-form__actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.75rem;
+		margin-top: 0.25rem;
+	}
+
+	@media (max-width: 760px) {
+		.risk-form__grid,
+		.risk-form__reference,
+		.risk-form__readonly {
+			grid-template-columns: 1fr;
+		}
+
+		.risk-form__actions {
+			display: grid;
+		}
+	}
+</style>

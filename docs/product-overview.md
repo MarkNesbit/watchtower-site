@@ -51,6 +51,6 @@ The project model includes a workspace-isolated relationship foundation for futu
 
 ## Risk Management MVP
 
-WT-RISK-002A introduces the first usable Risk Management surface: a project-scoped, read-only Risk Register and read-only risk detail page. The register displays existing source-of-truth project risk records with their human-readable risk reference, title, RAG/exposure signal, status, owner, actioner fallback, review date and latest update where those fields exist.
+WT-RISK-002A introduced the first usable Risk Management surface: a project-scoped Risk Register and risk detail page. The register displays source-of-truth project risk records with their human-readable risk reference, title, RAG/exposure signal, status, owner, actioner fallback, review date and latest update where those fields exist.
 
-Risk creation and editing remain deferred to WT-RISK-002B. Risk notes/replies, Risk-to-Diary integration, attention items, notifications and digest behaviour remain future slices. The Project Narrative can reference risk context in a later workflow, but it is not the source of truth for risks.
+WT-RISK-002B adds create and edit flows for owner, admin and member workspace roles. Watchtower generates risk references using `Risk-{PROJECT_REF}-{NNN}` and users cannot edit them. Viewer users retain read-only access. Risk delete, risk notes/replies, Risk-to-Diary integration, attention items, notifications, digest behaviour and health scoring remain future slices. The Project Narrative can reference risk context in a later workflow, but it is not the source of truth for risks.
