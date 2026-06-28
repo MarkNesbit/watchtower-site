@@ -72,7 +72,7 @@ function createRiskClient(rows = []) {
 	};
 }
 
-function createRiskMutationClient({ role = 'member', existingSequence = 1, ownerIsActive = true } = {}) {
+function createRiskMutationClient({ role = 'member', existingSequence = 1, ownerIsActive = true, authError = null } = {}) {
 	const calls = [];
 	const membershipWithWorkspace = {
 		role,
@@ -175,6 +175,7 @@ function createRiskMutationClient({ role = 'member', existingSequence = 1, owner
 		auth: {
 			getUser() {
 				calls.push(['getUser']);
+				if (authError) return { data: { user: null }, error: authError };
 				return { data: { user: { id: 'user-1' } }, error: null };
 			},
 		},
@@ -501,6 +502,31 @@ test('Viewer writes and inactive owner assignments are rejected before risk muta
 	assert.ok(!ownerClient.calls.some((call) => call[0] === 'update'));
 });
 
+test('Expired risk create/edit sessions fail before mutation', async () => {
+	const authError = new Error('invalid JWT: unable to parse or verify signature, token has invalid claims: token is expired');
+	const createClient = createRiskMutationClient({ authError });
+	await assert.rejects(
+		createProjectRisk('alpha', 'delivery-hub', {
+			title: 'Expired session',
+			status: 'open',
+			ragStatus: 'blue',
+		}, createClient, 'expired-token'),
+		/invalid JWT/,
+	);
+	assert.ok(!createClient.calls.some((call) => call[0] === 'insert'));
+
+	const updateClient = createRiskMutationClient({ authError });
+	await assert.rejects(
+		updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
+			title: 'Expired session',
+			status: 'open',
+			ragStatus: 'blue',
+		}, updateClient, 'expired-token'),
+		/invalid JWT/,
+	);
+	assert.ok(!updateClient.calls.some((call) => call[0] === 'update'));
+});
+
 test('Risk Register route renders a scoped table and create access state', async () => {
 	const route = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
 
@@ -557,12 +583,16 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(createRoute, /createProjectRisk\(workspaceSlug \?\? '', projectSlug \?\? '', formValues, serverSupabase, accessToken\)/);
 	assert.match(createRoute, /buildProjectRiskPath\(workspaceSlug \?\? '', data\.slug, risk\.risk_id\)/);
 	assert.match(createRoute, /\.eq\('slug', projectSlug\)[\s\S]*\.eq\('organisation_id', organisation\.id\)/);
+	assert.match(createRoute, /buildLoginRedirectPath\(Astro\.url\.pathname\)/);
+	assert.match(createRoute, /isSupabaseAuthSessionError\(error\)[\s\S]*Astro\.redirect\(sessionRedirectPath\)/);
 	assert.match(createRoute, /Viewer access is read-only\. Risk creation is unavailable\./);
 
 	assert.match(editRoute, /data-risk-edit-route/);
 	assert.match(editRoute, /can\(workspace\.role, 'risk\.edit'\)/);
 	assert.match(editRoute, /getProjectRisk\(organisation\.id, data\.id, riskId, workspace\.role, serverSupabase\)/);
 	assert.match(editRoute, /updateProjectRisk\(workspaceSlug \?\? '', projectSlug \?\? '', risk\.risk_id, formValues, serverSupabase, accessToken\)/);
+	assert.match(editRoute, /buildLoginRedirectPath\(Astro\.url\.pathname\)/);
+	assert.match(editRoute, /isSupabaseAuthSessionError\(error\)[\s\S]*Astro\.redirect\(sessionRedirectPath\)/);
 	assert.match(editRoute, /Viewer access is read-only\. Risk editing is unavailable\./);
 
 	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="rag_status"', 'name="owner_id"', 'name="review_date"']) {
@@ -570,6 +600,10 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	}
 	assert.match(form, /Actioner[\s\S]*Unassigned/);
 	assert.match(form, /Actioners will be handled through risk actions in a later slice\./);
+	assert.match(form, /supabase\.auth\.getSession\(\)/);
+	assert.match(form, /document\.cookie = `wt-access-token=\$\{session\.access_token\}/);
+	assert.match(form, /document\.cookie = `wt-refresh-token=\$\{session\.refresh_token\}/);
+	assert.match(form, /window\.location\.assign\(`\/login\?redirectTo=\$\{encodeURIComponent\(window\.location\.pathname\)\}`\)/);
 });
 
 test('Risk create/edit source avoids deferred side effects', async () => {

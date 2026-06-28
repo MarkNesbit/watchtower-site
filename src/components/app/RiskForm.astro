@@ -167,6 +167,33 @@ const describedBy = [
 	</div>
 </form>
 
+<script>
+	import { supabase } from '../../lib/supabaseClient';
+
+	const writeSessionCookies = (session) => {
+		const cookieOptions = `path=/; SameSite=Lax; max-age=${session.expires_in ?? 3600}`;
+		document.cookie = `wt-access-token=${session.access_token}; ${cookieOptions}`;
+		document.cookie = `wt-refresh-token=${session.refresh_token}; ${cookieOptions}`;
+	};
+
+	document.querySelectorAll('[data-risk-form]').forEach((form) => {
+		let sessionSynced = false;
+		form.addEventListener('submit', async (event) => {
+			if (sessionSynced) return;
+			event.preventDefault();
+			const { data } = await supabase.auth.getSession();
+			if (!data.session) {
+				window.location.assign(`/login?redirectTo=${encodeURIComponent(window.location.pathname)}`);
+				return;
+			}
+
+			writeSessionCookies(data.session);
+			sessionSynced = true;
+			if (form instanceof HTMLFormElement) form.submit();
+		});
+	});
+</script>
+
 <style>
 	.risk-form {
 		display: grid;
