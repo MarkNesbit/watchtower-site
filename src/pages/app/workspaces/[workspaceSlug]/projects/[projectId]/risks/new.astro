@@ -13,11 +13,12 @@ import {
 	validateRiskFormInput,
 } from '../../../../../../../lib/projectRisks';
 import { buildProjectPath, buildProjectRiskPath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../../../lib/projects';
-import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../../lib/supabaseServer';
+import { buildLoginRedirectPath, createSupabaseServerClient, getServerAccessToken, isSupabaseAuthSessionError } from '../../../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
 const workspaceSlug = Astro.params.workspaceSlug;
 const accessToken = getServerAccessToken(Astro.cookies);
+const sessionRedirectPath = buildLoginRedirectPath(Astro.url.pathname);
 let project = null;
 let ownerOptions = [];
 let workspaceName = '';
@@ -46,6 +47,7 @@ const formDataToValues = (formData) => ({
 });
 
 try {
+	if (!accessToken) return Astro.redirect(sessionRedirectPath);
 	const serverSupabase = createSupabaseServerClient(accessToken);
 	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug ?? '', accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
@@ -90,7 +92,8 @@ try {
 				} else {
 					try {
 						ownerOptions = await listRiskOwnerOptions(organisation.id, workspace.role, serverSupabase);
-					} catch {
+					} catch (error) {
+						if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
 						ownerOptions = [];
 					}
 
@@ -104,6 +107,7 @@ try {
 								const risk = await createProjectRisk(workspaceSlug ?? '', projectSlug ?? '', formValues, serverSupabase, accessToken);
 								return Astro.redirect(buildProjectRiskPath(workspaceSlug ?? '', data.slug, risk.risk_id));
 							} catch (error) {
+								if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
 								const errorMessage = error instanceof Error ? error.message : 'Unable to create risk.';
 								formErrors = errorMessage.includes('owner')
 									? { ownerId: errorMessage }
@@ -117,6 +121,7 @@ try {
 		}
 	}
 } catch (error) {
+	if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
 	message = error instanceof Error ? error.message : 'Unable to load Risk Management.';
 	Astro.response.status = 500;
 }

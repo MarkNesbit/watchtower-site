@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { getSafeRedirectPath } from '../src/lib/redirect.js';
+import { buildLoginRedirectPath, isSupabaseAuthSessionError } from '../src/lib/supabaseServer.ts';
 
 test('getSafeRedirectPath accepts same-origin relative paths', () => {
 	assert.equal(getSafeRedirectPath('/app'), '/app');
@@ -20,6 +21,18 @@ test('getSafeRedirectPath falls back for missing or malformed values', () => {
 	assert.equal(getSafeRedirectPath(''), '/app');
 	assert.equal(getSafeRedirectPath('dashboard'), '/app');
 	assert.equal(getSafeRedirectPath('/\\attacker.example'), '/app');
+});
+
+test('server auth helpers redirect safely and recognise expired Supabase JWT errors', () => {
+	assert.equal(
+		buildLoginRedirectPath('/app/workspaces/alpha/projects/delivery-hub/risks/new'),
+		'/login?redirectTo=%2Fapp%2Fworkspaces%2Falpha%2Fprojects%2Fdelivery-hub%2Frisks%2Fnew',
+	);
+	assert.equal(
+		isSupabaseAuthSessionError(new Error('invalid JWT: unable to parse or verify signature, token has invalid claims: token is expired')),
+		true,
+	);
+	assert.equal(isSupabaseAuthSessionError(new Error('Select an active workspace member as risk owner.')), false);
 });
 
 test('middleware does not use the wt-session marker cookie as authentication', async () => {
