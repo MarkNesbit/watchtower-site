@@ -12,7 +12,7 @@ import {
 	riskProfileName,
 	riskRagTone,
 } from '../../../../../../../lib/projectRisks';
-import { buildProjectPath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../../../lib/projects';
+import { buildProjectPath, buildProjectRiskEditPath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -102,7 +102,7 @@ const canEditRisk = can(workspaceRole, 'risk.edit');
 					headingId="risk-detail-heading"
 				/>
 
-				<ProjectControlPanel title="Risk detail" status="Read-only foundation" headingId="risk-detail-controls-heading">
+				<ProjectControlPanel title="Risk detail" status="Source-of-truth record" headingId="risk-detail-controls-heading">
 					<div class="risk-detail-summary">
 						<RagReferencePill
 							tone={riskRagTone(risk.rag_status)}
@@ -115,20 +115,28 @@ const canEditRisk = can(workspaceRole, 'risk.edit');
 				</ProjectControlPanel>
 
 				<ProjectContentPanel
-					title="Read-only source-of-truth record"
-					helper="This page displays the risk record without create, edit, delete, notes, diary or notification actions."
+					title="Source-of-truth record"
+					helper="This page displays the risk record. Delete, notes, diary, attention, notification and health scoring actions remain outside this slice."
 					headingId="risk-detail-record-heading"
 				>
 					<div slot="action" class="risk-detail-action">
-						<button
-							class="button button--primary"
-							type="button"
-							disabled
-							aria-describedby="risk-edit-unavailable"
-							data-risk-edit-disabled
-							data-viewer-read-only={!canEditRisk || undefined}
-						>Edit Risk</button>
-						<small id="risk-edit-unavailable">{canEditRisk ? 'Risk editing is coming in WT-RISK-002B.' : 'Viewer access is read-only. Risk editing is unavailable.'}</small>
+						{canEditRisk ? (
+							<a
+								class="button button--primary"
+								href={buildProjectRiskEditPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
+								data-risk-edit-action
+							>Edit Risk</a>
+						) : (
+							<button
+								class="button button--primary"
+								type="button"
+								disabled
+								aria-describedby="risk-edit-unavailable"
+								data-risk-edit-disabled
+								data-viewer-read-only
+							>Edit Risk</button>
+						)}
+						<small id="risk-edit-unavailable">{canEditRisk ? 'Update this risk record.' : 'Viewer access is read-only. Risk editing is unavailable.'}</small>
 					</div>
 
 					<section class="risk-detail-section" aria-labelledby="risk-detail-description-heading">

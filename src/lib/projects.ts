@@ -1,7 +1,15 @@
-import { assertCan } from './permissions';
-import { buildProjectEditPath, buildProjectNarrativePath, buildProjectPath, buildProjectRiskPath, buildProjectRisksPath } from './projectRoutes';
-import { buildUniqueSlug, slugifyProjectName } from './projectSlugs';
-import { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from './projectRefs';
+import { assertCan } from './permissions.ts';
+import {
+	buildProjectEditPath,
+	buildProjectNarrativePath,
+	buildProjectNewRiskPath,
+	buildProjectPath,
+	buildProjectRiskEditPath,
+	buildProjectRiskPath,
+	buildProjectRisksPath,
+} from './projectRoutes.ts';
+import { buildUniqueSlug, slugifyProjectName } from './projectSlugs.ts';
+import { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from './projectRefs.ts';
 
 const PROJECT_REF_CONSTRAINT = 'projects_organisation_project_ref_key';
 const PROJECT_NAME_CONSTRAINT = 'projects_organisation_project_name_key';
@@ -20,7 +28,9 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 export {
 	buildProjectEditPath,
 	buildProjectNarrativePath,
+	buildProjectNewRiskPath,
 	buildProjectPath,
+	buildProjectRiskEditPath,
 	buildProjectRiskPath,
 	buildProjectRisksPath,
 	buildUniqueProjectRef,

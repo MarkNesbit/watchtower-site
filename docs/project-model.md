@@ -206,9 +206,11 @@ Project slugs are unique only within a workspace, so project destinations includ
 - `/app/workspaces/{workspaceSlug}/projects/{projectSlug}`
 - `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/edit`
 - `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks`
+- `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/new`
 - `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/{riskId}`
+- `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/{riskId}/edit`
 
-Every scoped page first requires an active membership in the workspace identified by `organisations.slug`, then resolves the active project using both `projects.organisation_id` and `projects.slug`. Deleted and archived projects remain unavailable. This keeps copied links and bookmarks pinned to the intended workspace without exposing organisation or project UUIDs. RBAC remains unchanged: Viewers can open the dashboard and an available Risk Management preview, but cannot edit project details or create risks.
+Every scoped page first requires an active membership in the workspace identified by `organisations.slug`, then resolves the active project using both `projects.organisation_id` and `projects.slug`. Deleted and archived projects remain unavailable. This keeps copied links and bookmarks pinned to the intended workspace without exposing organisation or project UUIDs. RBAC remains unchanged: Viewers can open the dashboard and an available Risk Management preview, but cannot edit project details or create/edit risks.
 
 `/app/projects/{projectSlug}` and its former edit and Risks variants remain transitional compatibility routes. They search only projects visible through the signed-in user's active memberships. One accessible match redirects to the corresponding workspace-scoped URL, multiple accessible matches show a workspace choice instead of selecting silently, and no match returns the same not-found/no-access response without revealing inaccessible project existence. New app-generated project links do not use these transitional routes.
 
@@ -218,11 +220,21 @@ WT-RISK-002A makes Risk Management available as a project-scoped, read-only regi
 
 The register and detail route both preserve workspace-safe routing: the route workspace is resolved first, the project is then resolved by `organisation_id` and project slug, and risk records are fetched by both `organisation_id` and `project_id`. A single-risk detail page returns not found/no access if the requested `risk_id` does not belong to that selected project and workspace.
 
-Viewer users can read the Risk Register and detail pages, but write controls remain disabled. Owners, admins and members can also read the pages, but create/edit remains deferred to WT-RISK-002B. WT-RISK-002A does not implement risk notes/replies, Risk-to-Diary integration, attention items, notifications, digest behaviour or dashboard risk roll-ups.
+In WT-RISK-002A, Viewer users could read the Risk Register and detail pages while all write controls remained disabled; create/edit was deliberately left for WT-RISK-002B. WT-RISK-002A does not implement risk notes/replies, Risk-to-Diary integration, attention items, notifications, digest behaviour or dashboard risk roll-ups.
+
+## WT-RISK-002B Risk create/edit flow
+
+WT-RISK-002B adds project-scoped risk creation at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/new` and risk editing at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/{riskId}/edit`. The register New Risk action and detail Edit Risk action are active for Owner, Admin and Member roles. Viewer users continue to see read-only risk pages with disabled write actions and explanatory helper text.
+
+Create and edit actions re-check the route workspace, project, feature flag and central `risk.create`/`risk.edit` permissions server-side. Create derives `organisation_id`, `project_id`, `risk_sequence` and `risk_ref` from the resolved workspace/project rather than trusting form data. Edit fetches the target risk by `organisation_id`, `project_id` and `risk_id`, so copied or altered URLs cannot move risk records across projects or workspaces.
+
+The form captures title, description, status, RAG, owner and review date. `owner_id` may be assigned only to an active workspace member. Actioner remains displayed as `Unassigned` because the WT-RISK-001 schema intentionally reserves actioners for a future `project_risk_actions` model. Risk references remain system-generated in `Risk-{PROJECT_REF}-{NNN}` format and read-only.
+
+WT-RISK-002B does not implement risk delete, notes/replies, Risk-to-Diary integration, attention items, notifications, digest behaviour, dashboard roll-ups or health scoring.
 
 ## Feature-gated project capabilities
 
-WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and the direct `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks` route. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. WT-RISK-002A expands the accessible route from placeholder to read-only register/detail only, without adding write behaviour.
+WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and direct Risk Management routes. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. WT-RISK-002B keeps the same feature-gate model while adding create/edit behaviour for permitted roles.
 
 WT-US-0207 adds **Project Narrative** near the start of the dashboard capability tiles. Project Narrative is the user-facing project event, update, decision and history layer: it explains what happened, what changed and why it matters. It remains distinct from **Timeline**, which represents dates, milestones and key project stages.
 

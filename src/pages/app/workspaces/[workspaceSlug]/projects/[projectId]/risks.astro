@@ -14,7 +14,7 @@ import {
 	riskProfileName,
 	riskRagTone,
 } from '../../../../../../lib/projectRisks';
-import { buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
+import { buildProjectNewRiskPath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -100,8 +100,8 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 					headingId="risk-register-heading"
 				/>
 
-				<ProjectControlPanel title="Risk controls" status="Read-only foundation" headingId="risk-register-controls-heading">
-					<p class="risk-register-controls__copy">Create, edit, notes, diary integration, attention items and notifications are deferred to later Risk Management slices.</p>
+				<ProjectControlPanel title="Risk controls" status="Create and edit enabled" headingId="risk-register-controls-heading">
+					<p class="risk-register-controls__copy">Create and update project-level source-of-truth risks. Notes, diary integration, attention items, notifications and health scoring remain outside this slice.</p>
 				</ProjectControlPanel>
 
 				<ProjectContentPanel
@@ -110,18 +110,26 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 					headingId="risk-register-table-heading"
 				>
 					<div slot="action" class="risk-register-action">
-						<button
-							class="button button--primary"
-							type="button"
-							disabled
-							aria-describedby="risk-create-unavailable"
-							data-risk-create-disabled
-							data-viewer-read-only={!canCreateRisk || undefined}
-						>New Risk</button>
+						{canCreateRisk ? (
+							<a
+								class="button button--primary"
+								href={buildProjectNewRiskPath(workspaceSlug ?? '', project.slug)}
+								data-risk-create-action
+							>New Risk</a>
+						) : (
+							<button
+								class="button button--primary"
+								type="button"
+								disabled
+								aria-describedby="risk-create-unavailable"
+								data-risk-create-disabled
+								data-viewer-read-only
+							>New Risk</button>
+						)}
 						<DisabledActionHint
 							id="risk-create-unavailable"
 							allowed={canCreateRisk}
-							allowedText="Risk creation is coming in WT-RISK-002B."
+							allowedText="Create a new project risk."
 							disabledText="Viewer access is read-only. Risk creation is unavailable."
 						/>
 					</div>
@@ -134,7 +142,7 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 					) : risks.length === 0 ? (
 						<EmptyState title="No risks have been recorded for this project yet." data-risk-empty-state>
 							<p>When risks are recorded, this register will show the project’s source-of-truth risk reference, status, owner, review date and latest update.</p>
-							<p>{canCreateRisk ? 'Risk creation is not available until WT-RISK-002B.' : 'Viewer access is read-only, so risk creation is unavailable for your role.'}</p>
+							<p>{canCreateRisk ? 'Create the first risk when there is a delivery concern to manage.' : 'Viewer access is read-only, so risk creation is unavailable for your role.'}</p>
 						</EmptyState>
 					) : (
 						<div class="risk-register-table-scroll">
