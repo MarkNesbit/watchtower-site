@@ -807,21 +807,36 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /createProjectRiskComment\(workspaceSlug \?\? '', data\.slug, risk\.risk_id/);
 	assert.match(route, /Risk not found or you do not have access\./);
 	assert.match(route, /title="Current risk"/);
-	assert.match(route, /title="What needs attention"/);
+	assert.match(route, /title="Core Risk Detail"/);
+	assert.doesNotMatch(route, /What needs attention/);
 	assert.doesNotMatch(route, /Risk assurance view/);
+	assert.match(route, /class="risk-detail-heading"/);
+	assert.match(route, /label=\{risk\.risk_ref\}/);
+	assert.match(route, /statusLabel=\{riskDisplayLabel\(risk\.rag_status\)\}/);
+	assert.match(route, /data-risk-summary-strip/);
+	for (const label of ['Concern', 'Lifecycle status', 'Owner', 'Created by', 'Created at', 'Updated by', 'Updated at']) {
+		assert.match(route, new RegExp(`<dt>${label}</dt>`));
+	}
+	assert.match(route, /creatorName\(risk\)/);
+	assert.match(route, /updaterName\(risk\)/);
+	assert.match(route, /ownerName\(risk\)/);
 	assert.match(route, /getRiskAssuranceBlocks\(risk, new Date\(\)\)/);
 	assert.match(route, /data-risk-assurance-blocks/);
 	for (const block of ['description', 'status', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
 		assert.match(route, new RegExp(`data-risk-assurance-block=\\{block\\.id\\}`));
 	}
 	assert.match(route, /data-risk-dialog-open/);
+	assert.match(route, /data-risk-modal-backdrop-blur/);
+	assert.match(route, /backdrop-filter: blur\(10px\)/);
 	assert.match(route, /data-risk-detail-save-form/);
 	assert.match(route, /data-risk-comment-form/);
-	assert.match(route, /title="Comments"/);
+	assert.match(route, /data-risk-comments-section/);
+	assert.match(route, /title="Core Risk Detail"[\s\S]*data-risk-comments-section/);
+	assert.doesNotMatch(route, /<ProjectContentPanel[\s\S]*title="Comments"/);
 	assert.match(route, /name="intent" value="add-comment"/);
-	for (const label of ['Risk reference', 'Created by', 'Created at', 'Updated by', 'Updated at']) {
-		assert.match(route, new RegExp(`<dt>${label}</dt>`));
-	}
+	assert.match(route, /Back to Risk Register/);
+	assert.match(route, /Back to project/);
+	assert.doesNotMatch(route, /<dt>Risk reference<\/dt>/);
 	assert.doesNotMatch(route, /<dt>Transitional concern signal<\/dt>/);
 	assert.match(route, /data-viewer-read-only/);
 	assert.match(route, /buildProjectRiskEditPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);

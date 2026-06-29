@@ -16,6 +16,7 @@ const {
 	description = '',
 	headingId = 'project-page-heading',
 } = Astro.props;
+const hasTitleSlot = Astro.slots.has('title');
 ---
 
 <section class="content-card project-page-hero" aria-labelledby={headingId}>
@@ -29,7 +30,7 @@ const {
 				{projectRef && <span>{projectRef}</span>}
 			</p>
 		)}
-		<h1 id={headingId}>{title}</h1>
+		{hasTitleSlot ? <slot name="title" /> : <h1 id={headingId}>{title}</h1>}
 		{description && <p class="project-page-hero__description">{description}</p>}
 	</div>
 	<div class="project-page-hero__mark" aria-hidden="true">
