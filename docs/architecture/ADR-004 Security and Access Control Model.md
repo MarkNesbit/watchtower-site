@@ -232,7 +232,7 @@ The utility may simulate the fixed MVP roles:
 
 The simulation changes the effective role used by application permission helpers and RLS role checks, but it must not change `organisation_members.role`.
 
-Simulation state is stored in `internal_role_simulations`, is scoped to the `mark-nesbit-professional` workspace, is available only when the profile has `is_internal_tester = true`, and expires automatically after 4 hours.
+Simulation state is stored in `internal_role_simulations`, is scoped to the `mark-nesbit-professional-workspace` workspace, is available only when the profile has `is_internal_tester = true`, and expires automatically after 4 hours.
 
 This is not impersonation, not a global administrator capability, not customer-facing permission management, and not an expansion of the MVP permission model.
 

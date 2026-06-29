@@ -33,7 +33,7 @@ Supabase Auth owns authenticated accounts. Watchtower mirrors each verified acco
 
 Workspace access is derived from active organisation membership and the fixed MVP roles `owner`, `admin`, `member` and `viewer`. The database stores these roles on `organisation_members`, allowing a user to hold different roles in different workspaces. See `docs/access-foundation.md` for the full account/profile/membership/role model and future permission-readiness notes.
 
-WT-TEST-001 adds Account -> Test tools for the authorised Mark.Nesbit.Professional internal tester only. The tool can simulate Viewer, Member, Admin or Owner in the `mark-nesbit-professional` production test workspace for smoke-testing and permission validation. It stores short-lived simulation state, expires after 4 hours, changes effective permissions only, preserves the real `organisation_members.role`, and shows a persistent testing-mode banner while active. It is not impersonation, not customer-facing permission management, and not a global admin tool.
+WT-TEST-001 adds Account -> Test tools for the authorised Mark.Nesbit.Professional internal tester only. The tool can simulate Viewer, Member, Admin or Owner in the `mark-nesbit-professional-workspace` production test workspace for smoke-testing and permission validation. It stores short-lived simulation state, expires after 4 hours, changes effective permissions only, preserves the real `organisation_members.role`, and shows a persistent testing-mode banner while active. It is not impersonation, not customer-facing permission management, and not a global admin tool.
 
 ## Feature availability and preview access
 

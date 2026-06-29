@@ -26,7 +26,7 @@ Risk Management now has a feature-gated register at `/app/workspaces/{workspaceS
 
 WT-DASH-RISK-001 adds an icon-only assurance signal to the project dashboard Risk tile. The Risk tile icon reflects the highest current active risk assurance state for the project, excluding Draft and Closed risks. This signal does not use risk exposure, does not recolour the full tile, and does not add red/amber dots, counts, badges, attention items, notifications or health scoring.
 
-WT-TEST-001 adds `/app/account` and the restricted `/app/account/test-tools` route for the authorised Mark.Nesbit.Professional internal tester. Test tools can simulate Viewer, Member, Admin and Owner effective permissions in the `mark-nesbit-professional` workspace only. Simulation state is database-backed, expires after 4 hours, does not change `organisation_members.role`, displays a persistent authenticated-app banner while active, and is not customer-facing permission management, impersonation or a global admin feature.
+WT-TEST-001 adds `/app/account` and the restricted `/app/account/test-tools` route for the authorised Mark.Nesbit.Professional internal tester. Test tools can simulate Viewer, Member, Admin and Owner effective permissions in the `mark-nesbit-professional-workspace` workspace only. Simulation state is database-backed, expires after 4 hours, does not change `organisation_members.role`, displays a persistent authenticated-app banner while active, and is not customer-facing permission management, impersonation or a global admin feature.
 
 Authenticated project pages should follow the reusable layout, action, empty-state and restricted-action guidance in `docs/ui-page-design-standard.md`.
 

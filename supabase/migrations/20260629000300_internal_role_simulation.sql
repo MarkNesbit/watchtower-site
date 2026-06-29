@@ -55,7 +55,7 @@ as $$
     select 1
     from public.organisations o
     where o.id = target_organisation_id
-      and o.slug = 'mark-nesbit-professional'
+      and o.slug = 'mark-nesbit-professional-workspace'
       and o.deleted_at is null
       and o.archived_at is null
   );

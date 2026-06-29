@@ -70,7 +70,7 @@ The current central TypeScript helper is `src/lib/permissions.ts`. It maps fixed
 
 ## Internal role simulation
 
-WT-TEST-001 adds an internal-only role simulation utility under Account -> Test tools. It is scoped to the authorised Mark.Nesbit.Professional tester profile and the `mark-nesbit-professional` workspace slug. Simulation state is stored in `internal_role_simulations`, expires automatically after 4 hours, and is ignored when inactive, expired, unauthorised or outside the scoped test workspace.
+WT-TEST-001 adds an internal-only role simulation utility under Account -> Test tools. It is scoped to the authorised Mark.Nesbit.Professional tester profile and the `mark-nesbit-professional-workspace` workspace slug. Simulation state is stored in `internal_role_simulations`, expires automatically after 4 hours, and is ignored when inactive, expired, unauthorised or outside the scoped test workspace.
 
 Role simulation changes the effective role used by application permission helpers and the database `has_active_organisation_role` function. It does not update `organisation_members.role`, does not impersonate another user, does not create customer-facing permission management, and does not introduce a global admin capability. A persistent authenticated-app banner appears while simulation is active and provides reset back to real permissions.
 

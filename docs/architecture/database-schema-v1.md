@@ -319,7 +319,7 @@ This table changes effective permission resolution only. It must not update or r
 
 ## Notes
 
-Only one active simulation should exist per user/workspace. RLS limits create/reset access to the authenticated user whose profile is marked `is_internal_tester = true`, who is an active member of the scoped `mark-nesbit-professional` workspace, and whose simulation expires within 4 hours. Expired or inactive rows are ignored by effective-role resolution.
+Only one active simulation should exist per user/workspace. RLS limits create/reset access to the authenticated user whose profile is marked `is_internal_tester = true`, who is an active member of the scoped `mark-nesbit-professional-workspace` workspace, and whose simulation expires within 4 hours. Expired or inactive rows are ignored by effective-role resolution.
 
 This is not customer-facing permission management, not impersonation and not a global admin model.
 

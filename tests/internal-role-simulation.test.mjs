@@ -16,6 +16,7 @@ const accountPageUrl = new URL('../src/pages/app/account/index.astro', import.me
 const testToolsPageUrl = new URL('../src/pages/app/account/test-tools.astro', import.meta.url);
 const bannerUrl = new URL('../src/components/app/TestingModeBanner.astro', import.meta.url);
 const authenticatedLayoutUrl = new URL('../src/layouts/AuthenticatedLayout.astro', import.meta.url);
+const UNSCOPED_SHORT_WORKSPACE_SLUG = 'mark-nesbit-professional';
 
 function createInternalTestingClient({
 	userId = 'tester-1',
@@ -90,6 +91,9 @@ function createInternalTestingClient({
 					calls.push(['maybeSingle', table, this.filters]);
 					if (table === 'profiles') return { data: { is_internal_tester: isTester }, error: null };
 					if (table === 'organisation_members') {
+						if (this.filters['organisations.slug'] && this.filters['organisations.slug'] !== workspaceSlug) {
+							return { data: null, error: null };
+						}
 						return {
 							data: {
 								role,
@@ -127,7 +131,8 @@ test('Migration adds scoped internal role simulation storage and effective-role 
 	assert.match(sql, /create table public\.internal_role_simulations/);
 	assert.match(sql, /simulated_role in \('owner', 'admin', 'member', 'viewer'\)/);
 	assert.match(sql, /internal_role_simulations_one_active_per_user_workspace_idx/);
-	assert.match(sql, /o\.slug = 'mark-nesbit-professional'/);
+	assert.match(sql, /o\.slug = 'mark-nesbit-professional-workspace'/);
+	assert.doesNotMatch(sql, /o\.slug = 'mark-nesbit-professional'/);
 	assert.match(sql, /expires_at <= now\(\) \+ interval '4 hours'/);
 	assert.match(sql, /coalesce\(\s*public\.active_internal_role_simulation\(target_organisation_id, target_user_id\),\s*om\.role\s*\) = any\(allowed_roles\)/);
 	assert.doesNotMatch(sql, /impersonat|global_admin|platform_admin/i);
@@ -141,6 +146,61 @@ test('Account page hides Test tools from ordinary users and exposes them to auth
 	assert.match(accountPage, /data-no-test-tools/);
 	assert.match(testToolsPage, /if \(!state\.isInternalTester \|\| !state\.workspace\)/);
 	assert.match(testToolsPage, /Astro\.redirect\('\/app\/account'\)/);
+});
+
+test('Internal tester with production workspace slug can see Test tools state', async () => {
+	const client = createInternalTestingClient({
+		isTester: true,
+		workspaceSlug: 'mark-nesbit-professional-workspace',
+		role: 'owner',
+	});
+
+	const state = await getInternalRoleSimulationState(client);
+	assert.equal(state.isInternalTester, true);
+	assert.equal(state.workspace.slug, 'mark-nesbit-professional-workspace');
+	assert.equal(state.actualRole, 'owner');
+	assert.equal(state.effectiveRole, 'owner');
+	assert.ok(client.calls.some((call) => call[0] === 'eq' && call[1] === 'organisation_members' && call[2] === 'organisations.slug' && call[3] === INTERNAL_TEST_WORKSPACE_SLUG));
+});
+
+test('Internal tester with old short slug alone cannot see Test tools state', async () => {
+	const client = createInternalTestingClient({
+		isTester: true,
+		workspaceSlug: UNSCOPED_SHORT_WORKSPACE_SLUG,
+		role: 'owner',
+	});
+
+	const state = await getInternalRoleSimulationState(client);
+	assert.equal(state.isInternalTester, true);
+	assert.equal(state.workspace, null);
+	assert.equal(state.actualRole, null);
+	assert.equal(state.effectiveRole, null);
+});
+
+test('Internal tester outside scoped workspace cannot see Test tools state', async () => {
+	const client = createInternalTestingClient({
+		isTester: true,
+		workspaceSlug: 'customer-workspace',
+		role: 'owner',
+	});
+
+	const state = await getInternalRoleSimulationState(client);
+	assert.equal(state.isInternalTester, true);
+	assert.equal(state.workspace, null);
+	assert.equal(state.effectiveRole, null);
+});
+
+test('Ordinary users cannot see Test tools state', async () => {
+	const client = createInternalTestingClient({
+		isTester: false,
+		workspaceSlug: INTERNAL_TEST_WORKSPACE_SLUG,
+		role: 'owner',
+	});
+
+	const state = await getInternalRoleSimulationState(client);
+	assert.equal(state.isInternalTester, false);
+	assert.equal(state.workspace, null);
+	assert.equal(state.effectiveRole, null);
 });
 
 test('Effective role resolves to active simulated role only for authorised tester in scoped workspace', async () => {
@@ -178,6 +238,12 @@ test('Effective role falls back to actual role when simulation is inactive expir
 		...membership,
 		organisations: { ...membership.organisations, slug: 'customer-workspace' },
 	}, outsideWorkspaceClient, 'tester-1')).role, 'admin');
+
+	const oldShortSlugClient = createInternalTestingClient({ workspaceSlug: UNSCOPED_SHORT_WORKSPACE_SLUG, activeSimulation: futureSimulation('viewer') });
+	assert.equal((await applyRoleSimulationToMembership({
+		...membership,
+		organisations: { ...membership.organisations, slug: UNSCOPED_SHORT_WORKSPACE_SLUG },
+	}, oldShortSlugClient, 'tester-1')).role, 'admin');
 });
 
 test('Authorised tester can activate each simulated role without changing real membership role', async () => {
