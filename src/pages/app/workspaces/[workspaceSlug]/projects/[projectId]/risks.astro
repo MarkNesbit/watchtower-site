@@ -9,9 +9,9 @@ import RagReferencePill from '../../../../../../components/app/RagReferencePill.
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import { can } from '../../../../../../lib/permissions';
 import {
+	deriveRiskConcernTone,
 	listProjectRisks,
 	riskDisplayLabel,
-	riskRagTone,
 } from '../../../../../../lib/projectRisks';
 import { buildProjectNewRiskPath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
@@ -154,27 +154,30 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 									</tr>
 								</thead>
 								<tbody>
-									{risks.map((risk) => (
-										<tr>
-											<td>
-												<a
-													class="risk-reference-link"
-													href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
-													aria-label={`Open ${risk.risk_ref}, ${riskDisplayLabel(risk.rag_status)} risk`}
-												>
-													<RagReferencePill
-														tone={riskRagTone(risk.rag_status)}
-														label={risk.risk_ref}
-														statusLabel={riskDisplayLabel(risk.rag_status)}
-													/>
-												</a>
-											</td>
-											<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
-											<td>{riskDisplayLabel(risk.status)}</td>
-											<td>{formatDate(risk.review_date, 'No review date')}</td>
-											<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
-										</tr>
-									))}
+									{risks.map((risk) => {
+										const derivedConcernTone = deriveRiskConcernTone(risk);
+										return (
+											<tr>
+												<td>
+													<a
+														class="risk-reference-link"
+														href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
+														aria-label={`Open ${risk.risk_ref}, ${riskDisplayLabel(derivedConcernTone)} derived concern`}
+													>
+														<RagReferencePill
+															tone={derivedConcernTone}
+															label={risk.risk_ref}
+															statusLabel={riskDisplayLabel(derivedConcernTone)}
+														/>
+													</a>
+												</td>
+												<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
+												<td>{riskDisplayLabel(risk.status)}</td>
+												<td>{formatDate(risk.review_date, 'No review date')}</td>
+												<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
+											</tr>
+										);
+									})}
 								</tbody>
 							</table>
 						</div>

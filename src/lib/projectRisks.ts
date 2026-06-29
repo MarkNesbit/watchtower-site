@@ -1,7 +1,7 @@
 import { assertCan, type WorkspaceRole } from './permissions.ts';
 import { getWorkspaceBySlug } from './projects.ts';
 
-export const RISK_STATUSES = ['open', 'monitoring', 'mitigating', 'accepted', 'closed'] as const;
+export const RISK_STATUSES = ['draft', 'open', 'monitoring', 'mitigating', 'escalated', 'materialised', 'closed'] as const;
 export type RiskStatus = (typeof RISK_STATUSES)[number];
 
 export const RISK_LEVELS = ['low', 'medium', 'high'] as const;
@@ -84,7 +84,7 @@ export type RiskFormInput = {
 	status: string;
 	probability?: string;
 	impact?: string;
-	ragStatus: string;
+	ragStatus?: string;
 	ownerId?: string;
 	actionerId?: string;
 	reviewDate?: string;
@@ -237,7 +237,6 @@ export function validateRiskFormInput(input: RiskFormInput): Record<string, stri
 	if (!isRiskStatus(input.status)) errors.status = 'Select a valid risk status.';
 	if (!RISK_LEVELS.includes(input.probability as RiskLevel)) errors.probability = 'Select a valid probability.';
 	if (!RISK_LEVELS.includes(input.impact as RiskLevel)) errors.impact = 'Select a valid impact.';
-	if (!isRiskRagStatus(input.ragStatus)) errors.ragStatus = 'Select a valid RAG status.';
 	if (!isRiskReviewDate(input.reviewDate)) errors.reviewDate = 'Enter a valid review date.';
 	if (!isRiskReviewDate(input.dueDate)) errors.dueDate = 'Enter a valid due date.';
 	return errors;
@@ -290,10 +289,14 @@ function dateTone(value: unknown, now: Date, missingTone: RiskAssuranceTone, mis
 		: { tone: 'green' as RiskAssuranceTone, value: 'Scheduled' };
 }
 
-function exposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
+export function deriveRiskExposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
 	if (!RISK_LEVELS.includes(probability as RiskLevel) || !RISK_LEVELS.includes(impact as RiskLevel)) return 'red';
 	if (probability === 'high' && impact === 'high') return 'red';
 	if (probability === 'low' && impact === 'low') return 'green';
+	if (
+		(probability === 'medium' && impact === 'high') ||
+		(probability === 'high' && impact === 'medium')
+	) return 'red';
 	if (probability === 'high' || impact === 'high' || probability === 'medium' || impact === 'medium') return 'amber';
 	return 'green';
 }
@@ -310,7 +313,7 @@ function lifecycleStatusTone(status: unknown): RiskAssuranceTone {
 function actionerTone(status: unknown, actionerId: unknown): RiskAssuranceTone {
 	if (actionerId) return 'green';
 	const normalised = trimmedText(status).toLowerCase();
-	if (normalised === 'closed' || normalised === 'accepted') return 'neutral';
+	if (normalised === 'closed') return 'neutral';
 	return 'red';
 }
 
@@ -334,18 +337,65 @@ function staleUpdateTone(updatedAt: unknown, now: Date): RiskAssuranceTone {
 	return 'green';
 }
 
-export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): RiskAssuranceBlock[] {
-	const description = trimmedText(risk.description);
-	const descriptionTone: RiskAssuranceTone = !description ? 'red' : description.length < 30 ? 'amber' : 'green';
-	const exposure = exposureTone(risk.probability, risk.impact);
+function worstTone(tones: RiskAssuranceTone[]): RiskAssuranceTone {
+	if (tones.includes('red')) return 'red';
+	if (tones.includes('amber')) return 'amber';
+	if (tones.includes('green')) return 'green';
+	return 'neutral';
+}
+
+export function deriveRiskAssuranceTone(risk: Pick<ProjectRisk,
+	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+>, now = new Date()): RiskAssuranceTone {
+	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
+	const status = trimmedText(risk.status).toLowerCase();
 	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
 	const contingency = trimmedText(risk.contingency_plan);
-	const mitigationTone: RiskAssuranceTone = mitigation ? 'green' : 'red';
+	const missingMitigationTone: RiskAssuranceTone = mitigation ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'green';
+	const updated = staleUpdateTone(risk.updated_at, now);
+	const statusTone: RiskAssuranceTone = status === 'materialised'
+		? 'red'
+		: status === 'escalated' && (!risk.owner_id || !risk.actioner_id || review.tone !== 'green')
+		? 'red'
+		: 'green';
+
+	return worstTone([
+		risk.owner_id ? 'green' : 'red',
+		actionerTone(risk.status, risk.actioner_id),
+		review.tone,
+		due.tone,
+		missingMitigationTone,
+		contingency ? 'green' : 'red',
+		statusTone,
+		updated === 'red' || updated === 'amber' ? updated : 'green',
+	]);
+}
+
+export function deriveRiskConcernTone(risk: Pick<ProjectRisk,
+	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+>, now = new Date()): RiskRagStatus {
+	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
+	const assurance = deriveRiskAssuranceTone(risk, now);
+	if (assurance === 'red' || exposure === 'red') return 'red';
+	if (assurance === 'amber' || exposure === 'amber') return 'amber';
+	return 'green';
+}
+
+export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): RiskAssuranceBlock[] {
+	const description = trimmedText(risk.description);
+	const descriptionTone: RiskAssuranceTone = !description ? 'red' : description.length < 30 ? 'amber' : 'green';
+	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
+	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
+	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
+	const mitigation = trimmedText(risk.mitigation_plan);
+	const contingency = trimmedText(risk.contingency_plan);
+	const mitigationTone: RiskAssuranceTone = mitigation ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'green';
 	const contingencyTone: RiskAssuranceTone = contingency ? 'green' : 'red';
 	const actionResponsibilityTone = actionerTone(risk.status, risk.actioner_id);
 	const updatedTone = staleUpdateTone(risk.updated_at, now);
+	const concernTone = deriveRiskConcernTone(risk, now);
 
 	return [
 		{
@@ -363,6 +413,13 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 			statusLabel: riskAssuranceToneLabel(lifecycleStatusTone(risk.status)),
 			value: riskDisplayLabel(risk.status),
 			prompt: lifecycleStatusTone(risk.status) === 'red' ? 'Review status' : lifecycleStatusTone(risk.status) === 'amber' ? 'Confirm status' : undefined,
+		},
+		{
+			id: 'overall-concern',
+			title: 'Overall concern',
+			tone: concernTone,
+			statusLabel: riskAssuranceToneLabel(concernTone),
+			value: `Derived from ${riskAssuranceToneLabel(exposure)} exposure and ${riskAssuranceToneLabel(deriveRiskAssuranceTone(risk, now))} assurance.`,
 		},
 		{
 			id: 'exposure',
@@ -613,19 +670,25 @@ async function getNextRiskSequence(organisationId: string, projectId: string, cl
 }
 
 function normaliseRiskPayload(input: RiskFormInput) {
-	return {
+	const payload = {
 		title: input.title.trim(),
 		description: input.description?.trim() || null,
 		status: input.status as RiskStatus,
 		probability: input.probability as RiskLevel,
 		impact: input.impact as RiskLevel,
-		rag_status: input.ragStatus as RiskRagStatus,
 		owner_id: input.ownerId?.trim() || null,
 		actioner_id: input.actionerId?.trim() || null,
 		review_date: input.reviewDate?.trim() || null,
 		due_date: input.dueDate?.trim() || null,
 		mitigation_plan: input.mitigationPlan?.trim() || null,
 		contingency_plan: input.contingencyPlan?.trim() || null,
+	};
+	return {
+		...payload,
+		rag_status: deriveRiskConcernTone({
+			...payload,
+			updated_at: new Date().toISOString(),
+		}),
 	};
 }
 

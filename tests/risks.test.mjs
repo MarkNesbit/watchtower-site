@@ -5,6 +5,9 @@ import {
 	buildRiskReference,
 	createProjectRiskComment,
 	createProjectRisk,
+	deriveRiskAssuranceTone,
+	deriveRiskConcernTone,
+	deriveRiskExposureTone,
 	getProjectRisk,
 	getRiskAssuranceBlocks,
 	isRiskReviewDate,
@@ -25,6 +28,20 @@ const allMigrationSql = async () => {
 	const parts = await Promise.all(files.map((file) => readFile(new URL(file, dir), 'utf8')));
 	return parts.join('\n');
 };
+
+const assuredRiskFacts = (overrides = {}) => ({
+	status: 'open',
+	probability: 'low',
+	impact: 'low',
+	owner_id: 'owner-1',
+	actioner_id: 'actioner-1',
+	review_date: '2026-07-10',
+	due_date: '2026-08-01',
+	mitigation_plan: 'Confirmed alternate route.',
+	contingency_plan: 'Escalate through steering group.',
+	updated_at: '2026-06-20T10:00:00Z',
+	...overrides,
+});
 
 function createRiskClient(rows = []) {
 	const calls = [];
@@ -276,12 +293,14 @@ test('Risk actioner migration adds a nullable profile reference without creating
 });
 
 test('Risk and note constraints cover status, scoring, references and attention levels', async () => {
-	const sql = await migrationSql();
+	const sql = await allMigrationSql();
 	assert.match(sql, /project_risks_risk_ref_format_check check \(risk_ref ~ '\^Risk-\[A-Z\]\[A-Z0-9\]\{1,9\}-\[0-9\]\{3\}\$'\)/);
-	assert.match(sql, /project_risks_status_check check \(status in \('open', 'monitoring', 'mitigating', 'accepted', 'closed'\)\)/);
+	assert.match(sql, /update public\.project_risks[\s\S]*set status = 'closed'[\s\S]*where status = 'accepted'/);
+	assert.match(sql, /project_risks_status_check[\s\S]*check \(status in \('draft', 'open', 'monitoring', 'mitigating', 'escalated', 'materialised', 'closed'\)\)/);
 	assert.match(sql, /project_risks_probability_check check \(probability in \('low', 'medium', 'high'\)\)/);
 	assert.match(sql, /project_risks_impact_check check \(impact in \('low', 'medium', 'high'\)\)/);
 	assert.match(sql, /project_risks_rag_status_check check \(rag_status in \('blue', 'green', 'amber', 'red'\)\)/);
+	assert.match(sql, /Legacy\/transitional stored concern value retained for compatibility/);
 	assert.match(sql, /project_risk_notes_attention_level_check check \(attention_level in \('green', 'amber', 'red'\)\)/);
 	assert.match(sql, /unique \(project_id, risk_sequence\)/);
 	assert.match(sql, /unique \(organisation_id, risk_ref\)/);
@@ -401,7 +420,6 @@ test('Risk create/edit validation covers references, required fields and dates',
 		status: 'unknown',
 		probability: 'unknown',
 		impact: 'unknown',
-		ragStatus: 'purple',
 		reviewDate: '2026-02-31',
 		dueDate: '2026-13-01',
 	}), {
@@ -409,10 +427,47 @@ test('Risk create/edit validation covers references, required fields and dates',
 		status: 'Select a valid risk status.',
 		probability: 'Select a valid probability.',
 		impact: 'Select a valid impact.',
-		ragStatus: 'Select a valid RAG status.',
 		reviewDate: 'Enter a valid review date.',
 		dueDate: 'Enter a valid due date.',
 	});
+});
+
+test('Risk exposure derives from probability and impact without manual concern input', () => {
+	assert.equal(deriveRiskExposureTone('low', 'low'), 'green');
+	assert.equal(deriveRiskExposureTone('low', 'medium'), 'amber');
+	assert.equal(deriveRiskExposureTone('medium', 'low'), 'amber');
+	assert.equal(deriveRiskExposureTone('medium', 'medium'), 'amber');
+	assert.equal(deriveRiskExposureTone('high', 'low'), 'amber');
+	assert.equal(deriveRiskExposureTone('low', 'high'), 'amber');
+	assert.equal(deriveRiskExposureTone('medium', 'high'), 'red');
+	assert.equal(deriveRiskExposureTone('high', 'medium'), 'red');
+	assert.equal(deriveRiskExposureTone('high', 'high'), 'red');
+	assert.equal(deriveRiskExposureTone('', 'low'), 'red');
+	assert.equal(deriveRiskExposureTone('low', undefined), 'red');
+});
+
+test('Risk assurance derives from governance and control quality signals', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ owner_id: null }), now), 'red');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ actioner_id: null }), now), 'red');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ review_date: null }), now), 'amber');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ review_date: '2026-06-01' }), now), 'red');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ due_date: null }), now), 'amber');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ contingency_plan: '' }), now), 'red');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ mitigation_plan: '', probability: 'high', impact: 'high' }), now), 'red');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ mitigation_plan: '', probability: 'medium', impact: 'medium' }), now), 'amber');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'materialised' }), now), 'red');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'escalated', owner_id: null }), now), 'red');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'escalated' }), now), 'green');
+});
+
+test('Overall risk concern uses exposure plus assurance overrides', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ owner_id: null }), now), 'red');
+	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ probability: 'medium', impact: 'medium' }), now), 'amber');
+	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ probability: 'high', impact: 'high' }), now), 'red');
+	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ due_date: null }), now), 'amber');
+	assert.equal(deriveRiskConcernTone(assuredRiskFacts(), now), 'green');
 });
 
 test('Risk assurance blocks derive MVP quality signals without using manual RAG as truth', () => {
@@ -443,6 +498,8 @@ test('Risk assurance blocks derive MVP quality signals without using manual RAG 
 	assert.equal(byId.get('owner').tone, 'red');
 	assert.equal(byId.get('review-date').tone, 'red');
 	assert.equal(byId.get('exposure').tone, 'red');
+	assert.equal(byId.get('overall-concern').tone, 'red');
+	assert.match(byId.get('overall-concern').value, /Derived from Red exposure and Red assurance/);
 	assert.equal(byId.get('mitigation').tone, 'red');
 	assert.equal(byId.get('contingency').tone, 'red');
 	assert.equal(byId.get('updated').tone, 'red');
@@ -621,7 +678,7 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		status: 'open',
 		probability: 'high',
 		impact: 'medium',
-		ragStatus: 'amber',
+		ragStatus: 'green',
 		ownerId: 'owner-1',
 		actionerId: 'actioner-1',
 		reviewDate: '2026-07-10',
@@ -643,7 +700,7 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		status: 'open',
 		probability: 'high',
 		impact: 'medium',
-		rag_status: 'amber',
+		rag_status: 'red',
 		owner_id: 'owner-1',
 		actioner_id: 'actioner-1',
 		review_date: '2026-07-10',
@@ -662,7 +719,7 @@ test('Risk edit helper updates only scoped editable fields', async () => {
 		status: 'mitigating',
 		probability: 'medium',
 		impact: 'high',
-		ragStatus: 'red',
+		ragStatus: 'green',
 		ownerId: '',
 		actionerId: '',
 		reviewDate: '',
@@ -787,8 +844,13 @@ test('Risk Register route renders a cleaned scoped table and create access state
 	}
 	assert.match(route, /No risks have been recorded for this project yet\./);
 	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
+	assert.match(route, /deriveRiskConcernTone\(risk\)/);
 	assert.match(route, /buildProjectNewRiskPath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(route, /<td class="risk-register-table__risk"><strong>\{risk\.title\}<\/strong><\/td>/);
+	assert.match(route, /tone=\{derivedConcernTone\}/);
+	assert.match(route, /statusLabel=\{riskDisplayLabel\(derivedConcernTone\)\}/);
+	assert.match(route, /derived concern/);
+	assert.doesNotMatch(route, /riskRagTone/);
 	assert.doesNotMatch(route, /risk\.description && <span>/);
 	assert.match(route, /data-risk-create-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-create-disabled/);
@@ -813,7 +875,12 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.doesNotMatch(route, /Risk assurance view/);
 	assert.match(route, /class="risk-detail-heading"/);
 	assert.match(route, /label=\{risk\.risk_ref\}/);
-	assert.match(route, /statusLabel=\{riskDisplayLabel\(risk\.rag_status\)\}/);
+	assert.match(route, /deriveRiskConcernTone\(risk, new Date\(\)\)/);
+	assert.match(route, /tone=\{derivedConcernTone\}/);
+	assert.match(route, /statusLabel=\{riskDisplayLabel\(derivedConcernTone\)\}/);
+	assert.match(route, /derived concern/);
+	assert.doesNotMatch(route, /RISK_RAG_STATUSES/);
+	assert.doesNotMatch(route, /riskRagTone/);
 	assert.match(route, /font-size: clamp\(1\.55rem, 2\.35vw, 2\.45rem\)/);
 	assert.match(route, /data-risk-summary-strip/);
 	for (const label of ['Lifecycle status', 'Created by', 'Updated by', 'Updated']) {
@@ -827,10 +894,15 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.doesNotMatch(route, /ownerName\(risk\)/);
 	assert.match(route, /getRiskAssuranceBlocks\(risk, new Date\(\)\)/);
 	assert.match(route, /data-risk-assurance-blocks/);
-	for (const block of ['description', 'status', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
+	for (const block of ['description', 'status', 'overall-concern', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
 		assert.match(route, new RegExp(`data-risk-assurance-block=\\{block\\.id\\}`));
 	}
+	assert.match(route, /hasModalConfig\(block\.id\)/);
+	assert.match(route, /risk-assurance-block__button--static/);
 	assert.match(route, /data-risk-dialog-open/);
+	assert.match(route, /exposure: \{ title: 'Edit exposure', fields: \['probability', 'impact'\], submit: 'Save exposure' \}/);
+	assert.doesNotMatch(route, /name="rag_status"/);
+	assert.doesNotMatch(route, /Concern signal/);
 	assert.match(route, /data-risk-modal-backdrop-blur/);
 	assert.match(route, /backdrop-filter: blur\(10px\)/);
 	assert.match(route, /\.risk-action-form__actions \[data-risk-dialog-cancel\]/);
@@ -880,11 +952,15 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(editRoute, /isSupabaseAuthSessionError\(error\)[\s\S]*Astro\.redirect\(sessionRedirectPath\)/);
 	assert.match(editRoute, /Viewer access is read-only\. Risk editing is unavailable\./);
 
-	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="probability"', 'name="impact"', 'name="rag_status"', 'name="owner_id"', 'name="actioner_id"', 'name="review_date"', 'name="due_date"', 'name="mitigation_plan"', 'name="contingency_plan"']) {
+	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="probability"', 'name="impact"', 'name="owner_id"', 'name="actioner_id"', 'name="review_date"', 'name="due_date"', 'name="mitigation_plan"', 'name="contingency_plan"']) {
 		assert.match(form, new RegExp(field));
 	}
-	assert.match(form, /Concern signal/);
-	assert.match(form, /Transitional signal only/);
+	assert.doesNotMatch(form, /name="rag_status"/);
+	assert.doesNotMatch(form, /Concern signal/);
+	assert.doesNotMatch(form, /Transitional signal only/);
+	assert.doesNotMatch(createRoute, /ragStatus: String\(formData\.get\('rag_status'\)/);
+	assert.doesNotMatch(editRoute, /ragStatus: record\?\.rag_status/);
+	assert.doesNotMatch(editRoute, /ragStatus: String\(formData\.get\('rag_status'\)/);
 	assert.match(createRoute, /actionerOptions=\{ownerOptions\}/);
 	assert.match(editRoute, /actionerOptions=\{ownerOptions\}/);
 	assert.match(createRoute, /actionerId: String\(formData\.get\('actioner_id'\) \?\? ''\)/);
@@ -916,6 +992,25 @@ test('Risk create/edit/comment source avoids deferred side effects', async () =>
 		assert.doesNotMatch(combined, new RegExp(`from\\('${table}'\\)|insert\\([\\s\\S]*${table}`, 'i'));
 	}
 	assert.doesNotMatch(combined, /health\s*:/i);
+});
+
+test('Risk activity assurance and temporary handover remain documented future-ready scope', async () => {
+	const docs = await Promise.all([
+		readFile(new URL('../docs/risk-foundation.md', import.meta.url), 'utf8'),
+		readFile(new URL('../docs/project-model.md', import.meta.url), 'utf8'),
+		readFile(new URL('../docs/watchtower-platform.md', import.meta.url), 'utf8'),
+	]);
+	const combined = docs.join('\n');
+
+	assert.match(combined, /last_login_at/);
+	assert.match(combined, /future-ready/i);
+	assert.match(combined, /temporary actioner/i);
+	assert.match(combined, /handover reason/i);
+	assert.match(combined, /original actioner/i);
+	assert.match(combined, /Governance Profile \/ Assessment Profile/);
+
+	const source = await readFile(new URL('../src/lib/projectRisks.ts', import.meta.url), 'utf8');
+	assert.doesNotMatch(source, /last_login_at/);
 });
 
 test('Project dashboard Risk tile routes to the Risk Register without loading risk records', async () => {
