@@ -50,6 +50,21 @@ export type ProjectRisk = {
 	updater?: RiskProfile | null;
 };
 
+export type ProjectRiskComment = {
+	risk_note_id: string;
+	organisation_id: string;
+	project_id: string;
+	risk_id: string;
+	parent_risk_note_id?: string | null;
+	note: string;
+	attention_level: 'green' | 'amber' | 'red' | string;
+	created_by: string;
+	updated_by?: string | null;
+	created_at: string;
+	updated_at?: string | null;
+	author?: RiskProfile | null;
+};
+
 export type RiskAssuranceBlock = {
 	id: string;
 	title: string;
@@ -67,6 +82,8 @@ export type RiskFormInput = {
 	title: string;
 	description?: string;
 	status: string;
+	probability?: string;
+	impact?: string;
 	ragStatus: string;
 	ownerId?: string;
 	actionerId?: string;
@@ -96,6 +113,20 @@ const RISK_SELECT = [
 	'contingency_plan',
 	'review_date',
 	'due_date',
+	'created_by',
+	'updated_by',
+	'created_at',
+	'updated_at',
+].join(', ');
+
+const RISK_COMMENT_SELECT = [
+	'risk_note_id',
+	'organisation_id',
+	'project_id',
+	'risk_id',
+	'parent_risk_note_id',
+	'note',
+	'attention_level',
 	'created_by',
 	'updated_by',
 	'created_at',
@@ -145,6 +176,32 @@ async function enrichRiskProfiles(risks: ProjectRisk[], client): Promise<Project
 	}));
 }
 
+async function enrichRiskCommentProfiles(comments: ProjectRiskComment[], client): Promise<ProjectRiskComment[]> {
+	if (comments.length === 0) return comments;
+
+	const profileIds = uniqueValues(comments.map((comment) => comment.created_by));
+	const profileById = new Map<string, RiskProfile>();
+
+	if (profileIds.length > 0) {
+		try {
+			const { data: profiles } = await client
+				.from('profiles')
+				.select('id, display_name, email')
+				.in('id', profileIds);
+			for (const profile of profiles ?? []) {
+				profileById.set(profile.id, profile);
+			}
+		} catch {
+			// Comment author labels are optional enrichment; comments should still render.
+		}
+	}
+
+	return comments.map((comment) => ({
+		...comment,
+		author: profileById.get(comment.created_by) ?? null,
+	}));
+}
+
 export function isRiskStatus(value: unknown): value is RiskStatus {
 	return typeof value === 'string' && RISK_STATUSES.includes(value as RiskStatus);
 }
@@ -178,6 +235,8 @@ export function validateRiskFormInput(input: RiskFormInput): Record<string, stri
 	const errors: Record<string, string> = {};
 	if (!input.title.trim()) errors.title = 'Risk title is required.';
 	if (!isRiskStatus(input.status)) errors.status = 'Select a valid risk status.';
+	if (!RISK_LEVELS.includes(input.probability as RiskLevel)) errors.probability = 'Select a valid probability.';
+	if (!RISK_LEVELS.includes(input.impact as RiskLevel)) errors.impact = 'Select a valid impact.';
 	if (!isRiskRagStatus(input.ragStatus)) errors.ragStatus = 'Select a valid RAG status.';
 	if (!isRiskReviewDate(input.reviewDate)) errors.reviewDate = 'Enter a valid review date.';
 	if (!isRiskReviewDate(input.dueDate)) errors.dueDate = 'Enter a valid due date.';
@@ -232,7 +291,7 @@ function dateTone(value: unknown, now: Date, missingTone: RiskAssuranceTone, mis
 }
 
 function exposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
-	if (!RISK_LEVELS.includes(probability as RiskLevel) || !RISK_LEVELS.includes(impact as RiskLevel)) return 'neutral';
+	if (!RISK_LEVELS.includes(probability as RiskLevel) || !RISK_LEVELS.includes(impact as RiskLevel)) return 'red';
 	if (probability === 'high' && impact === 'high') return 'red';
 	if (probability === 'low' && impact === 'low') return 'green';
 	if (probability === 'high' || impact === 'high' || probability === 'medium' || impact === 'medium') return 'amber';
@@ -252,9 +311,7 @@ function actionerTone(status: unknown, actionerId: unknown): RiskAssuranceTone {
 	if (actionerId) return 'green';
 	const normalised = trimmedText(status).toLowerCase();
 	if (normalised === 'closed' || normalised === 'accepted') return 'neutral';
-	if (normalised === 'mitigating' || normalised === 'escalated' || normalised === 'materialised') return 'red';
-	if (normalised === 'draft' || normalised === 'open' || normalised === 'monitoring') return 'amber';
-	return 'amber';
+	return 'red';
 }
 
 function actionerValue(risk: ProjectRisk, tone: RiskAssuranceTone): string {
@@ -282,11 +339,11 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 	const descriptionTone: RiskAssuranceTone = !description ? 'red' : description.length < 30 ? 'amber' : 'green';
 	const exposure = exposureTone(risk.probability, risk.impact);
 	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
-	const due = dateTone(risk.due_date, now, 'neutral', 'No due date');
+	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
 	const contingency = trimmedText(risk.contingency_plan);
-	const mitigationTone: RiskAssuranceTone = mitigation ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'neutral';
-	const contingencyTone: RiskAssuranceTone = contingency ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'neutral';
+	const mitigationTone: RiskAssuranceTone = mitigation ? 'green' : 'red';
+	const contingencyTone: RiskAssuranceTone = contingency ? 'green' : 'red';
 	const actionResponsibilityTone = actionerTone(risk.status, risk.actioner_id);
 	const updatedTone = staleUpdateTone(risk.updated_at, now);
 
@@ -313,7 +370,7 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 			tone: exposure,
 			statusLabel: riskAssuranceToneLabel(exposure),
 			value: `${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact`,
-			prompt: exposure === 'neutral' ? 'Review exposure' : exposure === 'red' ? 'Add mitigation plan' : undefined,
+			prompt: exposure === 'red' ? 'Review exposure' : undefined,
 		},
 		{
 			id: 'owner',
@@ -418,6 +475,29 @@ export async function getProjectRisk(
 	if (error) throw error;
 	const [risk] = await enrichRiskProfiles(data ? [data as ProjectRisk] : [], client);
 	return risk ?? null;
+}
+
+export async function listProjectRiskComments(
+	organisationId: string,
+	projectId: string,
+	riskId: string,
+	workspaceRole: WorkspaceRole,
+	client,
+): Promise<ProjectRiskComment[]> {
+	assertCan(workspaceRole, 'risk.view', 'Your workspace role does not permit Risk Management access.');
+
+	const { data, error } = await client
+		.from('project_risk_notes')
+		.select(RISK_COMMENT_SELECT)
+		.eq('organisation_id', organisationId)
+		.eq('project_id', projectId)
+		.eq('risk_id', riskId)
+		.is('parent_risk_note_id', null)
+		.is('deleted_at', null)
+		.order('created_at', { ascending: false });
+
+	if (error) throw error;
+	return enrichRiskCommentProfiles((data ?? []) as ProjectRiskComment[], client);
 }
 
 export async function listRiskOwnerOptions(
@@ -537,6 +617,8 @@ function normaliseRiskPayload(input: RiskFormInput) {
 		title: input.title.trim(),
 		description: input.description?.trim() || null,
 		status: input.status as RiskStatus,
+		probability: input.probability as RiskLevel,
+		impact: input.impact as RiskLevel,
 		rag_status: input.ragStatus as RiskRagStatus,
 		owner_id: input.ownerId?.trim() || null,
 		actioner_id: input.actionerId?.trim() || null,
@@ -624,4 +706,37 @@ export async function updateProjectRisk(
 	if (!data) throw new Error('Risk not found or you do not have access.');
 	const [risk] = await enrichRiskProfiles([data as ProjectRisk], client);
 	return risk;
+}
+
+export async function createProjectRiskComment(
+	workspaceSlug: string,
+	projectSlug: string,
+	riskId: string,
+	note: string,
+	client,
+	accessToken?: string,
+): Promise<ProjectRiskComment> {
+	const trimmedNote = note.trim();
+	if (!trimmedNote) throw new Error('Comment is required.');
+
+	const { workspace, organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.edit', client, accessToken);
+	const risk = await getProjectRisk(organisation.id, project.id, riskId, workspace.role, client);
+	if (!risk) throw new Error('Risk not found or you do not have access.');
+
+	const { data, error } = await client
+		.from('project_risk_notes')
+		.insert({
+			organisation_id: organisation.id,
+			project_id: project.id,
+			risk_id: riskId,
+			parent_risk_note_id: null,
+			note: trimmedNote,
+			attention_level: 'green',
+		})
+		.select(RISK_COMMENT_SELECT)
+		.single();
+
+	if (error) throw error;
+	const [comment] = await enrichRiskCommentProfiles([data as ProjectRiskComment], client);
+	return comment;
 }
