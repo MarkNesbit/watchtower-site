@@ -1,5 +1,6 @@
 ---
 import {
+	RISK_LEVELS,
 	RISK_RAG_STATUSES,
 	RISK_STATUSES,
 	riskDisplayLabel,
@@ -11,6 +12,8 @@ type RiskFormValues = {
 	title: string;
 	description: string;
 	status: string;
+	probability: string;
+	impact: string;
 	ragStatus: string;
 	ownerId: string;
 	actionerId: string;
@@ -113,6 +116,36 @@ const describedBy = [
 				{RISK_STATUSES.map((status) => <option value={status} selected={values.status === status}>{riskDisplayLabel(status)}</option>)}
 			</select>
 			{errors.status && <p class="field-error" id="risk-status-error">{errors.status}</p>}
+		</div>
+
+		<div>
+			<label for="risk-probability">Probability <span aria-hidden="true">*</span></label>
+			<select
+				id="risk-probability"
+				name="probability"
+				required
+				aria-required="true"
+				aria-invalid={Boolean(errors.probability) || undefined}
+				aria-describedby={errors.probability ? 'risk-probability-error' : undefined}
+			>
+				{RISK_LEVELS.map((level) => <option value={level} selected={values.probability === level}>{riskDisplayLabel(level)}</option>)}
+			</select>
+			{errors.probability && <p class="field-error" id="risk-probability-error">{errors.probability}</p>}
+		</div>
+
+		<div>
+			<label for="risk-impact">Impact <span aria-hidden="true">*</span></label>
+			<select
+				id="risk-impact"
+				name="impact"
+				required
+				aria-required="true"
+				aria-invalid={Boolean(errors.impact) || undefined}
+				aria-describedby={errors.impact ? 'risk-impact-error' : undefined}
+			>
+				{RISK_LEVELS.map((level) => <option value={level} selected={values.impact === level}>{riskDisplayLabel(level)}</option>)}
+			</select>
+			{errors.impact && <p class="field-error" id="risk-impact-error">{errors.impact}</p>}
 		</div>
 
 		<div>

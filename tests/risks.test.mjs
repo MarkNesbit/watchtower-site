@@ -3,10 +3,12 @@ import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
 	buildRiskReference,
+	createProjectRiskComment,
 	createProjectRisk,
 	getProjectRisk,
 	getRiskAssuranceBlocks,
 	isRiskReviewDate,
+	listProjectRiskComments,
 	listProjectRisks,
 	riskDisplayLabel,
 	riskProfileName,
@@ -153,11 +155,43 @@ function createRiskMutationClient({ role = 'member', existingSequence = 1, owner
 						error: null,
 					};
 				}
+				if (table === 'project_risks' && this.selectValue.includes('risk_id')) {
+					return {
+						data: {
+							risk_id: this.filters.risk_id ?? 'risk-1',
+							organisation_id: 'workspace-1',
+							project_id: 'project-1',
+							risk_ref: 'Risk-HHH-001',
+							risk_sequence: 1,
+							title: 'Supplier delay',
+							status: 'open',
+							probability: 'medium',
+							impact: 'medium',
+							rag_status: 'amber',
+							created_by: 'user-1',
+							created_at: '2026-06-01T10:00:00Z',
+							updated_at: '2026-06-02T10:00:00Z',
+						},
+						error: null,
+					};
+				}
 				if (table === 'project_risks') return { data: { risk_sequence: existingSequence }, error: null };
 				return { data: null, error: null };
 			},
 			single() {
 				calls.push(['single', table]);
+				if (table === 'project_risk_notes') {
+					return {
+						data: {
+							risk_note_id: 'comment-1',
+							created_by: 'user-1',
+							created_at: '2026-06-03T10:00:00Z',
+							updated_at: null,
+							...this.insertPayload,
+						},
+						error: null,
+					};
+				}
 				return {
 					data: {
 						risk_id: 'risk-2',
@@ -365,12 +399,16 @@ test('Risk create/edit validation covers references, required fields and dates',
 	assert.deepEqual(validateRiskFormInput({
 		title: ' ',
 		status: 'unknown',
+		probability: 'unknown',
+		impact: 'unknown',
 		ragStatus: 'purple',
 		reviewDate: '2026-02-31',
 		dueDate: '2026-13-01',
 	}), {
 		title: 'Risk title is required.',
 		status: 'Select a valid risk status.',
+		probability: 'Select a valid probability.',
+		impact: 'Select a valid impact.',
 		ragStatus: 'Select a valid RAG status.',
 		reviewDate: 'Enter a valid review date.',
 		dueDate: 'Enter a valid due date.',
@@ -408,7 +446,8 @@ test('Risk assurance blocks derive MVP quality signals without using manual RAG 
 	assert.equal(byId.get('mitigation').tone, 'red');
 	assert.equal(byId.get('contingency').tone, 'red');
 	assert.equal(byId.get('updated').tone, 'red');
-	assert.equal(byId.get('actioner').tone, 'amber');
+	assert.equal(byId.get('due-date').tone, 'amber');
+	assert.equal(byId.get('actioner').tone, 'red');
 	assert.equal(byId.get('actioner').value, 'No actioner assigned for a risk requiring action.');
 	assert.equal(byId.get('owner').prompt, 'Set owner');
 	assert.equal(byId.get('actioner').prompt, 'Assign actioner');
@@ -440,8 +479,8 @@ test('Risk action responsibility assurance follows WT-RISK-003 assignment states
 	const actionerBlock = (risk) => getRiskAssuranceBlocks(risk, new Date('2026-06-28T12:00:00Z')).find((block) => block.id === 'actioner');
 
 	assert.equal(actionerBlock({ ...baseRisk, status: 'mitigating', actioner_id: null }).tone, 'red');
-	assert.equal(actionerBlock({ ...baseRisk, status: 'open', actioner_id: null }).tone, 'amber');
-	assert.equal(actionerBlock({ ...baseRisk, status: 'monitoring', actioner_id: null }).tone, 'amber');
+	assert.equal(actionerBlock({ ...baseRisk, status: 'open', actioner_id: null }).tone, 'red');
+	assert.equal(actionerBlock({ ...baseRisk, status: 'monitoring', actioner_id: null }).tone, 'red');
 	assert.deepEqual(
 		{
 			tone: actionerBlock({ ...baseRisk, status: 'closed', actioner_id: null }).tone,
@@ -529,12 +568,59 @@ test('Risk detail data access blocks cross-project and cross-workspace URL tampe
 	assert.ok(client.calls.some((call) => call[0] === 'maybeSingle'));
 });
 
+test('Risk comments use project risk notes as a scoped top-level comment stream', async () => {
+	const listClient = createRiskClient([
+		{
+			risk_note_id: 'comment-1',
+			organisation_id: 'workspace-1',
+			project_id: 'project-1',
+			risk_id: 'risk-1',
+			parent_risk_note_id: null,
+			note: 'Supplier response added.',
+			attention_level: 'green',
+			created_by: 'user-1',
+			created_at: '2026-06-03T10:00:00Z',
+		},
+	]);
+	const comments = await listProjectRiskComments('workspace-1', 'project-1', 'risk-1', 'viewer', listClient);
+
+	assert.equal(comments.length, 1);
+	assert.deepEqual(
+		listClient.calls.filter((call) => call[0] === 'eq'),
+		[
+			['eq', 'organisation_id', 'workspace-1'],
+			['eq', 'project_id', 'project-1'],
+			['eq', 'risk_id', 'risk-1'],
+		],
+	);
+	assert.ok(listClient.calls.some((call) => call[0] === 'from' && call[1] === 'project_risk_notes'));
+	assert.ok(listClient.calls.some((call) => call[0] === 'is' && call[1] === 'parent_risk_note_id' && call[2] === null));
+	assert.ok(listClient.calls.some((call) => call[0] === 'order' && call[1] === 'created_at' && call[2].ascending === false));
+
+	const createClient = createRiskMutationClient();
+	const comment = await createProjectRiskComment('alpha', 'delivery-hub', 'risk-1', '  Supplier response added.  ', createClient);
+	const insertCall = createClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_risk_notes');
+
+	assert.equal(comment.note, 'Supplier response added.');
+	assert.deepEqual(insertCall[2], {
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_id: 'risk-1',
+		parent_risk_note_id: null,
+		note: 'Supplier response added.',
+		attention_level: 'green',
+	});
+	assert.ok(!createClient.calls.some((call) => call[0] === 'from' && ['project_narrative_entries', 'attention_items', 'notification_events'].includes(call[1])));
+});
+
 test('Risk create helper writes a project-scoped risk with a generated reference', async () => {
 	const client = createRiskMutationClient({ existingSequence: 1 });
 	const risk = await createProjectRisk('alpha', 'delivery-hub', {
 		title: 'Supplier delay',
 		description: 'Critical supplier date is moving.',
 		status: 'open',
+		probability: 'high',
+		impact: 'medium',
 		ragStatus: 'amber',
 		ownerId: 'owner-1',
 		actionerId: 'actioner-1',
@@ -555,6 +641,8 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		title: 'Supplier delay',
 		description: 'Critical supplier date is moving.',
 		status: 'open',
+		probability: 'high',
+		impact: 'medium',
 		rag_status: 'amber',
 		owner_id: 'owner-1',
 		actioner_id: 'actioner-1',
@@ -572,6 +660,8 @@ test('Risk edit helper updates only scoped editable fields', async () => {
 		title: 'Supplier delay updated',
 		description: 'New mitigation agreed.',
 		status: 'mitigating',
+		probability: 'medium',
+		impact: 'high',
 		ragStatus: 'red',
 		ownerId: '',
 		actionerId: '',
@@ -587,6 +677,8 @@ test('Risk edit helper updates only scoped editable fields', async () => {
 		title: 'Supplier delay updated',
 		description: 'New mitigation agreed.',
 		status: 'mitigating',
+		probability: 'medium',
+		impact: 'high',
 		rag_status: 'red',
 		owner_id: null,
 		actioner_id: null,
@@ -611,6 +703,8 @@ test('Viewer writes and inactive owner or actioner assignments are rejected befo
 		createProjectRisk('alpha', 'delivery-hub', {
 			title: 'No write',
 			status: 'open',
+			probability: 'medium',
+			impact: 'medium',
 			ragStatus: 'blue',
 		}, viewerClient),
 		/risk creation/,
@@ -622,6 +716,8 @@ test('Viewer writes and inactive owner or actioner assignments are rejected befo
 		updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
 			title: 'Owner mismatch',
 			status: 'open',
+			probability: 'medium',
+			impact: 'medium',
 			ragStatus: 'blue',
 			ownerId: 'owner-1',
 		}, ownerClient),
@@ -634,6 +730,8 @@ test('Viewer writes and inactive owner or actioner assignments are rejected befo
 		createProjectRisk('alpha', 'delivery-hub', {
 			title: 'Actioner mismatch',
 			status: 'open',
+			probability: 'medium',
+			impact: 'medium',
 			ragStatus: 'blue',
 			actionerId: 'actioner-1',
 		}, actionerClient),
@@ -649,6 +747,8 @@ test('Expired risk create/edit sessions fail before mutation', async () => {
 		createProjectRisk('alpha', 'delivery-hub', {
 			title: 'Expired session',
 			status: 'open',
+			probability: 'medium',
+			impact: 'medium',
 			ragStatus: 'blue',
 		}, createClient, 'expired-token'),
 		/invalid JWT/,
@@ -660,6 +760,8 @@ test('Expired risk create/edit sessions fail before mutation', async () => {
 		updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
 			title: 'Expired session',
 			status: 'open',
+			probability: 'medium',
+			impact: 'medium',
 			ragStatus: 'blue',
 		}, updateClient, 'expired-token'),
 		/invalid JWT/,
@@ -701,23 +803,33 @@ test('Risk detail route renders edit access state and requires the risk to belon
 
 	assert.match(route, /data-risk-detail-route/);
 	assert.match(route, /getProjectRisk\(organisation\.id, data\.id, riskId, workspace\.role, serverSupabase\)/);
+	assert.match(route, /listProjectRiskComments\(organisation\.id, data\.id, risk\.risk_id, workspace\.role, serverSupabase\)/);
+	assert.match(route, /createProjectRiskComment\(workspaceSlug \?\? '', data\.slug, risk\.risk_id/);
 	assert.match(route, /Risk not found or you do not have access\./);
-	assert.match(route, /Risk assurance view/);
+	assert.match(route, /title="Current risk"/);
+	assert.match(route, /title="What needs attention"/);
+	assert.doesNotMatch(route, /Risk assurance view/);
 	assert.match(route, /getRiskAssuranceBlocks\(risk, new Date\(\)\)/);
 	assert.match(route, /data-risk-assurance-blocks/);
 	for (const block of ['description', 'status', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
 		assert.match(route, new RegExp(`data-risk-assurance-block=\\{block\\.id\\}`));
 	}
-	for (const label of ['Risk reference', 'Created by', 'Created at', 'Updated by', 'Updated at', 'Transitional concern signal']) {
+	assert.match(route, /data-risk-dialog-open/);
+	assert.match(route, /data-risk-detail-save-form/);
+	assert.match(route, /data-risk-comment-form/);
+	assert.match(route, /title="Comments"/);
+	assert.match(route, /name="intent" value="add-comment"/);
+	for (const label of ['Risk reference', 'Created by', 'Created at', 'Updated by', 'Updated at']) {
 		assert.match(route, new RegExp(`<dt>${label}</dt>`));
 	}
+	assert.doesNotMatch(route, /<dt>Transitional concern signal<\/dt>/);
 	assert.match(route, /data-viewer-read-only/);
 	assert.match(route, /buildProjectRiskEditPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
 	assert.match(route, /data-risk-edit-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-edit-disabled/);
 	assert.match(route, /Viewer access is read-only\. Risk editing is unavailable\./);
-	assert.doesNotMatch(route, /<form\b|<input\b|<select\b|<textarea\b|type="submit"/);
-	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
+	assert.match(route, /action=\{editHref\}/);
+	assert.doesNotMatch(route, /\.update\(|\.upsert\(|\.delete\(/);
 });
 
 test('Risk create and edit routes enforce permissions, validation and scoped mutations', async () => {
@@ -744,7 +856,7 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(editRoute, /isSupabaseAuthSessionError\(error\)[\s\S]*Astro\.redirect\(sessionRedirectPath\)/);
 	assert.match(editRoute, /Viewer access is read-only\. Risk editing is unavailable\./);
 
-	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="rag_status"', 'name="owner_id"', 'name="actioner_id"', 'name="review_date"', 'name="due_date"', 'name="mitigation_plan"', 'name="contingency_plan"']) {
+	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="probability"', 'name="impact"', 'name="rag_status"', 'name="owner_id"', 'name="actioner_id"', 'name="review_date"', 'name="due_date"', 'name="mitigation_plan"', 'name="contingency_plan"']) {
 		assert.match(form, new RegExp(field));
 	}
 	assert.match(form, /Concern signal/);
@@ -754,6 +866,9 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(createRoute, /actionerId: String\(formData\.get\('actioner_id'\) \?\? ''\)/);
 	assert.match(editRoute, /actionerId: record\?\.actioner_id \?\? ''/);
 	assert.match(editRoute, /actionerId: String\(formData\.get\('actioner_id'\) \?\? ''\)/);
+	assert.match(createRoute, /probability: String\(formData\.get\('probability'\) \?\? 'medium'\)/);
+	assert.match(editRoute, /probability: record\?\.probability \?\? 'medium'/);
+	assert.match(editRoute, /impact: String\(formData\.get\('impact'\) \?\? 'medium'\)/);
 	assert.match(form, /The actioner is responsible for carrying out mitigation, contingency, review, or follow-up activity\./);
 	assert.match(form, /data-review-date-offset="7"/);
 	assert.match(form, /data-review-date-offset="14"/);
@@ -765,14 +880,15 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(form, /window\.location\.assign\(`\/login\?redirectTo=\$\{encodeURIComponent\(window\.location\.pathname\)\}`\)/);
 });
 
-test('Risk create/edit source avoids deferred side effects', async () => {
+test('Risk create/edit/comment source avoids deferred side effects', async () => {
 	const sources = await Promise.all([
 		readFile(new URL('../src/lib/projectRisks.ts', import.meta.url), 'utf8'),
 		readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/new.astro', import.meta.url), 'utf8'),
+		readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId].astro', import.meta.url), 'utf8'),
 		readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId]/edit.astro', import.meta.url), 'utf8'),
 	]);
 	const combined = sources.join('\n');
-	for (const table of ['project_narrative_entries', 'project_risk_notes', 'attention_items', 'notification_events', 'email_notifications']) {
+	for (const table of ['project_narrative_entries', 'attention_items', 'notification_events', 'email_notifications']) {
 		assert.doesNotMatch(combined, new RegExp(`from\\('${table}'\\)|insert\\([\\s\\S]*${table}`, 'i'));
 	}
 	assert.doesNotMatch(combined, /health\s*:/i);
