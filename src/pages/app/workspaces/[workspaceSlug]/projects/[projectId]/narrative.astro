@@ -13,8 +13,15 @@ import {
 	listProjectNarrativeEntries,
 	normaliseProjectNarrativeLinkUrl,
 } from '../../../../../../lib/projectNarrative';
+import {
+	deriveRiskConcernTone,
+	deriveRiskExposureTone,
+	listProjectRisksByIds,
+	riskDisplayLabel,
+	riskProfileName,
+} from '../../../../../../lib/projectRisks';
 import { can } from '../../../../../../lib/permissions';
-import { buildProjectPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
+import { buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -27,6 +34,7 @@ let workspaceRole = '';
 let message = '';
 let entriesLoadError = '';
 let featureAccess = getFeatureAccess('projectDiary');
+let sourceRisksById = new Map();
 let createModalOpen = false;
 let saveMessage = '';
 let formValues = {
@@ -140,8 +148,20 @@ try {
 				}
 				try {
 					entries = await listProjectNarrativeEntries(organisation.id, data.id, workspace.role, serverSupabase);
+					const riskSourceIds = entries
+						.filter((entry) => entry.source_type === 'risk' && entry.source_record_id)
+						.map((entry) => entry.source_record_id);
+					if (riskSourceIds.length > 0) {
+						try {
+							const sourceRisks = await listProjectRisksByIds(organisation.id, data.id, riskSourceIds, workspace.role, serverSupabase);
+							sourceRisksById = new Map(sourceRisks.map((risk) => [risk.risk_id, risk]));
+						} catch {
+							sourceRisksById = new Map();
+						}
+					}
 				} catch (error) {
 					entries = [];
+					sourceRisksById = new Map();
 					entriesLoadError = error instanceof Error ? error.message : 'Unable to load Project Narrative entries.';
 				}
 			}
@@ -166,23 +186,51 @@ const formatSourceType = (value) => {
 const formatCreatedAt = (value) => value
 	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
 	: 'Not available';
+const formatDate = (value) => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value))
+	: 'Not available';
 const profileName = (profile) => {
 	const resolvedProfile = Array.isArray(profile) ? profile[0] : profile;
 	return resolvedProfile?.display_name || resolvedProfile?.email || 'Workspace member';
 };
 const creatorName = (entry) => profileName(entry.creator);
 const updaterName = (entry) => entry.updated_by ? profileName(entry.updater) : '';
+const riskPreviewFor = (entry) => {
+	if (entry.source_type !== 'risk' || !entry.source_record_id) return null;
+	const risk = sourceRisksById.get(entry.source_record_id);
+	if (!risk) return {
+		openHref: buildProjectRiskPath(workspaceSlug ?? '', project?.slug ?? projectSlug ?? '', entry.source_record_id),
+	};
+	const concern = deriveRiskConcernTone(risk, new Date());
+	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
+	return {
+		reference: risk.risk_ref,
+		title: risk.title,
+		status: riskDisplayLabel(risk.status),
+		concern: riskDisplayLabel(concern),
+		concernTone: concern,
+		exposure: `${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact (${riskDisplayLabel(exposure)})`,
+		owner: riskProfileName(risk.owner, 'Unassigned'),
+		actioner: riskProfileName(risk.actioner, 'Unassigned'),
+		reviewDate: formatDate(risk.review_date),
+		mitigation: risk.mitigation_plan || 'No mitigation plan recorded.',
+		contingency: risk.contingency_plan || 'No contingency plan recorded.',
+		openHref: buildProjectRiskPath(workspaceSlug ?? '', project?.slug ?? projectSlug ?? '', risk.risk_id),
+	};
+};
 const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	id: entry.id,
 	displayRef: getNarrativeDisplayRef(entry),
 	narrativeRef: entry.narrative_ref,
 	sourceType: formatSourceType(entry.source_type),
 	sourceRef: entry.source_ref,
+	sourceRecordId: entry.source_record_id,
 	attentionLevel: entry.attention_level,
 	attentionLabel: formatAttention(entry.attention_level),
 	title: entry.title,
 	details: entry.details,
 	links: entry.links ?? [],
+	sourceRisk: riskPreviewFor(entry),
 	createdBy: creatorName(entry),
 	createdAt: formatCreatedAt(entry.created_at),
 	updatedBy: updaterName(entry),
@@ -377,6 +425,26 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							<h3>Links</h3>
 							<ul data-detail-links></ul>
 						</section>
+						<section class="narrative-risk-preview" data-detail-risk-section hidden>
+							<div class="narrative-risk-preview__header">
+								<div>
+									<h3>Source risk</h3>
+									<p data-detail-risk-title></p>
+								</div>
+								<a class="button button--secondary" href="#" data-detail-risk-open>Open full risk</a>
+							</div>
+							<dl class="narrative-risk-preview__grid">
+								<div><dt>Reference</dt><dd data-detail-risk-reference></dd></div>
+								<div><dt>Lifecycle status</dt><dd data-detail-risk-status></dd></div>
+								<div><dt>Derived concern</dt><dd><span class="attention-badge" data-detail-risk-concern></span></dd></div>
+								<div><dt>Exposure</dt><dd data-detail-risk-exposure></dd></div>
+								<div><dt>Owner</dt><dd data-detail-risk-owner></dd></div>
+								<div><dt>Actioner</dt><dd data-detail-risk-actioner></dd></div>
+								<div><dt>Review date</dt><dd data-detail-risk-review-date></dd></div>
+								<div><dt>Mitigation</dt><dd data-detail-risk-mitigation></dd></div>
+								<div><dt>Contingency</dt><dd data-detail-risk-contingency></dd></div>
+							</dl>
+						</section>
 						<dl class="narrative-detail__meta">
 							<div><dt>Narrative reference</dt><dd data-detail-narrative-ref></dd></div>
 							<div><dt>Source type</dt><dd data-detail-source-type></dd></div>
@@ -508,6 +576,31 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 						setOptionalRow('[data-detail-updated-by-row]', '[data-detail-updated-by]', entry.updatedBy);
 						setOptionalRow('[data-detail-updated-at-row]', '[data-detail-updated-at]', entry.updatedAt);
 
+						const riskSection = detailModal.querySelector('[data-detail-risk-section]');
+						if (riskSection instanceof HTMLElement) {
+							riskSection.hidden = !entry.sourceRisk;
+						}
+						if (entry.sourceRisk) {
+							setText('[data-detail-risk-title]', entry.sourceRisk.title);
+							setText('[data-detail-risk-reference]', entry.sourceRisk.reference || entry.sourceRef);
+							setText('[data-detail-risk-status]', entry.sourceRisk.status);
+							setText('[data-detail-risk-exposure]', entry.sourceRisk.exposure);
+							setText('[data-detail-risk-owner]', entry.sourceRisk.owner);
+							setText('[data-detail-risk-actioner]', entry.sourceRisk.actioner);
+							setText('[data-detail-risk-review-date]', entry.sourceRisk.reviewDate);
+							setText('[data-detail-risk-mitigation]', entry.sourceRisk.mitigation);
+							setText('[data-detail-risk-contingency]', entry.sourceRisk.contingency);
+							const concern = detailModal.querySelector('[data-detail-risk-concern]');
+							if (concern instanceof HTMLElement) {
+								concern.className = `attention-badge attention-badge--${entry.sourceRisk.concernTone || 'neutral'}`;
+								concern.textContent = entry.sourceRisk.concern || 'Not available';
+							}
+							const openRisk = detailModal.querySelector('[data-detail-risk-open]');
+							if (openRisk instanceof HTMLAnchorElement) {
+								openRisk.href = entry.sourceRisk.openHref;
+							}
+						}
+
 						const linksSection = detailModal.querySelector('[data-detail-links-section]');
 						const linksList = detailModal.querySelector('[data-detail-links]');
 						if (linksSection instanceof HTMLElement && linksList) {
@@ -607,12 +700,20 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-detail h3 { margin: 0; font-size: 1rem; }
 	.narrative-detail ul { display: grid; gap: 0.4rem; margin: 0; padding-left: 1.1rem; }
 	.narrative-detail a { color: var(--accent-strong); font-weight: 850; }
+	.narrative-risk-preview { border: 1px solid var(--border); border-radius: 0.85rem; padding: 0.85rem; background: rgba(255, 255, 255, 0.035); }
+	.narrative-risk-preview__header { display: flex; align-items: start; justify-content: space-between; gap: 0.8rem; }
+	.narrative-risk-preview__header p { margin: 0.25rem 0 0; }
+	.narrative-risk-preview__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; margin: 0.7rem 0 0; }
+	.narrative-risk-preview__grid div { display: grid; gap: 0.2rem; min-width: 0; }
+	.narrative-risk-preview__grid dt { color: var(--text); font-size: 0.82rem; font-weight: 850; }
+	.narrative-risk-preview__grid dd { margin: 0; overflow-wrap: anywhere; }
 	.narrative-detail__meta { display: grid; gap: 0.65rem; margin: 0; padding-top: 0.85rem; border-top: 1px solid var(--border); }
 	.narrative-detail__meta div { display: grid; grid-template-columns: minmax(9rem, 0.45fr) 1fr; gap: 0.75rem; }
 	.narrative-detail__meta dt { color: var(--text); font-weight: 850; }
 	.narrative-detail__meta dd { margin: 0; overflow-wrap: anywhere; }
 	@media (max-width: 760px) {
-		.narrative-attention, .narrative-link-row, .narrative-detail__meta div { grid-template-columns: 1fr; }
+		.narrative-attention, .narrative-link-row, .narrative-risk-preview__grid, .narrative-detail__meta div { grid-template-columns: 1fr; }
+		.narrative-risk-preview__header { display: grid; }
 		.narrative-link-row label:nth-of-type(2), .narrative-link-row input:nth-of-type(2), .narrative-link-row .button { grid-column: 1; grid-row: auto; }
 		.narrative-form__actions { display: grid; }
 	}

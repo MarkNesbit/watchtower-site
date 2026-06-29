@@ -1,4 +1,5 @@
 import { assertCan, type WorkspaceRole } from './permissions.ts';
+import { createProjectNarrativeEntry } from './projectNarrative.ts';
 import { getWorkspaceBySlug } from './projects.ts';
 
 export const RISK_STATUSES = ['draft', 'open', 'monitoring', 'mitigating', 'escalated', 'materialised', 'closed'] as const;
@@ -133,6 +134,9 @@ const RISK_COMMENT_SELECT = [
 	'updated_at',
 ].join(', ');
 
+const RISK_RAISED_NARRATIVE_PREFIX = 'Risk raised:';
+const RISK_BECAME_RED_NARRATIVE_PREFIX = 'Risk became Red:';
+
 function isConstraintViolation(error: DatabaseError | null, constraintName: string): boolean {
 	if (!error || error.code !== '23505') return false;
 	return [error.message, error.details, error.hint].filter(Boolean).join(' ').includes(constraintName);
@@ -263,6 +267,18 @@ export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
 		.join(' ');
 }
 
+function isRedRiskConcern(value: unknown): boolean {
+	return value === 'red';
+}
+
+function riskConcernToNarrativeAttention(concern: RiskRagStatus): 'green' | 'amber' | 'red' | 'neutral' {
+	return concern === 'green' || concern === 'amber' || concern === 'red' ? concern : 'neutral';
+}
+
+function compactSentence(parts: Array<string | null | undefined>): string {
+	return parts.filter((part): part is string => Boolean(part?.trim())).map((part) => part.trim()).join(' ');
+}
+
 export function riskProfileName(profile: RiskProfile | null | undefined, fallback = 'Unassigned'): string {
 	return profile?.display_name || profile?.email || fallback;
 }
@@ -287,6 +303,11 @@ function dateTone(value: unknown, now: Date, missingTone: RiskAssuranceTone, mis
 	return date < startOfUtcDay(now)
 		? { tone: 'red' as RiskAssuranceTone, value: 'Overdue' }
 		: { tone: 'green' as RiskAssuranceTone, value: 'Scheduled' };
+}
+
+function riskReviewDateIsOverdue(value: unknown, now: Date): boolean {
+	const date = parseUtcDate(value);
+	return Boolean(date && date < startOfUtcDay(now));
 }
 
 export function deriveRiskExposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
@@ -381,6 +402,59 @@ export function deriveRiskConcernTone(risk: Pick<ProjectRisk,
 	if (assurance === 'red' || exposure === 'red') return 'red';
 	if (assurance === 'amber' || exposure === 'amber') return 'amber';
 	return 'green';
+}
+
+export function deriveRiskRedNarrativeReason(risk: Pick<ProjectRisk,
+	'owner_id' | 'actioner_id' | 'review_date' | 'contingency_plan' | 'probability' | 'impact'
+>, now = new Date()): string | null {
+	if (deriveRiskExposureTone(risk.probability, risk.impact) === 'red') return 'Exposure is Red.';
+	if (!risk.owner_id) return 'Owner is missing.';
+	if (!risk.actioner_id) return 'Actioner is missing.';
+	if (!trimmedText(risk.contingency_plan)) return 'Contingency plan is missing.';
+	if (riskReviewDateIsOverdue(risk.review_date, now)) return 'Review date is overdue.';
+	return null;
+}
+
+function buildRiskNarrativeDetails(risk: ProjectRisk, concern: RiskRagStatus, reason?: string | null): string {
+	return compactSentence([
+		`Concern: ${riskDisplayLabel(concern)}.`,
+		`Lifecycle status: ${riskDisplayLabel(risk.status)}.`,
+		reason ? `Reason: ${reason}` : null,
+	]);
+}
+
+async function createRiskRaisedNarrativeEntry(risk: ProjectRisk, workspaceRole: WorkspaceRole, client, now = new Date()) {
+	const concern = deriveRiskConcernTone(risk, now);
+	return createProjectNarrativeEntry(
+		{
+			projectId: risk.project_id,
+			sourceType: 'risk',
+			sourceRecordId: risk.risk_id,
+			sourceRef: risk.risk_ref,
+			attentionLevel: riskConcernToNarrativeAttention(concern),
+			title: `${RISK_RAISED_NARRATIVE_PREFIX} ${risk.risk_ref} — ${risk.title}`,
+			details: buildRiskNarrativeDetails(risk, concern),
+		},
+		workspaceRole,
+		client,
+	);
+}
+
+async function createRiskBecameRedNarrativeEntry(risk: ProjectRisk, workspaceRole: WorkspaceRole, client, now = new Date()) {
+	const reason = deriveRiskRedNarrativeReason(risk, now);
+	return createProjectNarrativeEntry(
+		{
+			projectId: risk.project_id,
+			sourceType: 'risk',
+			sourceRecordId: risk.risk_id,
+			sourceRef: risk.risk_ref,
+			attentionLevel: 'red',
+			title: `${RISK_BECAME_RED_NARRATIVE_PREFIX} ${risk.risk_ref} — ${risk.title}`,
+			details: buildRiskNarrativeDetails(risk, 'red', reason),
+		},
+		workspaceRole,
+		client,
+	);
 }
 
 export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): RiskAssuranceBlock[] {
@@ -557,6 +631,31 @@ export async function listProjectRiskComments(
 	return enrichRiskCommentProfiles((data ?? []) as ProjectRiskComment[], client);
 }
 
+export async function listProjectRisksByIds(
+	organisationId: string,
+	projectId: string,
+	riskIds: string[],
+	workspaceRole: WorkspaceRole,
+	client,
+): Promise<ProjectRisk[]> {
+	assertCan(workspaceRole, 'risk.view', 'Your workspace role does not permit Risk Management access.');
+
+	const scopedRiskIds = uniqueValues(riskIds);
+	if (scopedRiskIds.length === 0) return [];
+
+	const { data, error } = await client
+		.from('project_risks')
+		.select(RISK_SELECT)
+		.eq('organisation_id', organisationId)
+		.eq('project_id', projectId)
+		.in('risk_id', scopedRiskIds)
+		.is('deleted_at', null)
+		.is('archived_at', null);
+
+	if (error) throw error;
+	return enrichRiskProfiles((data ?? []) as ProjectRisk[], client);
+}
+
 export async function listRiskOwnerOptions(
 	organisationId: string,
 	workspaceRole: WorkspaceRole,
@@ -669,7 +768,7 @@ async function getNextRiskSequence(organisationId: string, projectId: string, cl
 	return Number(data?.risk_sequence ?? 0) + 1;
 }
 
-function normaliseRiskPayload(input: RiskFormInput) {
+function normaliseRiskPayload(input: RiskFormInput, now = new Date()) {
 	const payload = {
 		title: input.title.trim(),
 		description: input.description?.trim() || null,
@@ -687,7 +786,7 @@ function normaliseRiskPayload(input: RiskFormInput) {
 		...payload,
 		rag_status: deriveRiskConcernTone({
 			...payload,
-			updated_at: new Date().toISOString(),
+			updated_at: now.toISOString(),
 		}),
 	};
 }
@@ -702,11 +801,12 @@ export async function createProjectRisk(
 	const errors = validateRiskFormInput(input);
 	if (Object.keys(errors).length > 0) throw new Error(Object.values(errors)[0]);
 
-	const { organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.create', client, accessToken);
+	const { workspace, organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.create', client, accessToken);
 	const ownerId = input.ownerId?.trim() || null;
 	const actionerId = input.actionerId?.trim() || null;
 	await assertActiveRiskMember(organisation.id, ownerId, client, 'risk owner');
 	await assertActiveRiskMember(organisation.id, actionerId, client, 'risk actioner');
+	const eventTime = new Date();
 
 	let risk: ProjectRisk | null = null;
 	for (let attempt = 1; attempt <= MAX_RISK_REF_INSERT_ATTEMPTS; attempt += 1) {
@@ -719,7 +819,7 @@ export async function createProjectRisk(
 				project_id: project.id,
 				risk_ref: riskRef,
 				risk_sequence: riskSequence,
-				...normaliseRiskPayload({ ...input, ownerId, actionerId }),
+				...normaliseRiskPayload({ ...input, ownerId, actionerId }, eventTime),
 			})
 			.select(RISK_SELECT)
 			.single();
@@ -733,6 +833,7 @@ export async function createProjectRisk(
 	}
 
 	if (!risk) throw new Error('Watchtower could not assign a unique risk reference. Please try again.');
+	await createRiskRaisedNarrativeEntry(risk, workspace.role, client, eventTime);
 	const [enrichedRisk] = await enrichRiskProfiles([risk], client);
 	return enrichedRisk;
 }
@@ -748,15 +849,30 @@ export async function updateProjectRisk(
 	const errors = validateRiskFormInput(input);
 	if (Object.keys(errors).length > 0) throw new Error(Object.values(errors)[0]);
 
-	const { organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.edit', client, accessToken);
+	const { workspace, organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.edit', client, accessToken);
 	const ownerId = input.ownerId?.trim() || null;
 	const actionerId = input.actionerId?.trim() || null;
 	await assertActiveRiskMember(organisation.id, ownerId, client, 'risk owner');
 	await assertActiveRiskMember(organisation.id, actionerId, client, 'risk actioner');
+	const eventTime = new Date();
+
+	const { data: existingRiskData, error: existingRiskError } = await client
+		.from('project_risks')
+		.select(RISK_SELECT)
+		.eq('organisation_id', organisation.id)
+		.eq('project_id', project.id)
+		.eq('risk_id', riskId)
+		.is('deleted_at', null)
+		.is('archived_at', null)
+		.maybeSingle();
+
+	if (existingRiskError) throw existingRiskError;
+	if (!existingRiskData) throw new Error('Risk not found or you do not have access.');
+	const previousConcern = deriveRiskConcernTone(existingRiskData as ProjectRisk, eventTime);
 
 	const { data, error } = await client
 		.from('project_risks')
-		.update(normaliseRiskPayload({ ...input, ownerId, actionerId }))
+		.update(normaliseRiskPayload({ ...input, ownerId, actionerId }, eventTime))
 		.eq('organisation_id', organisation.id)
 		.eq('project_id', project.id)
 		.eq('risk_id', riskId)
@@ -767,6 +883,10 @@ export async function updateProjectRisk(
 
 	if (error) throw error;
 	if (!data) throw new Error('Risk not found or you do not have access.');
+	const nextConcern = deriveRiskConcernTone(data as ProjectRisk, eventTime);
+	if (!isRedRiskConcern(previousConcern) && isRedRiskConcern(nextConcern)) {
+		await createRiskBecameRedNarrativeEntry(data as ProjectRisk, workspace.role, client, eventTime);
+	}
 	const [risk] = await enrichRiskProfiles([data as ProjectRisk], client);
 	return risk;
 }

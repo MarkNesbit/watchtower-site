@@ -1,14 +1,14 @@
 # Project Narrative
 
-**Status:** WT-NARRATIVE-003 manual entry creation and read-only detail modal
+**Status:** WT-RISK-NARRATIVE-001 limited Risk-to-Narrative event integration
 
 **Migrations:** `20260624000400_project_narrative_schema_foundation.sql`, `20260625000100_project_narrative_entry_links.sql`
 
-**Scope:** Workspace-isolated records, data access, permissions, manual entry creation, structured links, and the project-level assurance table/detail modal
+**Scope:** Workspace-isolated records, data access, permissions, manual entry creation, structured links, limited risk-generated entries, and the project-level assurance table/detail modal
 
 ## Purpose and source-of-truth boundary
 
-Project Narrative is a project-level assurance timeline. It is designed to hold manual project updates, key delivery events, and—through later integrations—references to activity in Risks, Issues, Dependencies, and Assumptions.
+Project Narrative is a project-level assurance timeline. It is designed to hold manual project updates, key delivery events, and deliberately selected references to activity in Risks, Issues, Dependencies, and Assumptions.
 
 The Narrative is contextual and auditable, but it is not the editable source of truth for RAID data. A source-generated entry may retain a source UUID and a display reference such as `Risk-HHH-003`; the underlying Risk or other RAID record remains authoritative and must be changed in its own module.
 
@@ -27,7 +27,7 @@ The user-facing term is **Project Narrative**. The existing `projectDiary` and `
 - creator/updater identities and timestamps;
 - optional IANA `created_timezone` and `updated_timezone` context.
 
-Allowed source types are `manual`, `risk`, `issue`, `dependency`, `assumption`, and `system`. Manual entries default to `manual` and may omit both source metadata fields. The migration does not add a foreign key from `source_record_id` because the future RAID tables do not all exist yet.
+Allowed source types are `manual`, `risk`, `issue`, `dependency`, `assumption`, and `system`. Manual entries default to `manual` and may omit both source metadata fields. WT-RISK-NARRATIVE-001 risk entries use `source_type = risk`, the authoritative `project_risks.risk_id` in `source_record_id`, and the human-readable risk reference in `source_ref`. The migration does not add a foreign key from `source_record_id` because the future RAID tables do not all exist yet.
 
 The database requires at least one of `title` or `details` to contain non-whitespace text so future source-generated entries can remain flexible. The WT-NARRATIVE-003 manual entry form is stricter: manual entries require both Title and Details for usable project context. `source_ref`, when present, cannot be blank.
 
@@ -100,15 +100,30 @@ The Ref pill displays both text and a colour treatment, including a quieter neut
 
 The detail modal displays the Narrative reference, title, attention level, details, links, source type, source reference when present, created by/at, and updated by/at when present. For manual entries the source type displays as `Manual`; an empty source reference row is not shown.
 
+For risk-generated entries, the same modal can show a concise read-only source-risk preview: risk reference, title, lifecycle status, derived concern, exposure, owner, actioner, review date, and mitigation/contingency summaries where available. The preview includes an Open full risk action that routes to the Risk module. It does not expose risk editing controls, so Owner/Admin/Member users still edit risks only in Risk Management and Viewer users remain read-only.
+
 The empty state explains that future manual updates and RAID-linked activity will appear in one assurance timeline, while respecting the user's create permission.
 
 ## Data-access foundation
 
 `src/lib/projectNarrative.ts` centralises the allowed source and attention values and provides scoped list/create helpers. The page uses the list helper, which always filters by both workspace and project and sorts by `created_at` descending then `entry_number` descending. The create helper applies role checks, requires manual Title and Details, defaults source fields to manual/null, validates link rows, rejects unsafe URL protocols, inserts the entry, and then attaches any structured links to the created entry scope. The database remains the final validation and security boundary.
 
+## WT-RISK-NARRATIVE-001 risk entries
+
+WT-RISK-NARRATIVE-001 adds deliberately limited Risk-to-Narrative integration. Risk-generated entries are created only for two events:
+
+- a new risk is raised;
+- an existing risk changes from non-Red to Red using the WT-RISK-005 derived overall concern.
+
+The raised-risk entry is enough when a newly created risk is already Red, so create never also emits a duplicate "became Red" entry. Updating a risk that is already Red does not create another Red narrative entry unless the risk first moves out of Red and later becomes Red again.
+
+Routine risk edits do not populate Project Narrative. Description edits, owner changes, actioner changes, review-date or due-date changes, mitigation or contingency changes, comments, routine lifecycle changes, Green to Amber movement, Amber to Green movement, Red to Amber/Green movement, and Red staying Red are not Narrative events unless the derived overall concern changes from non-Red to Red. Risk comments remain on the risk record and do not create Narrative entries.
+
+Risk remains the source of truth. Project Narrative stores only concise event context and source linkage, not a duplicate risk data store or historical replay. This slice does not introduce attention items, notifications, daily digests, health scoring, AI summaries, issue creation, or risk editing from the Narrative modal.
+
 ## Validation
 
-Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, future source metadata, structured link schema/RLS, link validation, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, scoped newest-first listing, Ref/detail modal behavior, route/table structure, dashboard routing, and absence of out-of-scope integrations.
+Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, source metadata, structured link schema/RLS, link validation, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, scoped newest-first listing, Ref/detail modal behaviour, risk source preview/open-full-risk behaviour, route/table structure, dashboard routing, risk raised and non-Red-to-Red triggers, duplicate prevention, non-trigger routine edits/comments, and absence of attention item, notification, health scoring and AI behaviour.
 
 For an environment with the Supabase CLI and local Docker runtime, validate the complete migration chain with:
 
@@ -121,7 +136,7 @@ Then exercise authenticated owner/member/viewer users in two workspaces to confi
 
 ## Explicitly deferred
 
-- Risk-to-Narrative and other RAID event integrations.
+- Other RAID event integrations beyond the limited WT-RISK-NARRATIVE-001 risk raised and risk became Red events.
 - Risk, Issue, Dependency, or Assumption creation from Narrative entries.
 - Promotion or conversion from Narrative to RAID.
 - Functional/full filter and search behaviour.

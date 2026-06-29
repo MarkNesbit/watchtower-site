@@ -12,6 +12,7 @@ import {
 	getRiskAssuranceBlocks,
 	isRiskReviewDate,
 	listProjectRiskComments,
+	listProjectRisksByIds,
 	listProjectRisks,
 	riskDisplayLabel,
 	riskProfileName,
@@ -68,6 +69,10 @@ function createRiskClient(rows = []) {
 			calls.push(['limit', value]);
 			return this;
 		},
+		in(column, values) {
+			calls.push(['in', column, values]);
+			return this;
+		},
 		maybeSingle() {
 			calls.push(['maybeSingle']);
 			return { data: rows[0] ?? null, error: null };
@@ -92,13 +97,37 @@ function createRiskClient(rows = []) {
 	};
 }
 
-function createRiskMutationClient({ role = 'member', existingSequence = 1, ownerIsActive = true, actionerIsActive = true, authError = null } = {}) {
+function createRiskMutationClient({
+	role = 'member',
+	existingSequence = 1,
+	ownerIsActive = true,
+	actionerIsActive = true,
+	authError = null,
+	existingRisk = {},
+	updatedRisk = {},
+} = {}) {
 	const calls = [];
 	const membershipWithWorkspace = {
 		role,
 		organisations: { id: 'workspace-1', name: 'Alpha Workspace', slug: 'alpha' },
 	};
 	const project = { id: 'project-1', name: 'Delivery Hub', project_ref: 'HHH', slug: 'delivery-hub' };
+	const baseExistingRisk = {
+		risk_id: 'risk-1',
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		title: 'Supplier delay',
+		status: 'open',
+		probability: 'medium',
+		impact: 'medium',
+		rag_status: 'amber',
+		created_by: 'user-1',
+		created_at: '2026-06-01T10:00:00Z',
+		updated_at: '2026-06-02T10:00:00Z',
+		...existingRisk,
+	};
 
 	const makeQuery = (table) => {
 		const query = {
@@ -168,35 +197,34 @@ function createRiskMutationClient({ role = 'member', existingSequence = 1, owner
 							created_at: '2026-06-01T10:00:00Z',
 							updated_at: '2026-06-02T10:00:00Z',
 							...this.updatePayload,
+							...updatedRisk,
 						},
 						error: null,
 					};
 				}
 				if (table === 'project_risks' && this.selectValue.includes('risk_id')) {
-					return {
-						data: {
-							risk_id: this.filters.risk_id ?? 'risk-1',
-							organisation_id: 'workspace-1',
-							project_id: 'project-1',
-							risk_ref: 'Risk-HHH-001',
-							risk_sequence: 1,
-							title: 'Supplier delay',
-							status: 'open',
-							probability: 'medium',
-							impact: 'medium',
-							rag_status: 'amber',
-							created_by: 'user-1',
-							created_at: '2026-06-01T10:00:00Z',
-							updated_at: '2026-06-02T10:00:00Z',
-						},
-						error: null,
-					};
+					return { data: { ...baseExistingRisk, risk_id: this.filters.risk_id ?? baseExistingRisk.risk_id }, error: null };
 				}
 				if (table === 'project_risks') return { data: { risk_sequence: existingSequence }, error: null };
 				return { data: null, error: null };
 			},
 			single() {
 				calls.push(['single', table]);
+				if (table === 'project_narrative_entries') {
+					return {
+						data: {
+							id: 'narrative-1',
+							organisation_id: 'workspace-1',
+							project_id: this.insertPayload.project_id,
+							narrative_ref: 'NAR-HHH-001',
+							entry_number: 1,
+							created_by: 'user-1',
+							created_at: '2026-06-01T10:00:00Z',
+							...this.insertPayload,
+						},
+						error: null,
+					};
+				}
 				if (table === 'project_risk_notes') {
 					return {
 						data: {
@@ -609,6 +637,38 @@ test('Risk Register data access filters by selected workspace and project', asyn
 	assert.ok(client.calls.some((call) => call[0] === 'from' && call[1] === 'project_risks'));
 });
 
+test('Source risk preview data access stays scoped to selected workspace and project', async () => {
+	const client = createRiskClient([
+		{
+			risk_id: 'risk-1',
+			organisation_id: 'workspace-1',
+			project_id: 'project-1',
+			risk_ref: 'Risk-HHH-001',
+			risk_sequence: 1,
+			title: 'Supplier delay',
+			status: 'open',
+			probability: 'low',
+			impact: 'low',
+			rag_status: 'green',
+			created_by: 'user-1',
+			created_at: '2026-06-01T10:00:00Z',
+			updated_at: '2026-06-02T10:00:00Z',
+		},
+	]);
+
+	const risks = await listProjectRisksByIds('workspace-1', 'project-1', ['risk-1', 'risk-1'], 'viewer', client);
+	assert.equal(risks.length, 1);
+	assert.deepEqual(
+		client.calls.filter((call) => call[0] === 'eq'),
+		[
+			['eq', 'organisation_id', 'workspace-1'],
+			['eq', 'project_id', 'project-1'],
+		],
+	);
+	assert.deepEqual(client.calls.find((call) => call[0] === 'in'), ['in', 'risk_id', ['risk-1']]);
+	assert.ok(client.calls.some((call) => call[0] === 'from' && call[1] === 'project_risks'));
+});
+
 test('Risk detail data access blocks cross-project and cross-workspace URL tampering', async () => {
 	const client = createRiskClient([]);
 	const risk = await getProjectRisk('workspace-1', 'project-1', 'risk-elsewhere', 'viewer', client);
@@ -708,10 +768,23 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		mitigation_plan: 'Confirm alternative supplier.',
 		contingency_plan: 'Escalate to steering group.',
 	});
-	assert.ok(!client.calls.some((call) => call[0] === 'from' && ['project_narrative_entries', 'project_risk_notes', 'notification_events', 'attention_items'].includes(call[1])));
+	const narrativeCalls = client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries');
+	assert.equal(narrativeCalls.length, 1);
+	assert.deepEqual(narrativeCalls[0][2], {
+		project_id: 'project-1',
+		source_type: 'risk',
+		source_record_id: 'risk-2',
+		source_ref: 'Risk-HHH-002',
+		attention_level: 'red',
+		title: 'Risk raised: Risk-HHH-002 — Supplier delay',
+		details: 'Concern: Red. Lifecycle status: Open.',
+		created_timezone: null,
+	});
+	assert.ok(!client.calls.some((call) => call[0] === 'from' && ['project_risk_notes', 'notification_events', 'attention_items'].includes(call[1])));
+	assert.ok(!narrativeCalls.some((call) => call[2].title.includes('Risk became Red')));
 });
 
-test('Risk edit helper updates only scoped editable fields', async () => {
+test('Risk edit helper updates only scoped editable fields without narrative for Red staying Red', async () => {
 	const client = createRiskMutationClient();
 	const risk = await updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
 		title: 'Supplier delay updated',
@@ -750,8 +823,145 @@ test('Risk edit helper updates only scoped editable fields', async () => {
 			['organisation_id', 'workspace-1'],
 			['project_id', 'project-1'],
 			['risk_id', 'risk-1'],
+			['organisation_id', 'workspace-1'],
+			['project_id', 'project-1'],
+			['risk_id', 'risk-1'],
 		],
 	);
+	assert.equal(client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries').length, 0);
+});
+
+test('Creating a Red risk creates only the raised narrative entry', async () => {
+	const client = createRiskMutationClient({ existingSequence: 1 });
+	await createProjectRisk('alpha', 'delivery-hub', {
+		title: 'Critical supplier delay',
+		description: 'Critical supplier date is moving.',
+		status: 'open',
+		probability: 'high',
+		impact: 'high',
+		ownerId: '',
+		actionerId: '',
+		reviewDate: '2026-07-10',
+		dueDate: '2026-08-01',
+		mitigationPlan: '',
+		contingencyPlan: '',
+	}, client);
+
+	const narrativeCalls = client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries');
+	assert.equal(narrativeCalls.length, 1);
+	assert.match(narrativeCalls[0][2].title, /^Risk raised: Risk-HHH-002/);
+	assert.doesNotMatch(narrativeCalls[0][2].title, /became Red/);
+	assert.equal(narrativeCalls[0][2].source_type, 'risk');
+	assert.equal(narrativeCalls[0][2].source_record_id, 'risk-2');
+});
+
+test('Updating an existing non-Red risk to Red creates a source-linked narrative entry', async () => {
+	const greenRisk = assuredRiskFacts({
+		title: 'Supplier delay',
+		risk_id: 'risk-1',
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		rag_status: 'green',
+		created_by: 'user-1',
+		created_at: '2026-06-01T10:00:00Z',
+	});
+	const client = createRiskMutationClient({ existingRisk: greenRisk });
+
+	await updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
+		title: 'Supplier delay',
+		description: 'Critical supplier date is moving.',
+		status: 'open',
+		probability: 'high',
+		impact: 'high',
+		ownerId: 'owner-1',
+		actionerId: 'actioner-1',
+		reviewDate: '2026-07-10',
+		dueDate: '2026-08-01',
+		mitigationPlan: 'Confirm alternative supplier.',
+		contingencyPlan: 'Escalate to steering group.',
+	}, client);
+
+	const narrativeCalls = client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries');
+	assert.equal(narrativeCalls.length, 1);
+	assert.deepEqual(narrativeCalls[0][2], {
+		project_id: 'project-1',
+		source_type: 'risk',
+		source_record_id: 'risk-1',
+		source_ref: 'Risk-HHH-001',
+		attention_level: 'red',
+		title: 'Risk became Red: Risk-HHH-001 — Supplier delay',
+		details: 'Concern: Red. Lifecycle status: Open. Reason: Exposure is Red.',
+		created_timezone: null,
+	});
+});
+
+test('Updating a Green risk to Amber does not create a narrative entry', async () => {
+	const greenRisk = assuredRiskFacts({
+		title: 'Supplier delay',
+		risk_id: 'risk-1',
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		rag_status: 'green',
+		created_by: 'user-1',
+		created_at: '2026-06-01T10:00:00Z',
+	});
+	const client = createRiskMutationClient({ existingRisk: greenRisk });
+
+	await updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
+		title: 'Supplier delay',
+		description: 'Critical supplier date is moving.',
+		status: 'open',
+		probability: 'medium',
+		impact: 'low',
+		ownerId: 'owner-1',
+		actionerId: 'actioner-1',
+		reviewDate: '2026-07-10',
+		dueDate: '2026-08-01',
+		mitigationPlan: 'Confirm alternative supplier.',
+		contingencyPlan: 'Escalate to steering group.',
+	}, client);
+
+	assert.equal(client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries').length, 0);
+});
+
+test('Routine owner, actioner and review date edits do not create narrative entries while concern stays non-Red', async () => {
+	const greenRisk = assuredRiskFacts({
+		title: 'Supplier delay',
+		risk_id: 'risk-1',
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		rag_status: 'green',
+		created_by: 'user-1',
+		created_at: '2026-06-01T10:00:00Z',
+	});
+
+	for (const input of [
+		{ ownerId: 'owner-2', actionerId: 'actioner-1', reviewDate: '2026-07-10' },
+		{ ownerId: 'owner-1', actionerId: 'actioner-2', reviewDate: '2026-07-10' },
+		{ ownerId: 'owner-1', actionerId: 'actioner-1', reviewDate: '2026-07-20' },
+	]) {
+		const client = createRiskMutationClient({ existingRisk: greenRisk });
+		await updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
+			title: 'Supplier delay',
+			description: 'Critical supplier date is moving.',
+			status: 'open',
+			probability: 'low',
+			impact: 'low',
+			ownerId: input.ownerId,
+			actionerId: input.actionerId,
+			reviewDate: input.reviewDate,
+			dueDate: '2026-08-01',
+			mitigationPlan: 'Confirm alternative supplier.',
+			contingencyPlan: 'Escalate to steering group.',
+		}, client);
+		assert.equal(client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries').length, 0);
+	}
 });
 
 test('Viewer writes and inactive owner or actioner assignments are rejected before risk mutation', async () => {
@@ -988,10 +1198,14 @@ test('Risk create/edit/comment source avoids deferred side effects', async () =>
 		readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId]/edit.astro', import.meta.url), 'utf8'),
 	]);
 	const combined = sources.join('\n');
-	for (const table of ['project_narrative_entries', 'attention_items', 'notification_events', 'email_notifications']) {
+	assert.match(combined, /createProjectNarrativeEntry/);
+	assert.match(combined, /Risk raised:/);
+	assert.match(combined, /Risk became Red:/);
+	assert.match(combined, /!isRedRiskConcern\(previousConcern\) && isRedRiskConcern\(nextConcern\)/);
+	for (const table of ['attention_items', 'notification_events', 'email_notifications']) {
 		assert.doesNotMatch(combined, new RegExp(`from\\('${table}'\\)|insert\\([\\s\\S]*${table}`, 'i'));
 	}
-	assert.doesNotMatch(combined, /health\s*:/i);
+	assert.doesNotMatch(combined, /health\s*:|AI summar|AI analys/i);
 });
 
 test('Risk activity assurance and temporary handover remain documented future-ready scope', async () => {
