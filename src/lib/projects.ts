@@ -10,6 +10,7 @@ import {
 } from './projectRoutes.ts';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs.ts';
 import { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from './projectRefs.ts';
+import { applyRoleSimulationToMembership } from './internalTesting.ts';
 
 const PROJECT_REF_CONSTRAINT = 'projects_organisation_project_ref_key';
 const PROJECT_NAME_CONSTRAINT = 'projects_organisation_project_name_key';
@@ -64,7 +65,7 @@ export async function getCurrentWorkspace(client, accessToken?: string) {
 		.maybeSingle();
 
 	if (error) throw error;
-	return data;
+	return applyRoleSimulationToMembership(data, client, user.id);
 }
 
 export async function getWorkspaceBySlug(client, workspaceSlug: string, accessToken?: string) {
@@ -85,7 +86,7 @@ export async function getWorkspaceBySlug(client, workspaceSlug: string, accessTo
 		.maybeSingle();
 
 	if (error) throw error;
-	return data;
+	return applyRoleSimulationToMembership(data, client, user.id);
 }
 
 export async function getAccessibleProjectsBySlug(client, projectSlug: string, accessToken?: string) {
@@ -103,14 +104,20 @@ export async function getAccessibleProjectsBySlug(client, projectSlug: string, a
 		.eq('user_id', user.id);
 	if (membershipError) throw membershipError;
 
-	const activeWorkspaces = (memberships ?? [])
-		.map((membership) => {
-			const organisation = Array.isArray(membership.organisations)
-				? membership.organisations[0]
-				: membership.organisations;
-			return organisation ? { ...organisation, role: membership.role } : null;
-		})
-		.filter(Boolean);
+	const activeWorkspaces = [];
+	for (const membership of memberships ?? []) {
+		const organisation = Array.isArray(membership.organisations)
+			? membership.organisations[0]
+			: membership.organisations;
+		if (organisation) {
+			const effectiveMembership = await applyRoleSimulationToMembership(
+				{ role: membership.role, organisations: organisation },
+				client,
+				user.id,
+			);
+			activeWorkspaces.push({ ...organisation, role: effectiveMembership?.role ?? membership.role });
+		}
+	}
 	if (activeWorkspaces.length === 0) return [];
 
 	const workspaceById = new Map(activeWorkspaces.map((workspace) => [workspace.id, workspace]));

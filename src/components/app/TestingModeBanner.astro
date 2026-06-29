@@ -1,0 +1,29 @@
+---
+import { roleLabel, type RoleSimulationState } from '../../lib/internalTesting';
+
+type Props = {
+	state: RoleSimulationState | null;
+	returnTo?: string;
+};
+
+const { state, returnTo = '/app' } = Astro.props;
+const simulation = state?.activeSimulation;
+const simulatedRole = simulation?.simulated_role;
+const expiresAt = simulation?.expires_at
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(simulation.expires_at))
+	: '';
+---
+{state?.isInternalTester && simulation && simulatedRole && (
+	<aside class="testing-mode-banner" data-testing-mode-banner role="status">
+		<div>
+			<strong>Testing mode active:</strong>
+			<span>viewing {state.workspace?.name ?? 'this workspace'} as {roleLabel(simulatedRole)}.</span>
+			{expiresAt && <span class="testing-mode-banner__expiry">Expires {expiresAt} UTC.</span>}
+		</div>
+		<form method="post" action="/app/account/test-tools">
+			<input type="hidden" name="action" value="reset" />
+			<input type="hidden" name="return_to" value={returnTo} />
+			<button class="button button--secondary testing-mode-banner__reset" type="submit">Reset to real permissions</button>
+		</form>
+	</aside>
+)}

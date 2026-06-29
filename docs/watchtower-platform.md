@@ -29,9 +29,11 @@ The platform is intended for professional delivery and technology audiences, inc
 
 ## User profile and access foundation
 
-Supabase Auth owns authenticated accounts. Watchtower mirrors each verified account into a lightweight profile for identity, display and audit metadata. Profiles are not workspace permission stores and must not contain global customer roles, recovery email addresses, delivery personas or platform superuser roles. The one platform-level product control is the narrow `can_access_preview_features` eligibility flag; it cannot grant workspace membership, RBAC permissions or RLS access.
+Supabase Auth owns authenticated accounts. Watchtower mirrors each verified account into a lightweight profile for identity, display and audit metadata. Profiles are not workspace permission stores and must not contain global customer roles, recovery email addresses, delivery personas or platform superuser roles. The platform-level product controls are narrow eligibility flags: `can_access_preview_features` for preview feature availability and `is_internal_tester` for the WT-TEST-001 internal testing utility. They cannot grant workspace membership, ordinary RBAC permissions or general RLS access.
 
 Workspace access is derived from active organisation membership and the fixed MVP roles `owner`, `admin`, `member` and `viewer`. The database stores these roles on `organisation_members`, allowing a user to hold different roles in different workspaces. See `docs/access-foundation.md` for the full account/profile/membership/role model and future permission-readiness notes.
+
+WT-TEST-001 adds Account -> Test tools for the authorised Mark.Nesbit.Professional internal tester only. The tool can simulate Viewer, Member, Admin or Owner in the `mark-nesbit-professional` production test workspace for smoke-testing and permission validation. It stores short-lived simulation state, expires after 4 hours, changes effective permissions only, preserves the real `organisation_members.role`, and shows a persistent testing-mode banner while active. It is not impersonation, not customer-facing permission management, and not a global admin tool.
 
 ## Feature availability and preview access
 
