@@ -197,16 +197,37 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	assert.match(detailSource, /buildProjectNarrativePath\(workspaceSlug \?\? '', project\.slug\)/);
 });
 
-test('Project dashboard tiles share hover and keyboard focus treatment without activating unavailable tiles', async () => {
+test('Project dashboard tiles show static helper text without rollover-only behaviour', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 
 	assert.match(detailSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?aria-disabled="true"[\s\S]*?aria-describedby={[\s\S]*?tabindex="0"/);
 	assert.match(detailSource, /<small id={`dashboard-tile-help-\$\{index\}`}>/);
-	assert.match(detailSource, /\.dashboard-tile small \{\s*display: none;/);
-	assert.match(detailSource, /\.dashboard-tile:hover small,[\s\S]*?\.dashboard-tile:focus-visible small,[\s\S]*?\.dashboard-tile:focus-within small \{\s*display: block;/);
+	assert.match(detailSource, /\.dashboard-tile small \{\s*color: var\(--muted-strong\);/);
+	assert.doesNotMatch(detailSource, /\.dashboard-tile small \{\s*display: none;/);
+	assert.doesNotMatch(detailSource, /\.dashboard-tile:hover small,[\s\S]*?\.dashboard-tile:focus-visible small,[\s\S]*?\.dashboard-tile:focus-within small \{/);
 	assert.doesNotMatch(detailSource, /\.dashboard-tile--unavailable\s*\{[^}]*opacity:/);
 	assert.doesNotMatch(detailSource, /\.dashboard-tile--unavailable:hover/);
-	assert.match(detailSource, /<a class={`dashboard-tile[\s\S]*?href={tile\.href}/);
+	assert.match(detailSource, /<a[\s\S]*?class={`dashboard-tile[\s\S]*?href=\{tile\.href\}/);
+});
+
+test('Project dashboard Risk tile uses icon-only assurance state', async () => {
+	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+
+	assert.match(detailSource, /import \{[\s\S]*deriveProjectRiskDashboardAssuranceTone,[\s\S]*listProjectRisks,[\s\S]*riskAssuranceToneLabel/);
+	assert.match(detailSource, /let riskDashboardIconTone: RiskDashboardAssuranceTone = 'neutral'/);
+	assert.match(detailSource, /riskFeatureAccess\.isAccessible && can\(workspace\.role, 'risk\.view'\)/);
+	assert.match(detailSource, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
+	assert.match(detailSource, /deriveProjectRiskDashboardAssuranceTone\(risks, new Date\(\)\)/);
+	assert.match(detailSource, /riskDashboardIconLabel\(riskDashboardIconTone\)/);
+	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? tile\.title\}/);
+	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\}: \$\{tile\.line\}`\}/);
+	assert.match(detailSource, /data-risk-icon-state=\{tile\.destination === 'risks' \? tile\.iconTone : undefined\}/);
+	assert.match(detailSource, /dashboard-tile--icon-\$\{tile\.iconTone \?\? 'default'\}/);
+	assert.match(detailSource, /\.dashboard-tile__icon \{[\s\S]*?color: var\(--tile-icon-status, var\(--tile-status\)\)/);
+	for (const tone of ['green', 'amber', 'red', 'neutral']) {
+		assert.match(detailSource, new RegExp(`dashboard-tile--icon-${tone}`));
+	}
+	assert.doesNotMatch(detailSource, /badge|count|dot|notification|attention-item|attentionItems|healthScore/i);
 });
 
 test('Project dashboard edit action is visible to all viewers and active only for permitted roles', async () => {

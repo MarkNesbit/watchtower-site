@@ -5,6 +5,7 @@ import {
 	buildRiskReference,
 	createProjectRiskComment,
 	createProjectRisk,
+	deriveProjectRiskDashboardAssuranceTone,
 	deriveRiskAssuranceTone,
 	deriveRiskConcernTone,
 	deriveRiskExposureTone,
@@ -496,6 +497,46 @@ test('Overall risk concern uses exposure plus assurance overrides', () => {
 	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ probability: 'high', impact: 'high' }), now), 'red');
 	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ due_date: null }), now), 'amber');
 	assert.equal(deriveRiskConcernTone(assuredRiskFacts(), now), 'green');
+});
+
+test('Project dashboard risk icon derives highest active risk assurance state only', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const greenRisk = assuredRiskFacts();
+	const amberRisk = assuredRiskFacts({ review_date: null });
+	const redRisk = assuredRiskFacts({ owner_id: null });
+
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([greenRisk, amberRisk, redRisk], now), 'red');
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([greenRisk, amberRisk], now), 'amber');
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([greenRisk], now), 'green');
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([], now), 'neutral');
+});
+
+test('Project dashboard risk icon excludes Draft and Closed risks', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const excludedRedRisks = [
+		assuredRiskFacts({ status: 'draft', owner_id: null }),
+		assuredRiskFacts({ status: 'closed', contingency_plan: '' }),
+	];
+
+	assert.equal(deriveProjectRiskDashboardAssuranceTone(excludedRedRisks, now), 'neutral');
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([
+		...excludedRedRisks,
+		assuredRiskFacts({ status: 'monitoring' }),
+	], now), 'green');
+});
+
+test('Project dashboard risk icon is not driven by exposure', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const highExposureWithGreenAssurance = assuredRiskFacts({
+		probability: 'high',
+		impact: 'high',
+		mitigation_plan: 'Confirmed supplier alternate.',
+		contingency_plan: 'Escalate through steering group.',
+	});
+
+	assert.equal(deriveRiskExposureTone(highExposureWithGreenAssurance.probability, highExposureWithGreenAssurance.impact), 'red');
+	assert.equal(deriveRiskAssuranceTone(highExposureWithGreenAssurance, now), 'green');
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([highExposureWithGreenAssurance], now), 'green');
 });
 
 test('Risk assurance blocks derive MVP quality signals without using manual RAG as truth', () => {
@@ -1227,10 +1268,12 @@ test('Risk activity assurance and temporary handover remain documented future-re
 	assert.doesNotMatch(source, /last_login_at/);
 });
 
-test('Project dashboard Risk tile routes to the Risk Register without loading risk records', async () => {
+test('Project dashboard Risk tile routes to the Risk Register and loads only scoped assurance state', async () => {
 	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	assert.match(dashboard, /title: 'Risks'[\s\S]*destination: 'risks'[\s\S]*featureKey: 'riskManagement'/);
 	assert.match(dashboard, /buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\)/);
-	assert.doesNotMatch(dashboard, /from\('project_risks'\)/);
+	assert.match(dashboard, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
+	assert.match(dashboard, /deriveProjectRiskDashboardAssuranceTone\(risks, new Date\(\)\)/);
 	assert.doesNotMatch(dashboard, /risk_ref/);
+	assert.doesNotMatch(dashboard, /badge|count|attention_items|notification_events|healthScore|AI summar|AI analys/i);
 });
