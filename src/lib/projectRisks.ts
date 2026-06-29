@@ -4,6 +4,7 @@ import { getWorkspaceBySlug } from './projects.ts';
 
 export const RISK_STATUSES = ['draft', 'open', 'monitoring', 'mitigating', 'escalated', 'materialised', 'closed'] as const;
 export type RiskStatus = (typeof RISK_STATUSES)[number];
+export const DASHBOARD_ACTIVE_RISK_STATUSES = ['open', 'monitoring', 'mitigating', 'escalated', 'materialised'] as const;
 
 export const RISK_LEVELS = ['low', 'medium', 'high'] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
@@ -11,6 +12,7 @@ export type RiskLevel = (typeof RISK_LEVELS)[number];
 export const RISK_RAG_STATUSES = ['blue', 'green', 'amber', 'red'] as const;
 export type RiskRagStatus = (typeof RISK_RAG_STATUSES)[number];
 export type RiskAssuranceTone = 'green' | 'amber' | 'red' | 'neutral';
+export type RiskDashboardAssuranceTone = RiskAssuranceTone;
 
 const RISK_SEQUENCE_CONSTRAINT = 'project_risks_project_sequence_key';
 const RISK_REF_CONSTRAINT = 'project_risks_project_ref_key';
@@ -402,6 +404,21 @@ export function deriveRiskConcernTone(risk: Pick<ProjectRisk,
 	if (assurance === 'red' || exposure === 'red') return 'red';
 	if (assurance === 'amber' || exposure === 'amber') return 'amber';
 	return 'green';
+}
+
+export function isDashboardActiveRiskStatus(status: unknown): boolean {
+	return DASHBOARD_ACTIVE_RISK_STATUSES.includes(trimmedText(status).toLowerCase() as (typeof DASHBOARD_ACTIVE_RISK_STATUSES)[number]);
+}
+
+export function deriveProjectRiskDashboardAssuranceTone(
+	risks: Array<Pick<ProjectRisk,
+		'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+	>>,
+	now = new Date(),
+): RiskDashboardAssuranceTone {
+	const activeRisks = risks.filter((risk) => isDashboardActiveRiskStatus(risk.status));
+	if (activeRisks.length === 0) return 'neutral';
+	return worstTone(activeRisks.map((risk) => deriveRiskAssuranceTone(risk, now)));
 }
 
 export function deriveRiskRedNarrativeReason(risk: Pick<ProjectRisk,

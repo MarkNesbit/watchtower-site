@@ -24,6 +24,8 @@ Authenticated project capability routes include the feature-gated Project Narrat
 
 Risk Management now has a feature-gated register at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks`, single-risk actionable assurance detail pages at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/risks/{riskId}`, plus create and edit routes for owner, admin and member roles. WT-RISK-005 keeps lifecycle status, exposure, assurance and overall concern separate: users edit structured facts, probability and impact derive exposure, weak governance/control data derives assurance, and the risk reference pill uses the derived overall concern rather than a manually selected RAG. The stored `rag_status` value remains a legacy/transitional compatibility field until there is a migration strategy. Risk references remain system-generated and read-only; routine risk edits, risk comments, risk delete, replies/threading, attention items, notifications, configurable Governance Profile / Assessment Profile scoring, AI behaviour and health scoring remain deferred. Risk remains the source of truth; Project Narrative is not a risk audit log.
 
+WT-DASH-RISK-001 adds an icon-only assurance signal to the project dashboard Risk tile. The Risk tile icon reflects the highest current active risk assurance state for the project, excluding Draft and Closed risks. This signal does not use risk exposure, does not recolour the full tile, and does not add red/amber dots, counts, badges, attention items, notifications or health scoring.
+
 Authenticated project pages should follow the reusable layout, action, empty-state and restricted-action guidance in `docs/ui-page-design-standard.md`.
 
 ## Development
