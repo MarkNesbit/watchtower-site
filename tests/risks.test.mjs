@@ -807,19 +807,24 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /createProjectRiskComment\(workspaceSlug \?\? '', data\.slug, risk\.risk_id/);
 	assert.match(route, /Risk not found or you do not have access\./);
 	assert.match(route, /title="Current risk"/);
+	assert.doesNotMatch(route, /status="Actionable assurance"/);
 	assert.match(route, /title="Core Risk Detail"/);
 	assert.doesNotMatch(route, /What needs attention/);
 	assert.doesNotMatch(route, /Risk assurance view/);
 	assert.match(route, /class="risk-detail-heading"/);
 	assert.match(route, /label=\{risk\.risk_ref\}/);
 	assert.match(route, /statusLabel=\{riskDisplayLabel\(risk\.rag_status\)\}/);
+	assert.match(route, /font-size: clamp\(1\.55rem, 2\.35vw, 2\.45rem\)/);
 	assert.match(route, /data-risk-summary-strip/);
-	for (const label of ['Concern', 'Lifecycle status', 'Owner', 'Created by', 'Created at', 'Updated by', 'Updated at']) {
+	for (const label of ['Lifecycle status', 'Created by', 'Updated by', 'Updated']) {
 		assert.match(route, new RegExp(`<dt>${label}</dt>`));
+	}
+	for (const removedLabel of ['Concern', 'Owner', 'Created at', 'Updated at']) {
+		assert.doesNotMatch(route, new RegExp(`<dt>${removedLabel}</dt>`));
 	}
 	assert.match(route, /creatorName\(risk\)/);
 	assert.match(route, /updaterName\(risk\)/);
-	assert.match(route, /ownerName\(risk\)/);
+	assert.doesNotMatch(route, /ownerName\(risk\)/);
 	assert.match(route, /getRiskAssuranceBlocks\(risk, new Date\(\)\)/);
 	assert.match(route, /data-risk-assurance-blocks/);
 	for (const block of ['description', 'status', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
@@ -828,6 +833,9 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /data-risk-dialog-open/);
 	assert.match(route, /data-risk-modal-backdrop-blur/);
 	assert.match(route, /backdrop-filter: blur\(10px\)/);
+	assert.match(route, /\.risk-action-form__actions \[data-risk-dialog-cancel\]/);
+	assert.match(route, /background: #0c1724/);
+	assert.match(route, /color: #f3f8fc/);
 	assert.match(route, /data-risk-detail-save-form/);
 	assert.match(route, /data-risk-comment-form/);
 	assert.match(route, /data-risk-comments-section/);
@@ -836,6 +844,7 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /name="intent" value="add-comment"/);
 	assert.match(route, /Back to Risk Register/);
 	assert.match(route, /Back to project/);
+	assert.match(route, /<div class="risk-detail-links">[\s\S]*class="button button--secondary"[\s\S]*Back to Risk Register[\s\S]*class="button button--secondary"[\s\S]*Back to project/);
 	assert.doesNotMatch(route, /<dt>Risk reference<\/dt>/);
 	assert.doesNotMatch(route, /<dt>Transitional concern signal<\/dt>/);
 	assert.match(route, /data-viewer-read-only/);
