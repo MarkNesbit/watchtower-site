@@ -73,7 +73,7 @@ function createRiskClient(rows = []) {
 	};
 }
 
-function createRiskMutationClient({ role = 'member', existingSequence = 1, ownerIsActive = true, authError = null } = {}) {
+function createRiskMutationClient({ role = 'member', existingSequence = 1, ownerIsActive = true, actionerIsActive = true, authError = null } = {}) {
 	const calls = [];
 	const membershipWithWorkspace = {
 		role,
@@ -87,6 +87,7 @@ function createRiskMutationClient({ role = 'member', existingSequence = 1, owner
 			selectValue: '',
 			insertPayload: null,
 			updatePayload: null,
+			filters: {},
 			select(value) {
 				this.selectValue = value;
 				calls.push(['select', table, value]);
@@ -103,6 +104,7 @@ function createRiskMutationClient({ role = 'member', existingSequence = 1, owner
 				return this;
 			},
 			eq(column, value) {
+				this.filters[column] = value;
 				calls.push(['eq', table, column, value]);
 				return this;
 			},
@@ -128,7 +130,9 @@ function createRiskMutationClient({ role = 'member', existingSequence = 1, owner
 					return { data: membershipWithWorkspace, error: null };
 				}
 				if (table === 'organisation_members') {
-					return { data: ownerIsActive ? { user_id: 'owner-1' } : null, error: null };
+					const isActionerLookup = this.filters.user_id === 'actioner-1';
+					const isActive = isActionerLookup ? actionerIsActive : ownerIsActive;
+					return { data: isActive ? { user_id: this.filters.user_id } : null, error: null };
 				}
 				if (table === 'projects') return { data: project, error: null };
 				if (table === 'project_risks' && this.updatePayload) {
@@ -207,7 +211,7 @@ test('Project reference support is added safely and scoped to the workspace', as
 	assert.match(sql, /where project_ref is not null/);
 });
 
-test('Project risks include required MVP fields and exclude actioners', async () => {
+test('Project risks include required MVP fields', async () => {
 	const sql = await migrationSql();
 	for (const field of [
 		'organisation_id uuid not null',
@@ -227,7 +231,14 @@ test('Project risks include required MVP fields and exclude actioners', async ()
 	]) {
 		assert.match(sql, new RegExp(field.replace(/[()]/g, '\\$&')));
 	}
-	assert.doesNotMatch(sql, /actioner_id/i);
+});
+
+test('Risk actioner migration adds a nullable profile reference without creating an Actions module', async () => {
+	const sql = await allMigrationSql();
+	assert.match(sql, /add column if not exists actioner_id uuid references public\.profiles\(id\)/);
+	assert.match(sql, /create index if not exists project_risks_actioner_id_idx/);
+	assert.match(sql, /Nullable primary risk actioner for MVP assignment/);
+	assert.doesNotMatch(sql, /create\s+table\s+(public\.)?project_risk_actions\b/i);
 });
 
 test('Risk and note constraints cover status, scoring, references and attention levels', async () => {
@@ -398,8 +409,70 @@ test('Risk assurance blocks derive MVP quality signals without using manual RAG 
 	assert.equal(byId.get('contingency').tone, 'red');
 	assert.equal(byId.get('updated').tone, 'red');
 	assert.equal(byId.get('actioner').tone, 'amber');
+	assert.equal(byId.get('actioner').value, 'No actioner assigned for a risk requiring action.');
 	assert.equal(byId.get('owner').prompt, 'Set owner');
+	assert.equal(byId.get('actioner').prompt, 'Assign actioner');
 	assert.equal(byId.get('review-date').prompt, 'Update review date');
+});
+
+test('Risk action responsibility assurance follows WT-RISK-003 assignment states', () => {
+	const baseRisk = {
+		risk_id: 'risk-1',
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		title: 'Supplier delay',
+		description: 'Supplier delivery may miss the agreed implementation window.',
+		status: 'mitigating',
+		probability: 'medium',
+		impact: 'medium',
+		rag_status: 'amber',
+		owner_id: 'owner-1',
+		review_date: null,
+		due_date: null,
+		mitigation_plan: '',
+		contingency_plan: '',
+		created_by: 'user-1',
+		created_at: '2026-06-01T10:00:00Z',
+		updated_at: '2026-06-20T10:00:00Z',
+	};
+	const actionerBlock = (risk) => getRiskAssuranceBlocks(risk, new Date('2026-06-28T12:00:00Z')).find((block) => block.id === 'actioner');
+
+	assert.equal(actionerBlock({ ...baseRisk, status: 'mitigating', actioner_id: null }).tone, 'red');
+	assert.equal(actionerBlock({ ...baseRisk, status: 'open', actioner_id: null }).tone, 'amber');
+	assert.equal(actionerBlock({ ...baseRisk, status: 'monitoring', actioner_id: null }).tone, 'amber');
+	assert.deepEqual(
+		{
+			tone: actionerBlock({ ...baseRisk, status: 'closed', actioner_id: null }).tone,
+			statusLabel: actionerBlock({ ...baseRisk, status: 'closed', actioner_id: null }).statusLabel,
+		},
+		{ tone: 'neutral', statusLabel: 'Neutral' },
+	);
+	assert.deepEqual(
+		{
+			tone: actionerBlock({
+				...baseRisk,
+				actioner_id: 'actioner-1',
+				actioner: { id: 'actioner-1', display_name: 'Mark Nesbit Professional' },
+			}).tone,
+			value: actionerBlock({
+				...baseRisk,
+				actioner_id: 'actioner-1',
+				actioner: { id: 'actioner-1', display_name: 'Mark Nesbit Professional' },
+			}).value,
+			prompt: actionerBlock({
+				...baseRisk,
+				actioner_id: 'actioner-1',
+				actioner: { id: 'actioner-1', display_name: 'Mark Nesbit Professional' },
+			}).prompt,
+		},
+		{
+			tone: 'green',
+			value: 'Assigned to: Mark Nesbit Professional',
+			prompt: 'Change actioner',
+		},
+	);
 });
 
 test('Risk Register data access filters by selected workspace and project', async () => {
@@ -464,6 +537,7 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		status: 'open',
 		ragStatus: 'amber',
 		ownerId: 'owner-1',
+		actionerId: 'actioner-1',
 		reviewDate: '2026-07-10',
 		dueDate: '2026-08-01',
 		mitigationPlan: 'Confirm alternative supplier.',
@@ -483,6 +557,7 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		status: 'open',
 		rag_status: 'amber',
 		owner_id: 'owner-1',
+		actioner_id: 'actioner-1',
 		review_date: '2026-07-10',
 		due_date: '2026-08-01',
 		mitigation_plan: 'Confirm alternative supplier.',
@@ -499,6 +574,7 @@ test('Risk edit helper updates only scoped editable fields', async () => {
 		status: 'mitigating',
 		ragStatus: 'red',
 		ownerId: '',
+		actionerId: '',
 		reviewDate: '',
 		dueDate: '',
 		mitigationPlan: '',
@@ -513,6 +589,7 @@ test('Risk edit helper updates only scoped editable fields', async () => {
 		status: 'mitigating',
 		rag_status: 'red',
 		owner_id: null,
+		actioner_id: null,
 		review_date: null,
 		due_date: null,
 		mitigation_plan: null,
@@ -528,7 +605,7 @@ test('Risk edit helper updates only scoped editable fields', async () => {
 	);
 });
 
-test('Viewer writes and inactive owner assignments are rejected before risk mutation', async () => {
+test('Viewer writes and inactive owner or actioner assignments are rejected before risk mutation', async () => {
 	const viewerClient = createRiskMutationClient({ role: 'viewer' });
 	await assert.rejects(
 		createProjectRisk('alpha', 'delivery-hub', {
@@ -551,6 +628,18 @@ test('Viewer writes and inactive owner assignments are rejected before risk muta
 		/active workspace member/,
 	);
 	assert.ok(!ownerClient.calls.some((call) => call[0] === 'update'));
+
+	const actionerClient = createRiskMutationClient({ actionerIsActive: false });
+	await assert.rejects(
+		createProjectRisk('alpha', 'delivery-hub', {
+			title: 'Actioner mismatch',
+			status: 'open',
+			ragStatus: 'blue',
+			actionerId: 'actioner-1',
+		}, actionerClient),
+		/active workspace member/,
+	);
+	assert.ok(!actionerClient.calls.some((call) => call[0] === 'insert'));
 });
 
 test('Expired risk create/edit sessions fail before mutation', async () => {
@@ -655,16 +744,21 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(editRoute, /isSupabaseAuthSessionError\(error\)[\s\S]*Astro\.redirect\(sessionRedirectPath\)/);
 	assert.match(editRoute, /Viewer access is read-only\. Risk editing is unavailable\./);
 
-	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="rag_status"', 'name="owner_id"', 'name="review_date"', 'name="due_date"', 'name="mitigation_plan"', 'name="contingency_plan"']) {
+	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="rag_status"', 'name="owner_id"', 'name="actioner_id"', 'name="review_date"', 'name="due_date"', 'name="mitigation_plan"', 'name="contingency_plan"']) {
 		assert.match(form, new RegExp(field));
 	}
 	assert.match(form, /Concern signal/);
 	assert.match(form, /Transitional signal only/);
+	assert.match(createRoute, /actionerOptions=\{ownerOptions\}/);
+	assert.match(editRoute, /actionerOptions=\{ownerOptions\}/);
+	assert.match(createRoute, /actionerId: String\(formData\.get\('actioner_id'\) \?\? ''\)/);
+	assert.match(editRoute, /actionerId: record\?\.actioner_id \?\? ''/);
+	assert.match(editRoute, /actionerId: String\(formData\.get\('actioner_id'\) \?\? ''\)/);
+	assert.match(form, /The actioner is responsible for carrying out mitigation, contingency, review, or follow-up activity\./);
 	assert.match(form, /data-review-date-offset="7"/);
 	assert.match(form, /data-review-date-offset="14"/);
 	assert.match(form, /data-review-date-manual/);
-	assert.match(form, /Actioner[\s\S]*Unassigned/);
-	assert.match(form, /Actioners will be handled through risk actions in a later slice\./);
+	assert.doesNotMatch(form, /Actioners will be handled through risk actions in a later slice\./);
 	assert.match(form, /supabase\.auth\.getSession\(\)/);
 	assert.match(form, /document\.cookie = `wt-access-token=\$\{session\.access_token\}/);
 	assert.match(form, /document\.cookie = `wt-refresh-token=\$\{session\.refresh_token\}/);

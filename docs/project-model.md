@@ -228,7 +228,7 @@ WT-RISK-002B adds project-scoped risk creation at `/app/workspaces/{workspaceSlu
 
 Create and edit actions re-check the route workspace, project, feature flag and central `risk.create`/`risk.edit` permissions server-side. Create derives `organisation_id`, `project_id`, `risk_sequence` and `risk_ref` from the resolved workspace/project rather than trusting form data. Edit fetches the target risk by `organisation_id`, `project_id` and `risk_id`, so copied or altered URLs cannot move risk records across projects or workspaces.
 
-The form captures title, description, lifecycle status, a transitional concern signal, owner, review date, due date, mitigation plan and contingency plan. `owner_id` may be assigned only to an active workspace member. Actioner remains displayed as `Unassigned` because the WT-RISK-001 schema intentionally reserves actioners for a future `project_risk_actions` model. Risk references remain system-generated in `Risk-{PROJECT_REF}-{NNN}` format and read-only.
+The form captures title, description, lifecycle status, a transitional concern signal, owner, actioner, review date, due date, mitigation plan and contingency plan. `owner_id` and `actioner_id` may be assigned only to active workspace members. `actioner_id` is the single primary actioner for this MVP slice: the person responsible for carrying out mitigation, contingency, review or follow-up activity, while the risk owner remains accountable for managing the risk. Risk references remain system-generated in `Risk-{PROJECT_REF}-{NNN}` format and read-only.
 
 WT-RISK-002B does not implement risk delete, notes/replies, Risk-to-Diary integration, attention items, notifications, digest behaviour, dashboard roll-ups or health scoring.
 
@@ -240,9 +240,15 @@ The risk detail page becomes an assurance view. It still displays the source-of-
 
 These indicators are deliberately simple derived checks over existing fields. They do not replace the database RAG field, create a Governance Profile engine, alter project health, generate attention items or create notifications. Manual RAG is de-emphasised in the create/edit form as a transitional concern signal until a fuller scoring model exists.
 
+## WT-RISK-003 Risk actioner assignment foundation
+
+WT-RISK-003 adds nullable `project_risks.actioner_id` as a profile-backed primary actioner assignment. The create and edit forms use the same active workspace member option list as risk ownership, so an actioner cannot be selected from another workspace through the application flow. Owner, Admin and Member roles may assign, change or clear the actioner; Viewer users can see the actioner and assurance state but cannot edit it.
+
+The Risk Register remains clean and still shows only Ref, Risk, Status, Review date and Updated. The risk detail action responsibility block now displays the assigned actioner when present. Missing actioner is Green when assigned, Neutral for closed or accepted risks, Red for mitigating, escalated or materialised risks, and Amber for draft, open or monitoring risks. WT-RISK-003 does not introduce notes, diary integration, attention items, notifications, health scoring, multiple actioners, action approval workflow or a separate Actions module.
+
 ## Feature-gated project capabilities
 
-WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and direct Risk Management routes. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. WT-RISK-002B and WT-RISK-002C keep the same feature-gate model while adding create/edit behaviour and assurance view improvements for permitted roles.
+WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and direct Risk Management routes. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. WT-RISK-002B, WT-RISK-002C and WT-RISK-003 keep the same feature-gate model while adding create/edit behaviour, assurance view improvements and primary actioner assignment for permitted roles.
 
 WT-US-0207 adds **Project Narrative** near the start of the dashboard capability tiles. Project Narrative is the user-facing project event, update, decision and history layer: it explains what happened, what changed and why it matters. It remains distinct from **Timeline**, which represents dates, milestones and key project stages.
 

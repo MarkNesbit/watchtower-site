@@ -36,6 +36,7 @@ let formValues = {
 	status: 'open',
 	ragStatus: 'blue',
 	ownerId: '',
+	actionerId: '',
 	reviewDate: '',
 	dueDate: '',
 	mitigationPlan: '',
@@ -48,6 +49,7 @@ const formDataToValues = (formData) => ({
 	status: String(formData.get('status') ?? 'open'),
 	ragStatus: String(formData.get('rag_status') ?? 'blue'),
 	ownerId: String(formData.get('owner_id') ?? ''),
+	actionerId: String(formData.get('actioner_id') ?? ''),
 	reviewDate: String(formData.get('review_date') ?? ''),
 	dueDate: String(formData.get('due_date') ?? ''),
 	mitigationPlan: String(formData.get('mitigation_plan') ?? ''),
@@ -60,6 +62,7 @@ const riskToValues = (record) => ({
 	status: record?.status ?? 'open',
 	ragStatus: record?.rag_status ?? 'blue',
 	ownerId: record?.owner_id ?? '',
+	actionerId: record?.actioner_id ?? '',
 	reviewDate: record?.review_date ?? '',
 	dueDate: record?.due_date ?? '',
 	mitigationPlan: record?.mitigation_plan ?? '',
@@ -133,7 +136,9 @@ try {
 							} catch (error) {
 								if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
 								const errorMessage = error instanceof Error ? error.message : 'Unable to save risk.';
-								formErrors = errorMessage.includes('owner')
+								formErrors = errorMessage.includes('actioner')
+									? { actionerId: errorMessage }
+									: errorMessage.includes('owner')
 									? { ownerId: errorMessage }
 									: { general: errorMessage };
 							}
@@ -177,6 +182,7 @@ try {
 						values={formValues}
 						errors={formErrors}
 						ownerOptions={ownerOptions}
+						actionerOptions={ownerOptions}
 						projectRef={project.project_ref}
 						riskRef={risk.risk_ref}
 						message={saveMessage}

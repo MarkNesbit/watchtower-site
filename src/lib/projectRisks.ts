@@ -35,6 +35,7 @@ export type ProjectRisk = {
 	impact: RiskLevel | string;
 	rag_status: RiskRagStatus | string;
 	owner_id?: string | null;
+	actioner_id?: string | null;
 	mitigation_plan?: string | null;
 	contingency_plan?: string | null;
 	review_date?: string | null;
@@ -44,6 +45,7 @@ export type ProjectRisk = {
 	created_at: string;
 	updated_at: string;
 	owner?: RiskProfile | null;
+	actioner?: RiskProfile | null;
 	creator?: RiskProfile | null;
 	updater?: RiskProfile | null;
 };
@@ -67,6 +69,7 @@ export type RiskFormInput = {
 	status: string;
 	ragStatus: string;
 	ownerId?: string;
+	actionerId?: string;
 	reviewDate?: string;
 	dueDate?: string;
 	mitigationPlan?: string;
@@ -88,6 +91,7 @@ const RISK_SELECT = [
 	'impact',
 	'rag_status',
 	'owner_id',
+	'actioner_id',
 	'mitigation_plan',
 	'contingency_plan',
 	'review_date',
@@ -115,7 +119,7 @@ function uniqueValues(values: Array<string | null | undefined>): string[] {
 async function enrichRiskProfiles(risks: ProjectRisk[], client): Promise<ProjectRisk[]> {
 	if (risks.length === 0) return risks;
 
-	const profileIds = uniqueValues(risks.flatMap((risk) => [risk.owner_id, risk.created_by, risk.updated_by]));
+	const profileIds = uniqueValues(risks.flatMap((risk) => [risk.owner_id, risk.actioner_id, risk.created_by, risk.updated_by]));
 	const profileById = new Map<string, RiskProfile>();
 
 	if (profileIds.length > 0) {
@@ -135,6 +139,7 @@ async function enrichRiskProfiles(risks: ProjectRisk[], client): Promise<Project
 	return risks.map((risk) => ({
 		...risk,
 		owner: risk.owner_id ? profileById.get(risk.owner_id) ?? null : null,
+		actioner: risk.actioner_id ? profileById.get(risk.actioner_id) ?? null : null,
 		creator: profileById.get(risk.created_by) ?? null,
 		updater: risk.updated_by ? profileById.get(risk.updated_by) ?? null : null,
 	}));
@@ -243,6 +248,25 @@ function lifecycleStatusTone(status: unknown): RiskAssuranceTone {
 	return 'neutral';
 }
 
+function actionerTone(status: unknown, actionerId: unknown): RiskAssuranceTone {
+	if (actionerId) return 'green';
+	const normalised = trimmedText(status).toLowerCase();
+	if (normalised === 'closed' || normalised === 'accepted') return 'neutral';
+	if (normalised === 'mitigating' || normalised === 'escalated' || normalised === 'materialised') return 'red';
+	if (normalised === 'draft' || normalised === 'open' || normalised === 'monitoring') return 'amber';
+	return 'amber';
+}
+
+function actionerValue(risk: ProjectRisk, tone: RiskAssuranceTone): string {
+	if (risk.actioner_id) return `Assigned to: ${riskProfileName(risk.actioner, 'Workspace member')}`;
+	if (tone === 'neutral') return 'No actioner required for this risk state.';
+	return 'No actioner assigned for a risk requiring action.';
+}
+
+function actionerToneLabel(tone: RiskAssuranceTone): string {
+	return tone === 'neutral' ? 'Neutral' : riskAssuranceToneLabel(tone);
+}
+
 function staleUpdateTone(updatedAt: unknown, now: Date): RiskAssuranceTone {
 	const text = trimmedText(updatedAt);
 	const updated = text ? new Date(text) : null;
@@ -263,6 +287,7 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 	const contingency = trimmedText(risk.contingency_plan);
 	const mitigationTone: RiskAssuranceTone = mitigation ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'neutral';
 	const contingencyTone: RiskAssuranceTone = contingency ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'neutral';
+	const actionResponsibilityTone = actionerTone(risk.status, risk.actioner_id);
 	const updatedTone = staleUpdateTone(risk.updated_at, now);
 
 	return [
@@ -301,10 +326,10 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 		{
 			id: 'actioner',
 			title: 'Action responsibility',
-			tone: 'amber',
-			statusLabel: riskAssuranceToneLabel('amber'),
-			value: 'Unassigned',
-			prompt: 'Review action responsibility',
+			tone: actionResponsibilityTone,
+			statusLabel: actionerToneLabel(actionResponsibilityTone),
+			value: actionerValue(risk, actionResponsibilityTone),
+			prompt: risk.actioner_id ? 'Change actioner' : actionResponsibilityTone === 'neutral' ? undefined : 'Assign actioner',
 		},
 		{
 			id: 'review-date',
@@ -441,19 +466,24 @@ export async function listRiskOwnerOptions(
 	});
 }
 
-async function assertActiveRiskOwner(organisationId: string, ownerId: string | null, client): Promise<void> {
-	if (!ownerId) return;
+async function assertActiveRiskMember(
+	organisationId: string,
+	memberId: string | null,
+	client,
+	fieldLabel = 'workspace member',
+): Promise<void> {
+	if (!memberId) return;
 	const { data, error } = await client
 		.from('organisation_members')
 		.select('user_id')
 		.eq('organisation_id', organisationId)
-		.eq('user_id', ownerId)
+		.eq('user_id', memberId)
 		.eq('status', 'active')
 		.limit(1)
 		.maybeSingle();
 
 	if (error) throw error;
-	if (!data) throw new Error('Select an active workspace member as risk owner.');
+	if (!data) throw new Error(`Select an active workspace member as ${fieldLabel}.`);
 }
 
 async function resolveScopedRiskProject(
@@ -509,6 +539,7 @@ function normaliseRiskPayload(input: RiskFormInput) {
 		status: input.status as RiskStatus,
 		rag_status: input.ragStatus as RiskRagStatus,
 		owner_id: input.ownerId?.trim() || null,
+		actioner_id: input.actionerId?.trim() || null,
 		review_date: input.reviewDate?.trim() || null,
 		due_date: input.dueDate?.trim() || null,
 		mitigation_plan: input.mitigationPlan?.trim() || null,
@@ -528,7 +559,9 @@ export async function createProjectRisk(
 
 	const { organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.create', client, accessToken);
 	const ownerId = input.ownerId?.trim() || null;
-	await assertActiveRiskOwner(organisation.id, ownerId, client);
+	const actionerId = input.actionerId?.trim() || null;
+	await assertActiveRiskMember(organisation.id, ownerId, client, 'risk owner');
+	await assertActiveRiskMember(organisation.id, actionerId, client, 'risk actioner');
 
 	let risk: ProjectRisk | null = null;
 	for (let attempt = 1; attempt <= MAX_RISK_REF_INSERT_ATTEMPTS; attempt += 1) {
@@ -541,7 +574,7 @@ export async function createProjectRisk(
 				project_id: project.id,
 				risk_ref: riskRef,
 				risk_sequence: riskSequence,
-				...normaliseRiskPayload({ ...input, ownerId }),
+				...normaliseRiskPayload({ ...input, ownerId, actionerId }),
 			})
 			.select(RISK_SELECT)
 			.single();
@@ -572,11 +605,13 @@ export async function updateProjectRisk(
 
 	const { organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.edit', client, accessToken);
 	const ownerId = input.ownerId?.trim() || null;
-	await assertActiveRiskOwner(organisation.id, ownerId, client);
+	const actionerId = input.actionerId?.trim() || null;
+	await assertActiveRiskMember(organisation.id, ownerId, client, 'risk owner');
+	await assertActiveRiskMember(organisation.id, actionerId, client, 'risk actioner');
 
 	const { data, error } = await client
 		.from('project_risks')
-		.update(normaliseRiskPayload({ ...input, ownerId }))
+		.update(normaliseRiskPayload({ ...input, ownerId, actionerId }))
 		.eq('organisation_id', organisation.id)
 		.eq('project_id', project.id)
 		.eq('risk_id', riskId)

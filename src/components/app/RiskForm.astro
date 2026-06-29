@@ -13,6 +13,7 @@ type RiskFormValues = {
 	status: string;
 	ragStatus: string;
 	ownerId: string;
+	actionerId: string;
 	reviewDate: string;
 	dueDate: string;
 	mitigationPlan: string;
@@ -24,6 +25,7 @@ const {
 	values,
 	errors = {},
 	ownerOptions = [],
+	actionerOptions = ownerOptions,
 	projectRef = '',
 	riskRef = '',
 	message = '',
@@ -33,6 +35,7 @@ const {
 	values: RiskFormValues;
 	errors?: Record<string, string>;
 	ownerOptions?: RiskOwnerOption[];
+	actionerOptions?: RiskOwnerOption[];
 	projectRef?: string;
 	riskRef?: string;
 	message?: string;
@@ -146,6 +149,23 @@ const describedBy = [
 		</div>
 
 		<div>
+			<label for="risk-actioner-id">Actioner</label>
+			<select
+				id="risk-actioner-id"
+				name="actioner_id"
+				aria-invalid={Boolean(errors.actionerId) || undefined}
+				aria-describedby={errors.actionerId ? 'risk-actioner-id-error' : 'risk-actioner-id-help'}
+			>
+				<option value="">Unassigned</option>
+				{actionerOptions.map((actioner) => (
+					<option value={actioner.id} selected={values.actionerId === actioner.id}>{riskProfileName(actioner, `Workspace member ${actioner.id.slice(0, 8)}`)}</option>
+				))}
+			</select>
+			<p class="form-help" id="risk-actioner-id-help">The actioner is responsible for carrying out mitigation, contingency, review, or follow-up activity. The risk owner remains accountable for managing the risk.</p>
+			{errors.actionerId && <p class="field-error" id="risk-actioner-id-error">{errors.actionerId}</p>}
+		</div>
+
+		<div>
 			<label for="risk-review-date">Review date</label>
 			<div class="risk-date-quick-actions" aria-label="Review date quick actions">
 				<button type="button" data-review-date-offset="7">1 week</button>
@@ -175,12 +195,6 @@ const describedBy = [
 			/>
 			{errors.dueDate && <p class="field-error" id="risk-due-date-error">{errors.dueDate}</p>}
 		</div>
-	</div>
-
-	<div class="risk-form__readonly">
-		<span>Actioner</span>
-		<strong>Unassigned</strong>
-		<p>Actioners will be handled through risk actions in a later slice.</p>
 	</div>
 
 	<label for="risk-mitigation-plan">Mitigation plan</label>
