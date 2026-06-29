@@ -1,6 +1,6 @@
 import { isWorkspaceRole, WORKSPACE_ROLES, type WorkspaceRole } from './permissions.ts';
 
-export const INTERNAL_TEST_WORKSPACE_SLUG = 'mark-nesbit-professional';
+export const INTERNAL_TEST_WORKSPACE_SLUG = 'mark-nesbit-professional-workspace';
 export const ROLE_SIMULATION_TTL_HOURS = 4;
 
 export type OrganisationSummary = {
