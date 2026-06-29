@@ -1,11 +1,11 @@
 # Watchtower Risk Foundation
 
-**Status:** WT-RISK-003 risk actioner assignment foundation
+**Status:** WT-RISK-NARRATIVE-001 risk-to-narrative event integration
 **Scope:** Database, Row Level Security, constraints, indexes, migration tests, Risk Register, risk assurance detail, risk create and risk edit pages
 
 ## Purpose
 
-The risk foundation introduces the minimum database model needed for project-scoped risk management while preserving Watchtower's workspace isolation model. WT-RISK-002A added the first Risk Management UI surface for existing risk records, WT-RISK-002B added create/edit flows for permitted workspace roles, WT-RISK-002C simplifies the register while introducing block-level assurance signals on the detail page, WT-RISK-003 adds a nullable primary actioner assignment on the risk record, WT-RISK-004 adds focused edit modals and comments, WT-RISK-004A/004B polish the detail information architecture, and WT-RISK-005 derives overall concern from exposure plus assurance. It does not introduce risk delete, dashboard roll-ups, risk replies, Risk-to-Diary integration, attention item generation, email notification delivery, action approval, health scoring, configurable governance scoring, AI scoring, multiple actioners, a separate Actions module, temporary handover/delegation, or non-risk RAID tables.
+The risk foundation introduces the minimum database model needed for project-scoped risk management while preserving Watchtower's workspace isolation model. WT-RISK-002A added the first Risk Management UI surface for existing risk records, WT-RISK-002B added create/edit flows for permitted workspace roles, WT-RISK-002C simplifies the register while introducing block-level assurance signals on the detail page, WT-RISK-003 adds a nullable primary actioner assignment on the risk record, WT-RISK-004 adds focused edit modals and comments, WT-RISK-004A/004B polish the detail information architecture, WT-RISK-005 derives overall concern from exposure plus assurance, and WT-RISK-NARRATIVE-001 creates Project Narrative entries only for raised risks and existing risks that become Red. It does not introduce risk delete, dashboard roll-ups, risk replies, risk comment-to-narrative integration, attention item generation, email notification delivery, action approval, health scoring, configurable governance scoring, AI scoring, multiple actioners, a separate Actions module, temporary handover/delegation, or non-risk RAID tables.
 
 ## Identifiers and references
 
@@ -89,9 +89,11 @@ Notification delivery, notification event tables, email sending, and daily diges
 
 ## Project Narrative source-of-truth boundary
 
-WT-NARRATIVE-002 adds `project_narrative_entries` with source metadata ready for a later Risk-to-Narrative workflow. That foundation does not generate Narrative entries from Risks and does not change Risk behaviour.
+WT-NARRATIVE-002 adds `project_narrative_entries` with source metadata for Risk-to-Narrative workflow support. WT-RISK-NARRATIVE-001 now uses that existing schema; no new migration is required because `source_type`, `source_record_id`, and `source_ref` already support source-linked risk entries.
 
-When the integration is implemented, a Narrative entry may retain the authoritative `project_risks.risk_id` as `source_record_id` and a display value such as `Risk-HHH-003` as `source_ref`. Its own `NAR-{PROJECT_REF}-{NNN}` identity is still retained. The Risk record remains the source of truth and must be edited in Risk Management rather than through Project Narrative.
+Risk-generated Narrative entries retain the authoritative `project_risks.risk_id` as `source_record_id` and a display value such as `Risk-HHH-003` as `source_ref`. Their own `NAR-{PROJECT_REF}-{NNN}` identity is still retained. The Risk record remains the source of truth and must be edited in Risk Management rather than through Project Narrative.
+
+The integration is intentionally narrow. It creates one entry when a risk is raised and one entry when an existing risk's derived overall concern changes from non-Red to Red. It does not create entries for every edit, comments, owner/actioner/review-date-only changes, Green to Amber movement, Red staying Red, or Red moving down. The "became Red" trigger uses the WT-RISK-005 derived overall concern, not a manually selected or legacy stored RAG value.
 
 ## Dashboard and RAID future scope
 
@@ -142,13 +144,13 @@ The risk detail page is now an actionable assurance view focused on what needs a
 
 Owner, Admin and Member roles may create and edit risks when the `riskManagement` feature flag permits access. Create captures title, description, lifecycle status, probability, impact, owner, actioner, review date, due date, mitigation plan and contingency plan, then generates the next project-scoped reference in `Risk-{PROJECT_REF}-{NNN}` format. Edit allows those same editable fields to be updated while preserving immutable scope and creation fields. The database audit trigger binds `created_by` and `updated_by` to the authenticated user. The `project_risks.rag_status` column remains as legacy/transitional compatibility storage, but user-facing flows no longer treat it as a manually declared source of truth.
 
-The detail page also exposes top-level `project_risk_notes` as Comments. Comments are listed newest first with author and timestamp. Owner, Admin and Member roles can add a comment; Viewer users can read comments but cannot add them. WT-RISK-004 does not add replies/threading UI, attention item creation, notifications, diary integration or comment-to-action workflows.
+The detail page also exposes top-level `project_risk_notes` as Comments. Comments are listed newest first with author and timestamp. Owner, Admin and Member roles can add a comment; Viewer users can read comments but cannot add them. WT-RISK-004 and WT-RISK-NARRATIVE-001 do not add replies/threading UI, comment-generated Narrative entries, attention item creation, notifications or comment-to-action workflows.
 
 WT-RISK-004A refines the detail page information architecture. The hero heading renders the risk reference with the concern/RAG pill treatment, the Current risk panel carries a compact audit summary strip, and the main assurance area is named Core Risk Detail. Comments now live at the bottom of Core Risk Detail rather than in a separate content block. Focused edit modals retain the native dialog accessibility model and use a dark blurred backdrop to keep the active edit task foregrounded. WT-RISK-004B keeps that structure but removes duplicated concern and owner data from the summary strip, removes the "Actionable assurance" status pill, keeps only the Updated timestamp as the summary date, aligns top and bottom back navigation styling, and improves modal cancel contrast.
 
 WT-RISK-005 separates lifecycle status, exposure, assurance and overall concern. Users update structured facts, Watchtower derives exposure from probability and impact, derives assurance from governance/control quality signals, and derives the overall concern shown in the risk reference pill from exposure plus assurance overrides. Owner/actioner inactivity rules are documented as future-ready because `profiles.last_login_at` is available in the schema but the current `record_auth_audit_event('user.logged_in')` flow does not reliably maintain it. Temporary actioner handover/delegation also remains future scope and will need temporary actioner, handover reason, start date, end date, assigned by and original actioner fields.
 
-All active workspace roles, including Viewer, may read available risk pages when the `riskManagement` feature flag permits access. Viewer users cannot create or edit risks and see disabled write actions or read-only action prompts. No role can delete risks, trigger Diary integration, generate attention items, send notifications, change health scoring or manage a separate Actions module from WT-RISK-004.
+All active workspace roles, including Viewer, may read available risk pages when the `riskManagement` feature flag permits access. Viewer users cannot create or edit risks and see disabled write actions or read-only action prompts. Viewers can read risk-generated Narrative entries and the read-only source-risk preview where Project Narrative is available, but they cannot edit the source risk from the Narrative modal. No role can delete risks, create Narrative entries for routine risk edits or comments, generate attention items, send notifications, change health scoring, invoke AI behaviour or manage a separate Actions module from WT-RISK-NARRATIVE-001.
 
 ## Project relationship ambiguity readiness
 

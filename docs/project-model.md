@@ -163,6 +163,16 @@ Manual entries require Title, Details, and an Attention level. Attention default
 
 Structured links are stored in `project_narrative_entry_links`. Each link belongs to the same workspace and project as its parent Narrative entry, requires a label and safe `http://` or `https://` URL, and is protected by Row Level Security. Active workspace members can read links; owners, admins, and members can create links; viewers cannot create links. Link editing/deletion and RAID promotion/conversion are separate future stories.
 
+## WT-RISK-NARRATIVE-001 Risk-to-Narrative event integration
+
+WT-RISK-NARRATIVE-001 connects Risks to Project Narrative in a deliberately limited way. A Narrative entry is created when a new risk is raised, and when an existing risk changes from non-Red to Red using the WT-RISK-005 derived overall concern. A new risk that is already Red receives only the raised-risk entry; it does not also create a separate "became Red" entry during the same create operation.
+
+Risk-generated entries use `source_type = risk`, retain the source risk UUID in `source_record_id`, and display the human-readable risk reference in `source_ref`. The entry title is concise, for example `Risk raised: Risk-HHH-003 — Supplier delay` or `Risk became Red: Risk-HHH-003 — Supplier delay`, with supporting metadata such as derived concern and lifecycle status. When a risk becomes Red, the reason is intentionally simple where available, such as Red exposure, missing owner/actioner, missing contingency plan, or overdue review date.
+
+Routine edits do not populate Project Narrative. Description, owner, actioner, review date, due date, mitigation, contingency, ordinary status changes, Green to Amber transitions, Red staying Red, Red moving down, and risk comments remain on the Risk record unless the derived overall concern crosses from non-Red to Red. Project Narrative is therefore a project story and overview layer, not a general audit log.
+
+The Project Narrative detail modal can show a read-only source risk preview and an Open full risk action. It does not allow risk editing. Owner, Admin and Member users still edit risks only through Risk Management; Viewer users can read available narrative entries and source-risk previews but cannot create or edit risks. No attention items, notifications, health scoring, AI summaries, issue creation, or full historical snapshot/replay are introduced by this slice.
+
 ## WT-002B implementation guidance
 
 WT-002B should:
@@ -220,7 +230,7 @@ WT-RISK-002A makes Risk Management available as a project-scoped, read-only regi
 
 The register and detail route both preserve workspace-safe routing: the route workspace is resolved first, the project is then resolved by `organisation_id` and project slug, and risk records are fetched by both `organisation_id` and `project_id`. A single-risk detail page returns not found/no access if the requested `risk_id` does not belong to that selected project and workspace.
 
-In WT-RISK-002A, Viewer users could read the Risk Register and detail pages while all write controls remained disabled; create/edit was deliberately left for WT-RISK-002B. WT-RISK-002A does not implement risk notes/replies, Risk-to-Diary integration, attention items, notifications, digest behaviour or dashboard risk roll-ups.
+In WT-RISK-002A, Viewer users could read the Risk Register and detail pages while all write controls remained disabled; create/edit was deliberately left for WT-RISK-002B. WT-RISK-002A does not implement risk notes/replies, Risk-to-Narrative integration, attention items, notifications, digest behaviour or dashboard risk roll-ups.
 
 ## WT-RISK-002B Risk create/edit flow
 
@@ -230,7 +240,7 @@ Create and edit actions re-check the route workspace, project, feature flag and 
 
 The form captures title, description, lifecycle status, probability, impact, owner, actioner, review date, due date, mitigation plan and contingency plan. `owner_id` and `actioner_id` may be assigned only to active workspace members. `actioner_id` is the single primary actioner for this MVP slice: the person responsible for carrying out mitigation, contingency, review or follow-up activity, while the risk owner remains accountable for managing the risk. Risk references remain system-generated in `Risk-{PROJECT_REF}-{NNN}` format and read-only. From WT-RISK-005, users no longer manually declare the final concern/RAG in create or edit flows; the app derives it from exposure plus assurance.
 
-WT-RISK-002B does not implement risk delete, notes/replies, Risk-to-Diary integration, attention items, notifications, digest behaviour, dashboard roll-ups or health scoring.
+WT-RISK-002B does not implement risk delete, notes/replies, Risk-to-Narrative integration, attention items, notifications, digest behaviour, dashboard roll-ups or health scoring.
 
 ## WT-RISK-002C Risk register cleanup and assurance blocks
 
@@ -244,7 +254,7 @@ These indicators are deliberately simple derived checks over existing fields. WT
 
 WT-RISK-003 adds nullable `project_risks.actioner_id` as a profile-backed primary actioner assignment. The create and edit forms use the same active workspace member option list as risk ownership, so an actioner cannot be selected from another workspace through the application flow. Owner, Admin and Member roles may assign, change or clear the actioner; Viewer users can see the actioner and assurance state but cannot edit it.
 
-The Risk Register remains clean and still shows only Ref, Risk, Status, Review date and Updated. The risk detail action responsibility block now displays the assigned actioner when present. WT-RISK-004 tightens the assurance default so missing required action responsibility is Red, while closed risks without an actioner remain Neutral. WT-RISK-003 does not introduce notes, diary integration, attention items, notifications, health scoring, multiple actioners, action approval workflow or a separate Actions module.
+The Risk Register remains clean and still shows only Ref, Risk, Status, Review date and Updated. The risk detail action responsibility block now displays the assigned actioner when present. WT-RISK-004 tightens the assurance default so missing required action responsibility is Red, while closed risks without an actioner remain Neutral. WT-RISK-003 does not introduce notes, Project Narrative integration, attention items, notifications, health scoring, multiple actioners, action approval workflow or a separate Actions module.
 
 ## WT-RISK-004 Risk detail actionable assurance UX
 
@@ -252,7 +262,7 @@ WT-RISK-004 cleans up the single-risk detail page by moving Back to Risk Registe
 
 Each assurance card opens a focused edit modal for its field group rather than sending the user to one large edit surface. Summary edits title and description; lifecycle edits status; exposure edits probability and impact; ownership edits owner; action responsibility edits actioner; cadence and due-date cards edit their dates; plan cards edit mitigation or contingency text. The modal forms submit through the existing scoped edit route, so WT-RISK-004 does not add a parallel risk mutation path.
 
-WT-RISK-004 also exposes top-level `project_risk_notes` as Comments at the bottom of the detail page. Comments are shown newest first with author and timestamp, and Owner, Admin and Member roles can add a new top-level comment. Replies/threading UI, attention item creation, notifications, diary integration, digests and comment-to-action workflows remain deferred.
+WT-RISK-004 also exposes top-level `project_risk_notes` as Comments at the bottom of the detail page. Comments are shown newest first with author and timestamp, and Owner, Admin and Member roles can add a new top-level comment. Replies/threading UI, attention item creation, notifications, comment-to-Narrative integration, digests and comment-to-action workflows remain deferred.
 
 ## WT-RISK-004A Risk detail information architecture refinement
 
@@ -271,6 +281,8 @@ WT-RISK-005 introduces a derived risk concern model. Lifecycle status remains th
 Manual concern/RAG selection is removed from user-facing create, edit and focused exposure modal flows where safe. The database `rag_status` column is retained as a legacy/transitional compatibility value until a deliberate migration strategy replaces it. The app may write a derived value there for compatibility, but it is no longer treated as the user-owned source of truth.
 
 Owner/actioner inactivity assurance remains future-ready only. The schema includes `profiles.last_login_at`, but current login auditing records events through `record_auth_audit_event` and does not reliably maintain that timestamp. Temporary actioner handover/delegation is also future scope and will need temporary actioner, handover reason, start date, end date, assigned by and original actioner fields. Full configurable Governance Profile / Assessment Profile scoring remains future scope.
+
+WT-RISK-NARRATIVE-001 depends on this derived concern model for the "risk became Red" trigger. It does not use the legacy stored `rag_status` value as a user-selected trigger source.
 
 ## Feature-gated project capabilities
 
