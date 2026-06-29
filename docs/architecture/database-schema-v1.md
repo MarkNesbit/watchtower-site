@@ -156,6 +156,7 @@ One profile maps to one Supabase Auth user.
 | `display_name`  | `text`        |       No | Derived from email | None            | User-facing name. Initially generated from the email address.                |
 | `avatar_url`    | `text`        |      Yes | `null`             | None            | Optional profile image URL for future use.                                   |
 | `last_login_at` | `timestamptz` |      Yes | `null`             | None            | Last known successful login time. May be populated later.                    |
+| `is_internal_tester` | `boolean` |       No | `false`            | None            | WT-TEST-001 internal test-tool eligibility for the scoped production test workspace only. |
 | `created_at`    | `timestamptz` |       No | `now()`            | None            | Timestamp when the profile was created.                                      |
 | `updated_at`    | `timestamptz` |       No | `now()`            | None            | Timestamp when the profile was last updated.                                 |
 | `created_by`    | `uuid`        |      Yes | `null`             | `auth.users.id` | User or system actor that created the profile. Usually the same as `id`.     |
@@ -181,6 +182,8 @@ becomes:
 `Mark Nesbit`
 
 Display name editing is governed by workspace settings, not hardcoded user behaviour.
+
+`is_internal_tester` is not a workspace role, customer permission, platform administrator flag or impersonation capability. It only unlocks the scoped internal role simulation utility when the user also has active membership in the Mark.Nesbit.Professional test workspace.
 
 ---
 
@@ -290,6 +293,35 @@ Only `active` memberships grant access to workspace data.
 Admins must not be able to demote or remove the owner.
 
 That rule may be enforced through application logic and/or database policies.
+
+---
+
+# Table: `internal_role_simulations`
+
+## Purpose
+
+Stores short-lived WT-TEST-001 role simulation state for the authorised internal tester in the Mark.Nesbit.Professional production test workspace.
+
+This table changes effective permission resolution only. It must not update or replace `organisation_members.role`.
+
+## Fields
+
+| Field             | Type          | Nullable | Default             | Foreign Key        | Description                                                                       |
+| ----------------- | ------------- | -------: | ------------------- | ------------------ | --------------------------------------------------------------------------------- |
+| `id`              | `uuid`        |       No | `gen_random_uuid()` | None               | Primary key for the simulation record.                                            |
+| `user_id`         | `uuid`        |       No | None                | `auth.users.id`    | Authorised internal tester running the simulation.                                |
+| `organisation_id` | `uuid`        |       No | None                | `organisations.id` | Scoped Mark.Nesbit.Professional test workspace.                                   |
+| `simulated_role`  | `text`        |       No | None                | None               | Effective role to simulate: `owner`, `admin`, `member`, or `viewer`.              |
+| `is_active`       | `boolean`     |       No | `true`              | None               | Whether the simulation can still be considered active before expiry checks.        |
+| `expires_at`      | `timestamptz` |       No | None                | None               | Automatic expiry timestamp, capped to 4 hours from creation by RLS insert policy. |
+| `created_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the simulation was created.                                        |
+| `updated_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the simulation was last updated.                                   |
+
+## Notes
+
+Only one active simulation should exist per user/workspace. RLS limits create/reset access to the authenticated user whose profile is marked `is_internal_tester = true`, who is an active member of the scoped `mark-nesbit-professional` workspace, and whose simulation expires within 4 hours. Expired or inactive rows are ignored by effective-role resolution.
+
+This is not customer-facing permission management, not impersonation and not a global admin model.
 
 ---
 

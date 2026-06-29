@@ -1,0 +1,192 @@
+---
+import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
+import { WORKSPACE_ROLES, type WorkspaceRole } from '../../../lib/permissions';
+import {
+	activateRoleSimulation,
+	getInternalRoleSimulationState,
+	roleLabel,
+	resetRoleSimulation,
+	ROLE_SIMULATION_TTL_HOURS,
+} from '../../../lib/internalTesting';
+import { buildLoginRedirectPath, createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
+
+const accessToken = getServerAccessToken(Astro.cookies);
+if (!accessToken) return Astro.redirect(buildLoginRedirectPath(Astro.url.pathname));
+
+const serverSupabase = createSupabaseServerClient(accessToken);
+let state = await getInternalRoleSimulationState(serverSupabase, accessToken);
+let message = '';
+
+function safeReturnTo(value: FormDataEntryValue | null): string {
+	const text = String(value ?? '');
+	return text.startsWith('/app') && !text.startsWith('//') ? text : '/app/account/test-tools';
+}
+
+if (!state.isInternalTester || !state.workspace) {
+	return Astro.redirect('/app/account');
+}
+
+if (Astro.request.method === 'POST') {
+	const formData = await Astro.request.formData();
+	const action = String(formData.get('action') ?? '');
+
+	try {
+		if (action === 'reset') {
+			state = await resetRoleSimulation(serverSupabase, accessToken);
+			const returnTo = safeReturnTo(formData.get('return_to'));
+			if (returnTo !== '/app/account/test-tools') return Astro.redirect(returnTo);
+			message = 'Testing mode has been reset to real permissions.';
+		} else if (action === 'simulate') {
+			const simulatedRole = String(formData.get('simulated_role') ?? '') as WorkspaceRole;
+			if (!WORKSPACE_ROLES.includes(simulatedRole)) throw new Error('Select Viewer, Member, Admin or Owner.');
+			state = await activateRoleSimulation(serverSupabase, simulatedRole, accessToken);
+			message = `Testing mode is now simulating ${roleLabel(simulatedRole)}.`;
+		} else {
+			throw new Error('Choose a testing mode action.');
+		}
+	} catch (error) {
+		message = error instanceof Error ? error.message : 'Unable to update testing mode.';
+		state = await getInternalRoleSimulationState(serverSupabase, accessToken);
+	}
+}
+
+const activeRole = state.activeSimulation?.simulated_role ?? null;
+const expiryText = state.activeSimulation?.expires_at
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(state.activeSimulation.expires_at))
+	: '';
+---
+<AuthenticatedLayout title="Test tools | WatchTower">
+	<section class="content-card test-tools-page" data-test-tools-page>
+		<div class="test-tools-page__header">
+			<div>
+				<p class="eyebrow">Account</p>
+				<h1>Test tools</h1>
+				<p>Internal role simulation for {state.workspace.name}.</p>
+			</div>
+			<a class="button button--secondary" href="/app/account">Back to account</a>
+		</div>
+
+		<div class="test-tools-summary" aria-label="Testing mode status">
+			<div>
+				<span>Actual role</span>
+				<strong data-actual-role>{roleLabel(state.actualRole)}</strong>
+			</div>
+			<div>
+				<span>Effective role</span>
+				<strong data-effective-role>{roleLabel(state.effectiveRole)}</strong>
+			</div>
+			<div>
+				<span>Testing mode</span>
+				<strong data-testing-mode-status>{state.activeSimulation ? `Simulating ${roleLabel(activeRole)}` : 'Off'}</strong>
+			</div>
+			<div>
+				<span>Expiry</span>
+				<strong data-testing-expiry>{expiryText ? `${expiryText} UTC` : 'No active simulation'}</strong>
+			</div>
+		</div>
+
+		<form class="auth-card test-tools-form" method="post">
+			<fieldset>
+				<legend>Testing mode</legend>
+				<label>
+					<input type="radio" name="simulated_role" value="viewer" checked={activeRole === 'viewer'} />
+					<span>Simulate Viewer</span>
+				</label>
+				<label>
+					<input type="radio" name="simulated_role" value="member" checked={activeRole === 'member'} />
+					<span>Simulate Member</span>
+				</label>
+				<label>
+					<input type="radio" name="simulated_role" value="admin" checked={activeRole === 'admin'} />
+					<span>Simulate Admin</span>
+				</label>
+				<label>
+					<input type="radio" name="simulated_role" value="owner" checked={activeRole === 'owner'} />
+					<span>Simulate Owner</span>
+				</label>
+			</fieldset>
+			<p class="form-help">Simulation changes effective permissions only. It expires after {ROLE_SIMULATION_TTL_HOURS} hours and does not change the real workspace membership role.</p>
+			<div class="test-tools-form__actions">
+				<button class="button button--primary" type="submit" name="action" value="simulate">Apply simulated role</button>
+				<button class="button button--secondary" type="submit" name="action" value="reset">Reset to real permissions</button>
+			</div>
+			{message && <p class="form-message" role="alert">{message}</p>}
+		</form>
+	</section>
+</AuthenticatedLayout>
+
+<style>
+	.test-tools-page {
+		display: grid;
+		gap: 1rem;
+	}
+
+	.test-tools-page h1 {
+		font-size: clamp(2.25rem, 5vw, 4rem);
+	}
+
+	.test-tools-page__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.test-tools-summary {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+		gap: 0.75rem;
+	}
+
+	.test-tools-summary > div {
+		display: grid;
+		gap: 0.2rem;
+		border: 1px solid var(--border);
+		border-radius: 0.5rem;
+		padding: 0.9rem;
+		background: rgba(18, 31, 42, 0.72);
+	}
+
+	.test-tools-summary span {
+		color: var(--muted);
+		font-size: 0.86rem;
+		font-weight: 800;
+	}
+
+	.test-tools-form fieldset {
+		display: grid;
+		gap: 0.7rem;
+		margin: 0;
+		padding: 0;
+		border: 0;
+	}
+
+	.test-tools-form legend {
+		margin-bottom: 0.2rem;
+		color: var(--muted-strong);
+		font-weight: 850;
+	}
+
+	.test-tools-form label {
+		grid-template-columns: auto 1fr;
+		align-items: center;
+	}
+
+	.test-tools-form input[type='radio'] {
+		width: 1rem;
+		height: 1rem;
+	}
+
+	.test-tools-form__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+	}
+
+	@media (max-width: 720px) {
+		.test-tools-page__header,
+		.test-tools-form__actions {
+			display: grid;
+		}
+	}
+</style>

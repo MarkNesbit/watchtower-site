@@ -26,7 +26,9 @@ The pattern is deliberately lightweight. Pages can omit optional regions when th
 
 Authenticated pages should use the app navigation in the global header and should not add a second workspace/project navigation strip between the header and the project hero. The header-to-hero gap should follow the same compact rhythm used between the hero, control panel, and content panel.
 
-The authenticated header currently links Dashboard and Projects to implemented routes. Workspace and Account are visible as disabled navigation entries until dedicated routes exist; do not point them at unrelated pages.
+The authenticated header currently links Dashboard, Projects and Account to implemented routes. Workspace remains visible as a disabled navigation entry until a dedicated route exists; do not point it at unrelated pages.
+
+When WT-TEST-001 role simulation is active, `AuthenticatedLayout` shows a persistent testing-mode banner above page content. Project pages should not duplicate that banner. The reset action belongs in the banner and Account -> Test tools, and ordinary users must not see the Test tools entry.
 
 ## Hero And Context Panel
 

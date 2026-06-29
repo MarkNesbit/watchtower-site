@@ -219,6 +219,25 @@ Cannot:
 
 ---
 
+# Internal Test Role Simulation
+
+WT-TEST-001 introduces a controlled internal testing utility for the authorised Mark.Nesbit.Professional production test workspace/profile only.
+
+The utility may simulate the fixed MVP roles:
+
+* viewer
+* member
+* admin
+* owner
+
+The simulation changes the effective role used by application permission helpers and RLS role checks, but it must not change `organisation_members.role`.
+
+Simulation state is stored in `internal_role_simulations`, is scoped to the `mark-nesbit-professional` workspace, is available only when the profile has `is_internal_tester = true`, and expires automatically after 4 hours.
+
+This is not impersonation, not a global administrator capability, not customer-facing permission management, and not an expansion of the MVP permission model.
+
+---
+
 # Row Level Security (RLS)
 
 Row Level Security is mandatory.

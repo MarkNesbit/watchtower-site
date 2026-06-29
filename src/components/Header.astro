@@ -11,7 +11,7 @@ const appNavItems = [
 	{ href: '/app', label: 'Dashboard', exact: true },
 	{ href: '/app/projects', label: 'Projects' },
 	{ label: 'Workspace' },
-	{ label: 'Account' },
+	{ href: '/app/account', label: 'Account' },
 ];
 
 const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/';

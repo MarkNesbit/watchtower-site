@@ -66,7 +66,7 @@ test('shared header swaps Login for the existing sign-out action when authentica
 	assert.match(header, /\{ href: '\/app', label: 'Dashboard', exact: true \}/);
 	assert.match(header, /\{ href: '\/app\/projects', label: 'Projects' \}/);
 	assert.match(header, /\{ label: 'Workspace' \}/);
-	assert.match(header, /\{ label: 'Account' \}/);
+	assert.match(header, /\{ href: '\/app\/account', label: 'Account' \}/);
 	assert.match(header, /data-public-nav hidden=\{hasAuthCookie \|\| undefined\}/);
 	assert.match(header, /data-app-nav hidden=\{!hasAuthCookie \|\| undefined\}/);
 	assert.match(header, /nav__item nav__item--disabled/);

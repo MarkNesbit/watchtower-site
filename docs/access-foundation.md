@@ -28,7 +28,7 @@ A profile is account identity and audit metadata only. The current profile table
 - `created_at` and `updated_at` timestamps.
 - `created_by` and `updated_by` audit references.
 
-Profiles deliberately do not store global roles, workspace roles, workspace permissions, recovery email addresses, platform superuser roles or delivery personas. WT-US-0107 adds only `can_access_preview_features`, a narrow platform-level product eligibility flag. It does not make the profile a workspace permission source and cannot bypass membership, RBAC or RLS.
+Profiles deliberately do not store global roles, workspace roles, workspace permissions, recovery email addresses, platform superuser roles or delivery personas. WT-US-0107 adds only `can_access_preview_features`, a narrow platform-level product eligibility flag. WT-TEST-001 adds `is_internal_tester`, a restricted internal-utility eligibility flag for the Mark.Nesbit.Professional production test workspace only. Neither flag makes the profile a workspace permission source, and neither can bypass active membership, RBAC or RLS.
 
 ## Profile creation
 
@@ -67,6 +67,12 @@ For project permissions, owners and admins receive the full current project perm
 Permissions come from active workspace membership plus role. Profile fields must not grant permissions.
 
 The current central TypeScript helper is `src/lib/permissions.ts`. It maps fixed workspace roles to project permissions and denies unknown values. Database Row Level Security uses membership-based helper functions such as `is_active_organisation_member` and `has_active_organisation_role`.
+
+## Internal role simulation
+
+WT-TEST-001 adds an internal-only role simulation utility under Account -> Test tools. It is scoped to the authorised Mark.Nesbit.Professional tester profile and the `mark-nesbit-professional` workspace slug. Simulation state is stored in `internal_role_simulations`, expires automatically after 4 hours, and is ignored when inactive, expired, unauthorised or outside the scoped test workspace.
+
+Role simulation changes the effective role used by application permission helpers and the database `has_active_organisation_role` function. It does not update `organisation_members.role`, does not impersonate another user, does not create customer-facing permission management, and does not introduce a global admin capability. A persistent authenticated-app banner appears while simulation is active and provides reset back to real permissions.
 
 Future organisation-level permission policies can extend this model by adding policy checks after active membership and fixed role have been established. They should not move permission decisions onto profiles and should not introduce user-configurable permission builders in MVP.
 

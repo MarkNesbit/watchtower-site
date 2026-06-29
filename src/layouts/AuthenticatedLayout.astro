@@ -1,13 +1,28 @@
 ---
 import AuthStatus from '../components/auth/AuthStatus.astro';
+import TestingModeBanner from '../components/app/TestingModeBanner.astro';
 import SiteLayout from './SiteLayout.astro';
+import { getInternalRoleSimulationState, type RoleSimulationState } from '../lib/internalTesting';
+import { createSupabaseServerClient, getServerAccessToken } from '../lib/supabaseServer';
 
 type Props = { title?: string; description?: string };
 const { title = 'WatchTower App', description = 'Authenticated WatchTower workspace area.' } = Astro.props;
+const accessToken = getServerAccessToken(Astro.cookies);
+let roleSimulationState: RoleSimulationState | null = null;
+
+if (accessToken) {
+	try {
+		const serverSupabase = createSupabaseServerClient(accessToken);
+		roleSimulationState = await getInternalRoleSimulationState(serverSupabase, accessToken);
+	} catch {
+		roleSimulationState = null;
+	}
+}
 ---
 <SiteLayout title={title} description={description}>
 	<AuthStatus />
 	<section class="app-shell" data-authenticated-shell hidden>
+		<TestingModeBanner state={roleSimulationState} returnTo={Astro.url.pathname + Astro.url.search} />
 		<slot />
 	</section>
 </SiteLayout>
