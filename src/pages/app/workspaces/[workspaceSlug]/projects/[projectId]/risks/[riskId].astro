@@ -43,7 +43,6 @@ const formatDate = (value, fallback = 'Not available') => value
 const formatDateTime = (value, fallback = 'Not available') => value
 	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
 	: fallback;
-const ownerName = (record) => riskProfileName(record.owner, 'Unassigned');
 const creatorName = (record) => riskProfileName(record.creator, 'Workspace member');
 const updaterName = (record) => record.updated_by ? riskProfileName(record.updater, 'Workspace member') : 'Not available';
 const commentAuthorName = (comment) => riskProfileName(comment.author, 'Workspace member');
@@ -191,40 +190,22 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
 				</nav>
 
-				<ProjectControlPanel title="Current risk" status="Actionable assurance" headingId="risk-detail-controls-heading">
+				<ProjectControlPanel title="Current risk" headingId="risk-detail-controls-heading">
 					<dl class="risk-detail-summary-strip" data-risk-summary-strip>
-						<div>
-							<dt>Concern</dt>
-							<dd>
-								<RagReferencePill
-									tone={riskRagTone(risk.rag_status)}
-									label={riskDisplayLabel(risk.rag_status)}
-									statusLabel="RAG"
-								/>
-							</dd>
-						</div>
 						<div>
 							<dt>Lifecycle status</dt>
 							<dd>{riskDisplayLabel(risk.status)}</dd>
-						</div>
-						<div>
-							<dt>Owner</dt>
-							<dd>{ownerName(risk)}</dd>
 						</div>
 						<div>
 							<dt>Created by</dt>
 							<dd>{creatorName(risk)}</dd>
 						</div>
 						<div>
-							<dt>Created at</dt>
-							<dd><time datetime={risk.created_at}>{formatDateTime(risk.created_at)}</time></dd>
-						</div>
-						<div>
 							<dt>Updated by</dt>
 							<dd>{updaterName(risk)}</dd>
 						</div>
 						<div>
-							<dt>Updated at</dt>
+							<dt>Updated</dt>
 							<dd><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></dd>
 						</div>
 					</dl>
@@ -440,8 +421,8 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					</section>
 
 					<div class="risk-detail-links">
-						<a class="text-link" href={buildProjectRisksPath(workspaceSlug ?? '', project.slug)}>Back to Risk Register</a>
-						<a class="text-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
+						<a class="button button--secondary" href={buildProjectRisksPath(workspaceSlug ?? '', project.slug)}>Back to Risk Register</a>
+						<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
 					</div>
 				</ProjectContentPanel>
 			</>
@@ -547,17 +528,17 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 	}
 
 	.risk-detail-heading__reference :global(.rag-reference-pill) {
-		gap: 0.8rem;
+		gap: 0.7rem;
 		border-width: 2px;
-		padding: 0.35rem 0.9rem;
-		font-size: clamp(1.65rem, 2.8vw, 3rem);
-		line-height: 1.05;
-		white-space: normal;
+		padding: 0.42rem 0.95rem;
+		font-size: clamp(1.55rem, 2.35vw, 2.45rem);
+		line-height: 1.14;
+		white-space: nowrap;
 	}
 
 	.risk-detail-heading__reference :global(.rag-reference-pill__status) {
-		padding-left: 0.8rem;
-		font-size: clamp(0.72rem, 1.2vw, 0.9rem);
+		padding-left: 0.7rem;
+		font-size: clamp(0.7rem, 1vw, 0.82rem);
 		letter-spacing: 0;
 	}
 
@@ -781,6 +762,19 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		display: flex;
 		justify-content: flex-end;
 		gap: 0.75rem;
+	}
+
+	.risk-action-form__actions [data-risk-dialog-cancel] {
+		border-color: rgba(139, 166, 190, 0.58);
+		background: #0c1724;
+		color: #f3f8fc;
+	}
+
+	.risk-action-form__actions [data-risk-dialog-cancel]:hover,
+	.risk-action-form__actions [data-risk-dialog-cancel]:focus-visible {
+		border-color: var(--accent);
+		background: #122235;
+		color: var(--accent-strong);
 	}
 
 	.risk-comments-section {

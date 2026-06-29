@@ -260,9 +260,13 @@ WT-RISK-004A refines the same detail page structure without changing the risk mo
 
 The main editable assurance area is named Core Risk Detail. Assurance cards remain focused modal entry points, and their native dialog backdrop uses a dark blurred overlay so the active edit task is visually foregrounded. Comments now sit at the bottom of Core Risk Detail instead of in a separate large block, keeping the page ready for a future Custom Fields section below Comments without implementing custom fields in this slice.
 
+## WT-RISK-004B Risk detail MVP polish
+
+WT-RISK-004B keeps the WT-RISK-004A structure but tightens MVP readability. The hero risk-reference pill remains large but uses a more readable size and spacing. The Current risk summary removes duplicated concern and owner content, removes the "Actionable assurance" status pill, and keeps only lifecycle status, created by, updated by and the single Updated timestamp. Top and bottom back navigation use the same secondary button treatment. Modal cancel actions use the Watchtower dark UI treatment with stronger contrast.
+
 ## Feature-gated project capabilities
 
-WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and direct Risk Management routes. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. WT-RISK-002B, WT-RISK-002C, WT-RISK-003, WT-RISK-004 and WT-RISK-004A keep the same feature-gate model while adding create/edit behaviour, assurance view improvements, primary actioner assignment, actionable detail modals, comments and refined detail-page information architecture for permitted roles.
+WT-US-0107 applies the central `riskManagement` feature flag to the Risks dashboard tile and direct Risk Management routes. `hidden` removes the tile, `disabled` keeps it visible but inactive, `preview` allows only approved preview accounts, and `enabled` releases it generally. All states remain subject to active workspace membership and RBAC; Viewer access remains read-only when the capability is available. WT-RISK-002B, WT-RISK-002C, WT-RISK-003, WT-RISK-004, WT-RISK-004A and WT-RISK-004B keep the same feature-gate model while adding create/edit behaviour, assurance view improvements, primary actioner assignment, actionable detail modals, comments and refined detail-page information architecture for permitted roles.
 
 WT-US-0207 adds **Project Narrative** near the start of the dashboard capability tiles. Project Narrative is the user-facing project event, update, decision and history layer: it explains what happened, what changed and why it matters. It remains distinct from **Timeline**, which represents dates, milestones and key project stages.
 
