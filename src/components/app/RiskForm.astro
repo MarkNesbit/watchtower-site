@@ -1,7 +1,6 @@
 ---
 import {
 	RISK_LEVELS,
-	RISK_RAG_STATUSES,
 	RISK_STATUSES,
 	riskDisplayLabel,
 	riskProfileName,
@@ -14,7 +13,6 @@ type RiskFormValues = {
 	status: string;
 	probability: string;
 	impact: string;
-	ragStatus: string;
 	ownerId: string;
 	actionerId: string;
 	reviewDate: string;
@@ -146,22 +144,6 @@ const describedBy = [
 				{RISK_LEVELS.map((level) => <option value={level} selected={values.impact === level}>{riskDisplayLabel(level)}</option>)}
 			</select>
 			{errors.impact && <p class="field-error" id="risk-impact-error">{errors.impact}</p>}
-		</div>
-
-		<div>
-			<label for="risk-rag-status">Concern signal <span aria-hidden="true">*</span></label>
-			<select
-				id="risk-rag-status"
-				name="rag_status"
-				required
-				aria-required="true"
-				aria-invalid={Boolean(errors.ragStatus) || undefined}
-				aria-describedby={errors.ragStatus ? 'risk-rag-status-error' : undefined}
-			>
-				{RISK_RAG_STATUSES.map((ragStatus) => <option value={ragStatus} selected={values.ragStatus === ragStatus}>{riskDisplayLabel(ragStatus)}</option>)}
-			</select>
-			<p class="form-help">Transitional signal only. The assurance view also derives concern from record quality.</p>
-			{errors.ragStatus && <p class="field-error" id="risk-rag-status-error">{errors.ragStatus}</p>}
 		</div>
 
 		<div>

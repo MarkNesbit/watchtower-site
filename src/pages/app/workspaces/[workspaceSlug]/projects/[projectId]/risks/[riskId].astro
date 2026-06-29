@@ -8,16 +8,15 @@ import { getFeatureAccess, loadFeatureAccess } from '../../../../../../../lib/fe
 import { can } from '../../../../../../../lib/permissions';
 import {
 	RISK_LEVELS,
-	RISK_RAG_STATUSES,
 	RISK_STATUSES,
 	createProjectRiskComment,
+	deriveRiskConcernTone,
 	getRiskAssuranceBlocks,
 	getProjectRisk,
 	listProjectRiskComments,
 	listRiskOwnerOptions,
 	riskDisplayLabel,
 	riskProfileName,
-	riskRagTone,
 } from '../../../../../../../lib/projectRisks';
 import { buildProjectPath, buildProjectRiskEditPath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../../../lib/projects';
 import { buildLoginRedirectPath, createSupabaseServerClient, getServerAccessToken, isSupabaseAuthSessionError } from '../../../../../../../lib/supabaseServer';
@@ -125,6 +124,7 @@ try {
 const canEditRisk = can(workspaceRole, 'risk.edit');
 const editHref = project && risk ? buildProjectRiskEditPath(workspaceSlug ?? '', project.slug, risk.risk_id) : '';
 const assuranceBlocks = risk ? getRiskAssuranceBlocks(risk, new Date()) : [];
+const derivedConcernTone = risk ? deriveRiskConcernTone(risk, new Date()) : 'neutral';
 const blockValue = (block) => {
 	if (block.id === 'review-date') return formatDate(risk?.review_date, block.value);
 	if (block.id === 'due-date') return formatDate(risk?.due_date, block.value);
@@ -137,7 +137,6 @@ const riskFormFields = risk ? {
 	status: risk.status ?? 'open',
 	probability: risk.probability ?? 'medium',
 	impact: risk.impact ?? 'medium',
-	rag_status: risk.rag_status ?? 'blue',
 	owner_id: risk.owner_id ?? '',
 	actioner_id: risk.actioner_id ?? '',
 	review_date: risk.review_date ?? '',
@@ -148,7 +147,7 @@ const riskFormFields = risk ? {
 const modalConfigs = {
 	description: { title: 'Edit summary', fields: ['title', 'description'], submit: 'Save summary' },
 	status: { title: 'Edit lifecycle status', fields: ['status'], submit: 'Save status' },
-	exposure: { title: 'Edit exposure', fields: ['probability', 'impact', 'rag_status'], submit: 'Save exposure' },
+	exposure: { title: 'Edit exposure', fields: ['probability', 'impact'], submit: 'Save exposure' },
 	owner: { title: 'Edit risk owner', fields: ['owner_id'], submit: 'Save owner' },
 	actioner: { title: 'Edit action responsibility', fields: ['actioner_id'], submit: 'Save actioner' },
 	'review-date': { title: 'Edit review cadence', fields: ['review_date'], submit: 'Save review date' },
@@ -158,6 +157,7 @@ const modalConfigs = {
 	updated: { title: 'Review risk record', fields: ['title', 'description', 'status', 'review_date'], submit: 'Save review' },
 };
 const modalConfig = (blockId) => modalConfigs[blockId] ?? modalConfigs.description;
+const hasModalConfig = (blockId) => Boolean(modalConfigs[blockId]);
 const hiddenFieldsFor = (blockId) => Object.entries(riskFormFields).filter(([name]) => !modalConfig(blockId).fields.includes(name));
 const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includes(fieldName);
 ---
@@ -176,10 +176,10 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					<h1 slot="title" id="risk-detail-heading" class="risk-detail-heading">
 						<span class="risk-detail-heading__reference">
 							<RagReferencePill
-								tone={riskRagTone(risk.rag_status)}
+								tone={derivedConcernTone}
 								label={risk.risk_ref}
-								statusLabel={riskDisplayLabel(risk.rag_status)}
-								ariaLabel={`${risk.risk_ref}, ${riskDisplayLabel(risk.rag_status)} concern signal`}
+								statusLabel={riskDisplayLabel(derivedConcernTone)}
+								ariaLabel={`${risk.risk_ref}, ${riskDisplayLabel(derivedConcernTone)} derived concern`}
 							/>
 						</span>
 					</h1>
@@ -238,31 +238,33 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					<div class="risk-assurance-grid" data-risk-assurance-blocks>
 						{assuranceBlocks.map((block) => (
 							<article class={`risk-assurance-block risk-assurance-block--${block.tone}`} data-risk-assurance-block={block.id} data-assurance-tone={block.tone}>
-								<button class="risk-assurance-block__button" type="button" aria-haspopup="dialog" data-risk-dialog-open={`risk-dialog-${block.id}`}>
-									<span class="risk-assurance-block__heading">
-										<span class="risk-assurance-block__title">{block.title}</span>
-										<span class={`assurance-badge assurance-badge--${block.tone}`}>{block.statusLabel}</span>
-									</span>
-									<span class="risk-assurance-block__value">{blockValue(block)}</span>
-									{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
-								</button>
+								{hasModalConfig(block.id) ? (
+									<>
+										<button class="risk-assurance-block__button" type="button" aria-haspopup="dialog" data-risk-dialog-open={`risk-dialog-${block.id}`}>
+											<span class="risk-assurance-block__heading">
+												<span class="risk-assurance-block__title">{block.title}</span>
+												<span class={`assurance-badge assurance-badge--${block.tone}`}>{block.statusLabel}</span>
+											</span>
+											<span class="risk-assurance-block__value">{blockValue(block)}</span>
+											{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
+										</button>
 
-								<dialog class="risk-action-dialog" id={`risk-dialog-${block.id}`} aria-labelledby={`risk-dialog-${block.id}-title`} data-risk-dialog data-risk-modal-backdrop-blur>
-									<div class="risk-action-dialog__header">
-										<div>
-											<p class="eyebrow">{block.title}</p>
-											<h3 id={`risk-dialog-${block.id}-title`}>{modalConfig(block.id).title}</h3>
-										</div>
-										<form method="dialog">
-											<button class="risk-action-dialog__close" type="submit" aria-label="Close">x</button>
-										</form>
-									</div>
+										<dialog class="risk-action-dialog" id={`risk-dialog-${block.id}`} aria-labelledby={`risk-dialog-${block.id}-title`} data-risk-dialog data-risk-modal-backdrop-blur>
+											<div class="risk-action-dialog__header">
+												<div>
+													<p class="eyebrow">{block.title}</p>
+													<h3 id={`risk-dialog-${block.id}-title`}>{modalConfig(block.id).title}</h3>
+												</div>
+												<form method="dialog">
+													<button class="risk-action-dialog__close" type="submit" aria-label="Close">x</button>
+												</form>
+											</div>
 
-									{canEditRisk ? (
-										<form class="risk-action-form" method="post" action={editHref} data-risk-detail-save-form>
-											{hiddenFieldsFor(block.id).map(([name, value]) => (
-												<input type="hidden" name={name} value={value} />
-											))}
+											{canEditRisk ? (
+												<form class="risk-action-form" method="post" action={editHref} data-risk-detail-save-form>
+													{hiddenFieldsFor(block.id).map(([name, value]) => (
+														<input type="hidden" name={name} value={value} />
+													))}
 
 											{modalHasField(block.id, 'title') && (
 												<label>
@@ -301,15 +303,6 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 													<span>Impact</span>
 													<select name="impact" required>
 														{RISK_LEVELS.map((level) => <option value={level} selected={riskFormFields.impact === level}>{riskDisplayLabel(level)}</option>)}
-													</select>
-												</label>
-											)}
-
-											{modalHasField(block.id, 'rag_status') && (
-												<label>
-													<span>Concern signal</span>
-													<select name="rag_status" required>
-														{RISK_RAG_STATUSES.map((ragStatus) => <option value={ragStatus} selected={riskFormFields.rag_status === ragStatus}>{riskDisplayLabel(ragStatus)}</option>)}
 													</select>
 												</label>
 											)}
@@ -375,17 +368,28 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 												<button class="button button--secondary" type="button" data-risk-dialog-cancel>Cancel</button>
 												<button class="button button--primary" type="submit">{modalConfig(block.id).submit}</button>
 											</div>
-										</form>
-									) : (
-										<div class="risk-action-form" data-viewer-read-only>
-											<p>{blockValue(block)}</p>
-											<p>Viewer access is read-only. Risk editing is unavailable.</p>
-											<form method="dialog">
-												<button class="button button--secondary" type="submit">Close</button>
-											</form>
-										</div>
-									)}
-								</dialog>
+												</form>
+											) : (
+												<div class="risk-action-form" data-viewer-read-only>
+													<p>{blockValue(block)}</p>
+													<p>Viewer access is read-only. Risk editing is unavailable.</p>
+													<form method="dialog">
+														<button class="button button--secondary" type="submit">Close</button>
+													</form>
+												</div>
+											)}
+										</dialog>
+									</>
+								) : (
+									<div class="risk-assurance-block__button risk-assurance-block__button--static">
+										<span class="risk-assurance-block__heading">
+											<span class="risk-assurance-block__title">{block.title}</span>
+											<span class={`assurance-badge assurance-badge--${block.tone}`}>{block.statusLabel}</span>
+										</span>
+										<span class="risk-assurance-block__value">{blockValue(block)}</span>
+										{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
+									</div>
+								)}
 							</article>
 						))}
 					</div>
@@ -619,8 +623,12 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		cursor: pointer;
 	}
 
-	.risk-assurance-block__button:hover,
-	.risk-assurance-block__button:focus-visible {
+	.risk-assurance-block__button--static {
+		cursor: default;
+	}
+
+	button.risk-assurance-block__button:hover,
+	button.risk-assurance-block__button:focus-visible {
 		outline: 2px solid color-mix(in srgb, var(--assurance-tone) 72%, transparent);
 		outline-offset: 2px;
 	}
