@@ -26,6 +26,29 @@ function isConstraintViolation(error: DatabaseError | null, constraintName: stri
 
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+export const PROJECT_TYPES = ['delivery', 'transformation', 'technology', 'operational', 'compliance', 'other'] as const;
+export type ProjectType = (typeof PROJECT_TYPES)[number];
+export const DELIVERY_METHODS = ['waterfall', 'agile', 'hybrid', 'kanban', 'scrum', 'other'] as const;
+export type DeliveryMethod = (typeof DELIVERY_METHODS)[number];
+export const PROJECT_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
+export type ProjectPriority = (typeof PROJECT_PRIORITIES)[number];
+export const PROJECT_CRITICALITIES = ['low', 'medium', 'high', 'critical'] as const;
+export type ProjectCriticality = (typeof PROJECT_CRITICALITIES)[number];
+export const REVIEW_CADENCES = ['weekly', 'fortnightly', 'monthly', 'quarterly', 'ad_hoc'] as const;
+export type ReviewCadence = (typeof REVIEW_CADENCES)[number];
+
+export type ProjectInformationInput = {
+	projectType?: string | null;
+	deliveryMethod?: string | null;
+	priority?: string | null;
+	criticality?: string | null;
+	startDate?: string | null;
+	targetEndDate?: string | null;
+	nextReviewDate?: string | null;
+	reviewCadence?: string | null;
+	governanceRoute?: string | null;
+	escalationRoute?: string | null;
+};
 
 export {
 	buildProjectDetailsPath,
@@ -46,6 +69,63 @@ export {
 
 export function isProjectStatus(value: unknown): value is ProjectStatus {
 	return typeof value === 'string' && PROJECT_STATUSES.includes(value as ProjectStatus);
+}
+
+export function isProjectType(value: unknown): value is ProjectType {
+	return typeof value === 'string' && PROJECT_TYPES.includes(value as ProjectType);
+}
+
+export function isDeliveryMethod(value: unknown): value is DeliveryMethod {
+	return typeof value === 'string' && DELIVERY_METHODS.includes(value as DeliveryMethod);
+}
+
+export function isProjectPriority(value: unknown): value is ProjectPriority {
+	return typeof value === 'string' && PROJECT_PRIORITIES.includes(value as ProjectPriority);
+}
+
+export function isProjectCriticality(value: unknown): value is ProjectCriticality {
+	return typeof value === 'string' && PROJECT_CRITICALITIES.includes(value as ProjectCriticality);
+}
+
+export function isReviewCadence(value: unknown): value is ReviewCadence {
+	return typeof value === 'string' && REVIEW_CADENCES.includes(value as ReviewCadence);
+}
+
+export function projectFieldLabel(value: unknown, fallback = 'Not set'): string {
+	if (typeof value !== 'string' || !value.trim()) return fallback;
+	return value
+		.split(/[_\s-]+/)
+		.filter(Boolean)
+		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+		.join(' ');
+}
+
+function cleanOptionalText(value: unknown, fieldLabel: string, maxLength: number): string | null {
+	if (value === null || value === undefined) return null;
+	const text = String(value).trim();
+	if (!text) return null;
+	if (text.length > maxLength) throw new Error(`${fieldLabel} must be ${maxLength} characters or fewer.`);
+	return text;
+}
+
+function cleanOptionalControlledValue<T extends string>(
+	value: unknown,
+	values: readonly T[],
+	message: string,
+): T | null {
+	if (value === null || value === undefined || value === '') return null;
+	if (typeof value !== 'string' || !values.includes(value as T)) throw new Error(message);
+	return value as T;
+}
+
+function cleanOptionalDate(value: unknown, fieldLabel: string): string | null {
+	if (value === null || value === undefined || value === '') return null;
+	if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error(`Enter a valid ${fieldLabel}.`);
+	const date = new Date(`${value}T00:00:00Z`);
+	if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+		throw new Error(`Enter a valid ${fieldLabel}.`);
+	}
+	return value;
 }
 
 export async function getCurrentWorkspace(client, accessToken?: string) {
@@ -276,6 +356,70 @@ export async function updateProjectCore(
 		.is('deleted_at', null)
 		.is('archived_at', null)
 		.select('slug, name, description, status, health')
+		.maybeSingle();
+
+	if (error) throw error;
+	if (!project) throw new Error('Project not found or you do not have access.');
+	return project;
+}
+
+export async function updateProjectInformation(
+	workspaceSlug: string,
+	projectSlug: string,
+	input: ProjectInformationInput,
+	client,
+	accessToken?: string,
+) {
+	const workspace = await getWorkspaceBySlug(client, workspaceSlug, accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+	if (!workspace || !organisation) throw new Error('No active workspace is available.');
+	assertCan(workspace.role, 'project.editDetails', 'Your workspace role does not permit project editing.');
+
+	const updatePayload: Record<string, string | null> = {};
+	if (Object.prototype.hasOwnProperty.call(input, 'projectType')) {
+		updatePayload.project_type = cleanOptionalControlledValue(input.projectType, PROJECT_TYPES, 'Select a valid project type.');
+	}
+	if (Object.prototype.hasOwnProperty.call(input, 'deliveryMethod')) {
+		updatePayload.delivery_method = cleanOptionalControlledValue(input.deliveryMethod, DELIVERY_METHODS, 'Select a valid delivery method.');
+	}
+	if (Object.prototype.hasOwnProperty.call(input, 'priority')) {
+		updatePayload.priority = cleanOptionalControlledValue(input.priority, PROJECT_PRIORITIES, 'Select a valid priority.');
+	}
+	if (Object.prototype.hasOwnProperty.call(input, 'criticality')) {
+		updatePayload.criticality = cleanOptionalControlledValue(input.criticality, PROJECT_CRITICALITIES, 'Select a valid criticality.');
+	}
+	if (Object.prototype.hasOwnProperty.call(input, 'startDate')) {
+		updatePayload.start_date = cleanOptionalDate(input.startDate, 'start date');
+	}
+	if (Object.prototype.hasOwnProperty.call(input, 'targetEndDate')) {
+		updatePayload.target_end_date = cleanOptionalDate(input.targetEndDate, 'target end date');
+	}
+	if (Object.prototype.hasOwnProperty.call(input, 'nextReviewDate')) {
+		updatePayload.next_review_date = cleanOptionalDate(input.nextReviewDate, 'next review date');
+	}
+	if (Object.prototype.hasOwnProperty.call(input, 'reviewCadence')) {
+		updatePayload.review_cadence = cleanOptionalControlledValue(input.reviewCadence, REVIEW_CADENCES, 'Select a valid review cadence.');
+	}
+	if (Object.prototype.hasOwnProperty.call(input, 'governanceRoute')) {
+		updatePayload.governance_route = cleanOptionalText(input.governanceRoute, 'Governance route', 500);
+	}
+	if (Object.prototype.hasOwnProperty.call(input, 'escalationRoute')) {
+		updatePayload.escalation_route = cleanOptionalText(input.escalationRoute, 'Escalation route', 500);
+	}
+
+	if (Object.keys(updatePayload).length === 0) throw new Error('No project information fields were supplied.');
+	if (updatePayload.start_date && updatePayload.target_end_date && updatePayload.target_end_date < updatePayload.start_date) {
+		throw new Error('Target end date cannot be before the start date.');
+	}
+
+	const { data: project, error } = await client
+		.from('projects')
+		.update(updatePayload)
+		.eq('slug', projectSlug)
+		.eq('organisation_id', organisation.id)
+		.is('deleted_at', null)
+		.is('archived_at', null)
+		.select('slug, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, review_cadence, governance_route, escalation_route')
 		.maybeSingle();
 
 	if (error) throw error;

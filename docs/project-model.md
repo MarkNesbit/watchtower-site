@@ -1,6 +1,6 @@
 # Watchtower Project Model
 
-**Status:** Product working reference through WT-PROJ-DETAILS-002
+**Status:** Product working reference through WT-PROJ-INFO-001
 
 **Last updated:** 30 June 2026
 
@@ -211,7 +211,15 @@ WT-PROJ-DETAILS-002 refines Project Details into a read-first page. Users see pr
 
 Project responsibility assignments are shown as cards. Six default empty slots guide setup: Sponsor, Project Manager, Delivery Lead, Product Owner, Assurance Lead and Default Risk Owner. Additional assigned roles appear after those defaults. The Add another team member modal lets permitted users select a real workspace member or active demo persona, choose a controlled project role and add responsibility text.
 
-Removing an assignment marks the project responsibility inactive through the `project_people` status model. It does not delete the real workspace member, demo person, auth user or profile, and it does not grant or revoke workspace permissions. Dates and governance remain read-only follow-up-ready fields with `Not set` values until dedicated schema exists; future work should make those fields editable through the same modal pattern.
+Removing an assignment marks the project responsibility inactive through the `project_people` status model. It does not delete the real workspace member, demo person, auth user or profile, and it does not grant or revoke workspace permissions.
+
+## WT-PROJ-INFO-001 project information, dates and governance
+
+WT-PROJ-INFO-001 adds the first controlled project setup fields to the existing `projects` table. Project Details now displays and, where permitted, edits project context, dates and governance information through modal forms.
+
+Project context fields are `project_type`, `delivery_method`, `priority` and `criticality`. Date and governance fields are `start_date`, `target_end_date`, `next_review_date`, `review_cadence`, `governance_route` and `escalation_route`. Empty values display as `Not set`. Controlled values are constrained in both application validation and database checks, and free-text governance/escalation routes are trimmed and limited to 500 characters.
+
+The date rules are intentionally simple: start date, target end date and next review date are optional, but target end date cannot be before start date when both are populated. These fields support project setup and future assurance; they do not create or edit Risks, Issues, Dependencies, Assumptions, Actions, Decisions or Project Narrative entries. Project reference, slug, workspace, internal ID, health and audit fields remain read-only on Project Details.
 
 ## WT-US-0202B system-generated fixed project references
 
