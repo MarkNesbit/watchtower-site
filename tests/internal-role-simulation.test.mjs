@@ -12,6 +12,7 @@ import {
 import { createProjectRisk } from '../src/lib/projectRisks.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260629000300_internal_role_simulation.sql', import.meta.url);
+const scopeFixMigrationUrl = new URL('../supabase/migrations/20260630000100_fix_internal_test_workspace_scope.sql', import.meta.url);
 const accountPageUrl = new URL('../src/pages/app/account/index.astro', import.meta.url);
 const testToolsPageUrl = new URL('../src/pages/app/account/test-tools.astro', import.meta.url);
 const bannerUrl = new URL('../src/components/app/TestingModeBanner.astro', import.meta.url);
@@ -136,6 +137,17 @@ test('Migration adds scoped internal role simulation storage and effective-role 
 	assert.match(sql, /expires_at <= now\(\) \+ interval '4 hours'/);
 	assert.match(sql, /coalesce\(\s*public\.active_internal_role_simulation\(target_organisation_id, target_user_id\),\s*om\.role\s*\) = any\(allowed_roles\)/);
 	assert.doesNotMatch(sql, /impersonat|global_admin|platform_admin/i);
+});
+
+test('Production scope repair migration centralises the active workspace slug', async () => {
+	const sql = await readFile(scopeFixMigrationUrl, 'utf8');
+	assert.match(sql, /create or replace function public\.internal_test_workspace_slug\(\)/);
+	assert.match(sql, /select 'mark-nesbit-professional-workspace'::text/);
+	assert.match(sql, /create or replace function public\.is_internal_role_simulation_workspace\(target_organisation_id uuid\)/);
+	assert.match(sql, /o\.slug = public\.internal_test_workspace_slug\(\)/);
+	assert.doesNotMatch(sql, /o\.slug = 'mark-nesbit-professional'/);
+	assert.match(sql, /grant execute on function public\.internal_test_workspace_slug\(\) to authenticated, service_role/);
+	assert.match(sql, /grant execute on function public\.is_internal_role_simulation_workspace\(uuid\) to authenticated, service_role/);
 });
 
 test('Account page hides Test tools from ordinary users and exposes them to authorised testers only', async () => {

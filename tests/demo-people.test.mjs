@@ -209,12 +209,23 @@ test('Import replacement deletes only demo people and does not alter real profil
 	const parsed = parseDemoPeopleCsv(validCsv);
 	const imported = await replaceWorkspaceDemoPeople(client, parsed.rows);
 	assert.equal(imported.length, 3);
+	assert.ok(client.calls.some((call) => call[0] === 'eq' && call[1] === 'organisation_members' && call[2] === 'organisations.slug' && call[3] === INTERNAL_TEST_WORKSPACE_SLUG));
 	assert.ok(client.calls.some((call) => call[0] === 'delete' && call[1] === 'workspace_demo_people'));
 	assert.ok(client.calls.some((call) => call[0] === 'insert' && call[1] === 'workspace_demo_people'));
 	assert.ok(client.calls.some((call) => call[0] === 'update' && call[1] === 'internal_role_simulations' && call[2].is_active === false));
 	assert.ok(!client.calls.some((call) => ['insert', 'update', 'delete'].includes(call[0]) && call[1] === 'profiles'));
 	assert.ok(!client.calls.some((call) => call[1] === 'auth.users'));
 	assert.ok(!client.calls.some((call) => ['insert', 'update', 'delete'].includes(call[0]) && call[1] === 'organisation_members'));
+});
+
+test('Internal tester with old short workspace slug cannot import demo people', async () => {
+	const client = createDemoPeopleClient({ workspaceSlug: 'mark-nesbit-professional' });
+	const parsed = parseDemoPeopleCsv(validCsv);
+	await assert.rejects(
+		replaceWorkspaceDemoPeople(client, parsed.rows),
+		/Demo people import is not available/,
+	);
+	assert.ok(!client.calls.some((call) => call[0] === 'insert' && call[1] === 'workspace_demo_people'));
 });
 
 test('Ordinary users cannot import demo people through server helper', async () => {
