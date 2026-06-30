@@ -9,6 +9,7 @@ import {
 } from '../src/lib/projectPeople.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260630000200_project_people_assignments.sql', import.meta.url);
+const projectInfoMigrationUrl = new URL('../supabase/migrations/20260630000300_project_information_fields.sql', import.meta.url);
 const detailsPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/details.astro', import.meta.url);
 const routesUrl = new URL('../src/lib/projectRoutes.ts', import.meta.url);
 const projectsLibraryUrl = new URL('../src/lib/projects.ts', import.meta.url);
@@ -43,6 +44,34 @@ test('Project people migration keeps assignment separate from workspace permissi
 	assert.doesNotMatch(sql, /project_permissions|grant_workspace|organisation_members\s+set\s+role/i);
 });
 
+test('Project information migration adds controlled nullable setup fields safely', async () => {
+	const sql = await readFile(projectInfoMigrationUrl, 'utf8');
+	for (const field of [
+		'project_type',
+		'delivery_method',
+		'priority',
+		'criticality',
+		'start_date',
+		'target_end_date',
+		'next_review_date',
+		'review_cadence',
+		'governance_route',
+		'escalation_route',
+	]) {
+		assert.match(sql, new RegExp(`add column if not exists ${field}`));
+	}
+	assert.match(sql, /projects_project_type_check[\s\S]*'delivery'[\s\S]*'transformation'[\s\S]*'compliance'/);
+	assert.match(sql, /projects_delivery_method_check[\s\S]*'waterfall'[\s\S]*'agile'[\s\S]*'scrum'/);
+	assert.match(sql, /projects_priority_check[\s\S]*'low'[\s\S]*'critical'/);
+	assert.match(sql, /projects_criticality_check[\s\S]*'low'[\s\S]*'critical'/);
+	assert.match(sql, /projects_review_cadence_check[\s\S]*'weekly'[\s\S]*'ad_hoc'/);
+	assert.match(sql, /target_end_date >= start_date/);
+	assert.match(sql, /length\(btrim\(governance_route\)\) <= 500/);
+	assert.match(sql, /length\(btrim\(escalation_route\)\) <= 500/);
+	assert.match(sql, /grant update \([\s\S]*project_type[\s\S]*escalation_route[\s\S]*\) on public\.projects to authenticated/);
+	assert.doesNotMatch(sql, /create\s+table\s+(public\.)?(risks|issues|dependencies|assumptions)|notify|notification/i);
+});
+
 test('Project people helper enforces central RBAC and scopes assignment writes through workspace project route', async () => {
 	const source = await readFile(peopleLibraryUrl, 'utf8');
 	assert.match(source, /assertCan\(workspaceRole, 'project\.view'/);
@@ -59,6 +88,27 @@ test('Project people helper enforces central RBAC and scopes assignment writes t
 	assert.doesNotMatch(source, /\.delete\(\)/);
 });
 
+test('Project information helper validates controlled values dates permissions and scoped updates', async () => {
+	const source = await readFile(projectsLibraryUrl, 'utf8');
+	const helperSource = source.slice(source.indexOf('export async function updateProjectInformation'));
+	assert.match(source, /export const PROJECT_TYPES = \['delivery', 'transformation', 'technology', 'operational', 'compliance', 'other'\]/);
+	assert.match(source, /export const DELIVERY_METHODS = \['waterfall', 'agile', 'hybrid', 'kanban', 'scrum', 'other'\]/);
+	assert.match(source, /export const PROJECT_PRIORITIES = \['low', 'medium', 'high', 'critical'\]/);
+	assert.match(source, /export const REVIEW_CADENCES = \['weekly', 'fortnightly', 'monthly', 'quarterly', 'ad_hoc'\]/);
+	assert.match(helperSource, /export async function updateProjectInformation/);
+	assert.match(helperSource, /assertCan\(workspace\.role, 'project\.editDetails'/);
+	assert.match(helperSource, /cleanOptionalControlledValue\(input\.projectType, PROJECT_TYPES/);
+	assert.match(helperSource, /cleanOptionalDate\(input\.startDate, 'start date'\)/);
+	assert.match(helperSource, /Target end date cannot be before the start date/);
+	assert.match(helperSource, /cleanOptionalText\(input\.governanceRoute, 'Governance route', 500\)/);
+	assert.match(helperSource, /\.eq\('slug', projectSlug\)/);
+	assert.match(helperSource, /\.eq\('organisation_id', organisation\.id\)/);
+	assert.match(helperSource, /\.is\('deleted_at', null\)/);
+	assert.match(helperSource, /\.is\('archived_at', null\)/);
+	assert.match(helperSource, /Object\.prototype\.hasOwnProperty\.call\(input, 'projectType'\)/);
+	assert.doesNotMatch(helperSource, /project_ref:\s*|health:\s*|from\('project_risks'\)|from\('issues'\)|from\('dependencies'\)|from\('assumptions'\)/);
+});
+
 test('Project Details route displays full available details read-first with modal editing', async () => {
 	const source = await readFile(detailsPageUrl, 'utf8');
 	assert.match(source, /data-project-details/);
@@ -73,6 +123,7 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(source, /\.is\('archived_at', null\)/);
 	assert.match(source, /canEditProject = can\(workspaceRole, 'project\.editDetails'\)/);
 	assert.match(source, /updateProjectCore\(workspaceSlug \?\? '', projectSlug \?\? ''/);
+	assert.match(source, /updateProjectInformation\(workspaceSlug \?\? '', projectSlug \?\? ''/);
 	assert.match(source, /saveProjectPersonForRole\(workspaceSlug \?\? '', projectSlug \?\? ''/);
 	assert.match(source, /listProjectPeople\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
 	assert.match(source, /listProjectPersonOptions\(organisation\.id, workspace\.role, serverSupabase\)/);
@@ -81,6 +132,8 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(source, /id="project-identity-dialog"/);
 	assert.match(source, /data-project-identity-modal/);
 	assert.match(source, /data-project-description-modal/);
+	assert.match(source, /data-project-context-modal/);
+	assert.match(source, /data-project-governance-modal/);
 	assert.match(source, /data-project-assignment-modal/);
 	assert.match(source, /data-add-team-member-modal/);
 	assert.match(source, /data-project-dialog-cancel/);
@@ -93,13 +146,45 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(source, /Not captured in the current project schema/);
 	assert.match(source, /Start date/);
 	assert.match(source, /Target end date/);
+	assert.match(source, /Next review date/);
+	assert.match(source, /Review cadence/);
 	assert.match(source, /Governance route/);
+	assert.match(source, /Escalation route/);
 	assert.match(source, /Not set/);
+	assert.match(source, /Project type/);
+	assert.match(source, /Delivery method/);
+	assert.match(source, /Priority/);
+	assert.match(source, /Criticality/);
 	assert.match(source, /Demo persona/);
 	assert.match(source, /Assignments describe accountability only; they do not grant edit permissions\./);
 	assert.doesNotMatch(source, /name="health"|name="project_ref"|name="organisation_id"|name="created_by"|name="updated_by"/);
 	assert.doesNotMatch(source, /label="Project setup"|label="Context"|label="Governance"|label="Responsibilities"|label="Read-only"/);
 	assert.doesNotMatch(source, /data-project-identity-form|data-project-description-form|project-person-card__form/);
+});
+
+test('Project Details loads and edits project context and governance fields through modals', async () => {
+	const source = await readFile(detailsPageUrl, 'utf8');
+	assert.match(source, /project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, review_cadence, governance_route, escalation_route/);
+	assert.match(source, /data-project-context-fields/);
+	assert.match(source, /projectContextFields = \[/);
+	assert.match(source, /projectFieldLabel\(project\?\.project_type\)/);
+	assert.match(source, /id="project-context-dialog"/);
+	assert.match(source, /name="project_type"/);
+	assert.match(source, /PROJECT_TYPES\.map/);
+	assert.match(source, /DELIVERY_METHODS\.map/);
+	assert.match(source, /PROJECT_PRIORITIES\.map/);
+	assert.match(source, /PROJECT_CRITICALITIES\.map/);
+	assert.match(source, /data-project-governance-fields/);
+	assert.match(source, /governanceFields = \[/);
+	assert.match(source, /formatDate\(project\?\.start_date\)/);
+	assert.match(source, /id="project-governance-dialog"/);
+	assert.match(source, /name="start_date" type="date"/);
+	assert.match(source, /name="target_end_date" type="date"/);
+	assert.match(source, /name="next_review_date" type="date"/);
+	assert.match(source, /REVIEW_CADENCES\.map/);
+	assert.match(source, /name="governance_route" rows="4" maxlength="500"/);
+	assert.match(source, /name="escalation_route" rows="4" maxlength="500"/);
+	assert.match(source, /Save dates and governance/);
 });
 
 test('Project Details roles use default slots, assignment modals, removal and add-team-member flow', async () => {

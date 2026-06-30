@@ -13,7 +13,19 @@ import {
 	saveProjectPersonForRole,
 } from '../../../../../../lib/projectPeople';
 import { can } from '../../../../../../lib/permissions';
-import { buildProjectPath, getWorkspaceBySlug, PROJECT_STATUSES, updateProjectCore } from '../../../../../../lib/projects';
+import {
+	DELIVERY_METHODS,
+	PROJECT_CRITICALITIES,
+	PROJECT_PRIORITIES,
+	PROJECT_STATUSES,
+	PROJECT_TYPES,
+	REVIEW_CADENCES,
+	buildProjectPath,
+	getWorkspaceBySlug,
+	projectFieldLabel,
+	updateProjectCore,
+	updateProjectInformation,
+} from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -33,6 +45,9 @@ const formatValue = (value, fallback = 'Not available') => value || fallback;
 const formatStatusLabel = (value) => value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Unknown';
 const formatDateTime = (value, fallback = 'Not available') => value
 	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
+	: fallback;
+const formatDate = (value, fallback = 'Not set') => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`))
 	: fallback;
 const healthTone = (value) => {
 	const health = value?.toLowerCase();
@@ -58,14 +73,6 @@ const optionLabel = (option) => {
 	const projectRole = option.projectRole ? ` / ${projectPeopleRoleLabel(option.projectRole)}` : '';
 	return `${option.displayName} - ${role}${projectRole}`;
 };
-const followUpFields = [
-	{ label: 'Start date', value: 'Not set' },
-	{ label: 'Target end date', value: 'Not set' },
-	{ label: 'Next review date', value: 'Not set' },
-	{ label: 'Review cadence', value: 'Not set' },
-	{ label: 'Governance route', value: 'Not set' },
-	{ label: 'Escalation route', value: 'Not set' },
-];
 const DEFAULT_PROJECT_PEOPLE_ROLES = [
 	'sponsor',
 	'project_manager',
@@ -107,6 +114,24 @@ try {
 						status: String(formData.get('status') ?? 'proposed'),
 					}, serverSupabase, accessToken);
 					saveMessage = 'Project description saved.';
+				} else if (intent === 'update-project-context') {
+					await updateProjectInformation(workspaceSlug ?? '', projectSlug ?? '', {
+						projectType: String(formData.get('project_type') ?? ''),
+						deliveryMethod: String(formData.get('delivery_method') ?? ''),
+						priority: String(formData.get('priority') ?? ''),
+						criticality: String(formData.get('criticality') ?? ''),
+					}, serverSupabase, accessToken);
+					saveMessage = 'Project context saved.';
+				} else if (intent === 'update-project-governance') {
+					await updateProjectInformation(workspaceSlug ?? '', projectSlug ?? '', {
+						startDate: String(formData.get('start_date') ?? ''),
+						targetEndDate: String(formData.get('target_end_date') ?? ''),
+						nextReviewDate: String(formData.get('next_review_date') ?? ''),
+						reviewCadence: String(formData.get('review_cadence') ?? ''),
+						governanceRoute: String(formData.get('governance_route') ?? ''),
+						escalationRoute: String(formData.get('escalation_route') ?? ''),
+					}, serverSupabase, accessToken);
+					saveMessage = 'Dates and governance saved.';
 				} else if (intent === 'save-project-person' || intent === 'add-project-person') {
 					await saveProjectPersonForRole(workspaceSlug ?? '', projectSlug ?? '', {
 						projectRole: String(formData.get('project_role') ?? ''),
@@ -129,7 +154,7 @@ try {
 
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('id, organisation_id, name, project_ref, description, slug, status, health, created_at, updated_at, created_by')
+			.select('id, organisation_id, name, project_ref, description, slug, status, health, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, review_cadence, governance_route, escalation_route, created_at, updated_at, created_by')
 			.eq('slug', projectSlug)
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
@@ -179,6 +204,20 @@ const projectRoleCards = [
 ];
 const realPersonOptions = personOptions.filter((option) => option.source === 'user');
 const demoPersonOptions = personOptions.filter((option) => option.source === 'demo');
+const projectContextFields = [
+	{ label: 'Project type', value: projectFieldLabel(project?.project_type) },
+	{ label: 'Delivery method', value: projectFieldLabel(project?.delivery_method) },
+	{ label: 'Priority', value: projectFieldLabel(project?.priority) },
+	{ label: 'Criticality', value: projectFieldLabel(project?.criticality) },
+];
+const governanceFields = [
+	{ label: 'Start date', value: formatDate(project?.start_date) },
+	{ label: 'Target end date', value: formatDate(project?.target_end_date) },
+	{ label: 'Next review date', value: formatDate(project?.next_review_date) },
+	{ label: 'Review cadence', value: projectFieldLabel(project?.review_cadence) },
+	{ label: 'Governance route', value: formatValue(project?.governance_route, 'Not set') },
+	{ label: 'Escalation route', value: formatValue(project?.escalation_route, 'Not set') },
+];
 ---
 <AuthenticatedLayout title={project ? `${project.name} details | WatchTower` : 'Project Details | WatchTower'}>
 	<section class="project-details-page" data-project-details>
@@ -243,9 +282,9 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 				</ProjectContentPanel>
 
 				<ProjectContentPanel
-					title="Project description and context"
-					helper="Only current project fields are shown in this slice."
-					headingId="project-context-heading"
+					title="Project description"
+					helper="The short project description remains separate from RAID records and Project Narrative."
+					headingId="project-description-heading"
 				>
 					<div slot="action">
 						{canEditProject ? (
@@ -265,12 +304,51 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 				</ProjectContentPanel>
 
 				<ProjectContentPanel
+					title="Project context"
+					helper="These fields describe setup context and do not replace structured RAID records."
+					headingId="project-context-heading"
+				>
+					<div slot="action">
+						{canEditProject ? (
+							<button class="button button--secondary project-details-edit-action" type="button" data-project-dialog-open="project-context-dialog">Edit context</button>
+						) : (
+							<DisabledActionHint
+								id="project-context-edit-hint"
+								allowed={false}
+								allowedText=""
+								disabledText="Project context editing is unavailable for your current role."
+							/>
+						)}
+					</div>
+					<dl class="details-grid" data-project-context-fields>
+						{projectContextFields.map((field) => (
+							<div>
+								<dt>{field.label}</dt>
+								<dd>{field.value}</dd>
+							</div>
+						))}
+					</dl>
+				</ProjectContentPanel>
+
+				<ProjectContentPanel
 					title="Dates and governance"
-					helper="These fields are identified for follow-up schema work rather than added broadly in this slice."
+					helper="Review and governance information supports project setup and assurance planning."
 					headingId="project-governance-heading"
 				>
-					<dl class="details-grid governance-grid" data-project-details-follow-up-fields>
-						{followUpFields.map((field) => (
+					<div slot="action">
+						{canEditProject ? (
+							<button class="button button--secondary project-details-edit-action" type="button" data-project-dialog-open="project-governance-dialog">Edit dates and governance</button>
+						) : (
+							<DisabledActionHint
+								id="project-governance-edit-hint"
+								allowed={false}
+								allowedText=""
+								disabledText="Dates and governance editing is unavailable for your current role."
+							/>
+						)}
+					</div>
+					<dl class="details-grid governance-grid" data-project-governance-fields>
+						{governanceFields.map((field) => (
 							<div class="follow-up-field">
 								<dt>{field.label}</dt>
 								<dd>{field.value}</dd>
@@ -449,6 +527,99 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 								<div class="project-details-modal-form__actions">
 									<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
 									<button class="button button--primary" type="submit">Save description</button>
+								</div>
+							</form>
+						</dialog>
+
+						<dialog class="project-details-dialog" id="project-context-dialog" aria-labelledby="project-context-dialog-title" data-project-details-dialog>
+							<div class="project-details-dialog__header">
+								<div>
+									<h3 id="project-context-dialog-title">Edit project context</h3>
+									<p>These fields support project setup and future assurance.</p>
+								</div>
+								<form method="dialog">
+									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+								</form>
+							</div>
+							<form class="project-details-modal-form" method="post" data-project-context-modal>
+								<input type="hidden" name="intent" value="update-project-context" />
+								<label>
+									<span>Project type</span>
+									<select name="project_type">
+										<option value="" selected={!project.project_type}>Not set</option>
+										{PROJECT_TYPES.map((value) => <option value={value} selected={project.project_type === value}>{projectFieldLabel(value)}</option>)}
+									</select>
+								</label>
+								<label>
+									<span>Delivery method</span>
+									<select name="delivery_method">
+										<option value="" selected={!project.delivery_method}>Not set</option>
+										{DELIVERY_METHODS.map((value) => <option value={value} selected={project.delivery_method === value}>{projectFieldLabel(value)}</option>)}
+									</select>
+								</label>
+								<label>
+									<span>Priority</span>
+									<select name="priority">
+										<option value="" selected={!project.priority}>Not set</option>
+										{PROJECT_PRIORITIES.map((value) => <option value={value} selected={project.priority === value}>{projectFieldLabel(value)}</option>)}
+									</select>
+								</label>
+								<label>
+									<span>Criticality</span>
+									<select name="criticality">
+										<option value="" selected={!project.criticality}>Not set</option>
+										{PROJECT_CRITICALITIES.map((value) => <option value={value} selected={project.criticality === value}>{projectFieldLabel(value)}</option>)}
+									</select>
+								</label>
+								<div class="project-details-modal-form__actions">
+									<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
+									<button class="button button--primary" type="submit">Save context</button>
+								</div>
+							</form>
+						</dialog>
+
+						<dialog class="project-details-dialog" id="project-governance-dialog" aria-labelledby="project-governance-dialog-title" data-project-details-dialog>
+							<div class="project-details-dialog__header">
+								<div>
+									<h3 id="project-governance-dialog-title">Edit dates and governance</h3>
+									<p>These fields support review planning. RAID items remain managed in their own modules.</p>
+								</div>
+								<form method="dialog">
+									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+								</form>
+							</div>
+							<form class="project-details-modal-form" method="post" data-project-governance-modal>
+								<input type="hidden" name="intent" value="update-project-governance" />
+								<label>
+									<span>Start date</span>
+									<input name="start_date" type="date" value={project.start_date ?? ''} />
+								</label>
+								<label>
+									<span>Target end date</span>
+									<input name="target_end_date" type="date" value={project.target_end_date ?? ''} />
+								</label>
+								<label>
+									<span>Next review date</span>
+									<input name="next_review_date" type="date" value={project.next_review_date ?? ''} />
+								</label>
+								<label>
+									<span>Review cadence</span>
+									<select name="review_cadence">
+										<option value="" selected={!project.review_cadence}>Not set</option>
+										{REVIEW_CADENCES.map((value) => <option value={value} selected={project.review_cadence === value}>{projectFieldLabel(value)}</option>)}
+									</select>
+								</label>
+								<label>
+									<span>Governance route</span>
+									<textarea name="governance_route" rows="4" maxlength="500">{project.governance_route ?? ''}</textarea>
+								</label>
+								<label>
+									<span>Escalation route</span>
+									<textarea name="escalation_route" rows="4" maxlength="500">{project.escalation_route ?? ''}</textarea>
+								</label>
+								<div class="project-details-modal-form__actions">
+									<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
+									<button class="button button--primary" type="submit">Save dates and governance</button>
 								</div>
 							</form>
 						</dialog>
