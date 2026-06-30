@@ -7,7 +7,7 @@ import RagReferencePill from '../../../../../components/app/RagReferencePill.ast
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../lib/featureFlags';
 import type { FeatureAccess, FeatureKey } from '../../../../../lib/featureFlags';
 import { can } from '../../../../../lib/permissions';
-import { buildProjectEditPath, buildProjectNarrativePath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
+import { buildProjectDetailsPath, buildProjectNarrativePath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
 import {
 	deriveProjectRiskDashboardAssuranceTone,
 	listProjectRisks,
@@ -48,11 +48,19 @@ type ProjectTile = {
 	line: string;
 	ariaLabel?: string;
 	href: string | null;
-	destination?: 'narrative' | 'risks';
+	destination?: 'details' | 'narrative' | 'risks';
 	featureKey?: FeatureKey;
 };
 
 const projectTiles: ProjectTile[] = [
+	{
+		title: 'Project Details',
+		icon: 'i',
+		tone: 'blue',
+		line: 'View setup, context, roles and responsibilities.',
+		href: null,
+		destination: 'details',
+	},
 	{
 		title: 'Project Narrative',
 		icon: '≡',
@@ -143,7 +151,9 @@ const visibleProjectTiles = projectTiles.flatMap((tile) => {
 		? buildProjectRisksPath(workspaceSlug ?? '', project.slug)
 		: project && tile.destination === 'narrative'
 			? buildProjectNarrativePath(workspaceSlug ?? '', project.slug)
-			: tile.href;
+			: project && tile.destination === 'details'
+				? buildProjectDetailsPath(workspaceSlug ?? '', project.slug)
+				: tile.href;
 	const isAccessible = Boolean(href) && (!featureAccess || featureAccess.isAccessible);
 	const unavailableReason = featureAccess && !featureAccess.isAccessible
 		? featureAccess.unavailableReason
@@ -198,12 +208,8 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 					helper="Open a project capability or review its current availability."
 					headingId="project-dashboard-areas-heading"
 				>
-					<div slot="action" data-edit-project-action>
-						{canEditProject ? (
-							<a class="button button--secondary project-dashboard__edit" href={buildProjectEditPath(workspaceSlug ?? '', project.slug)}>Edit project details</a>
-						) : (
-							<span class="button button--secondary project-dashboard__edit" aria-disabled="true" data-disabled-edit-action>Edit project details</span>
-						)}
+					<div slot="action" data-project-details-action>
+						<a class="button button--secondary project-dashboard__details" href={buildProjectDetailsPath(workspaceSlug ?? '', project.slug)}>Project details</a>
 					</div>
 					<div class="dashboard-tile-grid" aria-label="Project dashboard areas">
 						{resolvedProjectTiles.map((tile, index) => !tile.isAccessible ? (
@@ -267,7 +273,7 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 		justify-self: start;
 	}
 
-	.project-dashboard__edit {
+	.project-dashboard__details {
 		justify-self: end;
 	}
 

@@ -6,6 +6,10 @@ export function buildProjectEditPath(workspaceSlug: string, projectSlug: string)
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/edit`;
 }
 
+export function buildProjectDetailsPath(workspaceSlug: string, projectSlug: string): string {
+	return `${buildProjectPath(workspaceSlug, projectSlug)}/details`;
+}
+
 export function buildProjectRisksPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/risks`;
 }

@@ -1,8 +1,8 @@
 # Watchtower Project Model
 
-**Status:** Product working reference through WT-NARRATIVE-003
+**Status:** Product working reference through WT-PROJ-DETAILS-001
 
-**Last updated:** 25 June 2026
+**Last updated:** 30 June 2026
 
 **Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/ui-page-design-standard.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`, `supabase/migrations/20260625000100_project_narrative_entry_links.sql`
 
@@ -194,6 +194,16 @@ Editable project fields are limited to the existing core fields `name` and `stat
 Project creation remains lightweight. `created_by` continues to be populated automatically from the authenticated Supabase user when a project is created. The current schema does not include `updated_by`; WT-002B therefore does not add it and recommends a later small audit migration when the surrounding profile/audit display pattern is ready.
 
 WT-002B does not implement Red/Amber/Green scoring, RAID tables, dependency modelling, programme/portfolio modelling, or additional optional project fields.
+
+## WT-PROJ-DETAILS-001 Project Details and responsibility assignments
+
+WT-PROJ-DETAILS-001 adds a workspace-safe Project Details page at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/details`. The project dashboard now links to this page as the controlled place to review project setup, context, responsibilities and system metadata; the dashboard remains a summary and capability navigation surface.
+
+The Details page displays the current project schema fields: project name, project reference, workspace, status, health, route slug, internal project ID, description, created by, created at and updated at. Project reference, workspace, internal IDs, health and audit timestamps are read-only. Authorised workspace roles may update the existing safe fields `name`, `status` and `description` through server-side helpers that re-check workspace/project scope and central RBAC.
+
+The project responsibility foundation stores assignments in `project_people`. Each assignment links one project role to either a real active workspace member (`organisation_members.user_id`, aligned with `profiles.id` / `auth.users.id`) or an active `workspace_demo_people` demo persona. Demo assignments remain visibly labelled as demo/persona records. Project roles describe accountability/context only and do not grant project edit rights or change workspace RBAC.
+
+The following project date/governance fields remain follow-up schema candidates rather than part of this slice: start date, target end date, next review date, review cadence, governance route, escalation route and project-level `updated_by`.
 
 ## WT-US-0202B system-generated fixed project references
 

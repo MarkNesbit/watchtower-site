@@ -4,6 +4,7 @@ import test from 'node:test';
 import { buildUniqueSlug, slugifyProjectName } from '../src/lib/projectSlugs.ts';
 import { can } from '../src/lib/permissions.ts';
 import {
+	buildProjectDetailsPath,
 	buildProjectEditPath,
 	buildProjectNarrativePath,
 	buildProjectNewRiskPath,
@@ -27,6 +28,7 @@ test('Project slug generation creates URL-safe slugs', () => {
 
 test('Project route helpers build workspace-safe risk paths', () => {
 	assert.equal(buildProjectPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub');
+	assert.equal(buildProjectDetailsPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub/details');
 	assert.equal(buildProjectRisksPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub/risks');
 	assert.equal(buildProjectNewRiskPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub/risks/new');
 	assert.equal(
@@ -167,6 +169,8 @@ test('Project dashboard is read-only and displays metadata including description
 	assert.match(detailSource, /<RagReferencePill[\s\S]*tone=\{healthTone\(project\.health\)\}/);
 	assert.doesNotMatch(detailSource, /project-dashboard__bar|project-dashboard__workspace|project-hero-card|project-pills|rag-timeline/);
 	assert.match(detailSource, /Read-only metadata/);
+	assert.match(detailSource, /Project Details/);
+	assert.match(detailSource, /buildProjectDetailsPath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(detailSource, /description, slug/);
 	assert.match(detailSource, /formatValue\(project\.description\)/);
 	assert.match(detailSource, /formatDate\(project\.created_at\)/);
@@ -230,14 +234,15 @@ test('Project dashboard Risk tile uses icon-only assurance state', async () => {
 	assert.doesNotMatch(detailSource, /badge|count|dot|notification|attention-item|attentionItems|healthScore/i);
 });
 
-test('Project dashboard edit action is visible to all viewers and active only for permitted roles', async () => {
+test('Project dashboard links to Project Details as the controlled detail surface', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	assert.match(detailSource, /canEditProject = can\(workspace\.role, 'project\.editDetails'\)/);
-	assert.match(detailSource, /data-edit-project-action/);
-	assert.match(detailSource, /Edit project details/);
-	assert.match(detailSource, /buildProjectEditPath\(workspaceSlug \?\? '', project\.slug\)/);
-	assert.match(detailSource, /data-disabled-edit-action/);
-	assert.match(detailSource, /aria-disabled="true"/);
+	assert.match(detailSource, /data-project-details-action/);
+	assert.match(detailSource, /Project details/);
+	assert.match(detailSource, /title: 'Project Details'/);
+	assert.match(detailSource, /destination: 'details'/);
+	assert.match(detailSource, /buildProjectDetailsPath\(workspaceSlug \?\? '', project\.slug\)/);
+	assert.doesNotMatch(detailSource, /data-edit-project-action/);
 	assert.match(detailSource, /You do not have permission to edit project details\./);
 });
 
@@ -286,6 +291,7 @@ test('Project routing keeps migrations, admin invite permissions tables and futu
 
 test('Workspace-scoped project route builders use readable slugs for every project destination', () => {
 	assert.equal(buildProjectPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check');
+	assert.equal(buildProjectDetailsPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/details');
 	assert.equal(buildProjectEditPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/edit');
 	assert.equal(buildProjectRisksPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/risks');
 	assert.equal(buildProjectNarrativePath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/narrative');
@@ -308,6 +314,7 @@ test('Workspace lookup requires the authenticated user active membership and wor
 test('Every workspace-scoped project page binds project slug to the matched workspace', async () => {
 	for (const pagePath of [
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro',
+		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/details.astro',
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/edit.astro',
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro',
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/narrative.astro',

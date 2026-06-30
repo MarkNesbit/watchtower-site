@@ -1,0 +1,508 @@
+---
+import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
+import DisabledActionHint from '../../../../../../components/app/DisabledActionHint.astro';
+import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
+import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
+import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
+import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
+import {
+	PROJECT_PEOPLE_ROLES,
+	listProjectPeople,
+	listProjectPersonOptions,
+	projectPeopleRoleLabel,
+	saveProjectPersonForRole,
+} from '../../../../../../lib/projectPeople';
+import { can } from '../../../../../../lib/permissions';
+import { buildProjectPath, getWorkspaceBySlug, PROJECT_STATUSES, updateProjectCore } from '../../../../../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
+
+const projectSlug = Astro.params.projectId;
+const workspaceSlug = Astro.params.workspaceSlug;
+const accessToken = getServerAccessToken(Astro.cookies);
+let project = null;
+let workspaceName = '';
+let workspaceRole = '';
+let message = '';
+let saveMessage = '';
+let creatorDisplayName = '';
+let peopleLoadError = '';
+let assignments = [];
+let personOptions = [];
+
+const formatValue = (value, fallback = 'Not available') => value || fallback;
+const formatStatusLabel = (value) => value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Unknown';
+const formatDateTime = (value, fallback = 'Not available') => value
+	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
+	: fallback;
+const healthTone = (value) => {
+	const health = value?.toLowerCase();
+	if (health === 'green') return 'green';
+	if (health === 'amber') return 'amber';
+	if (health === 'red') return 'red';
+	return 'blue';
+};
+const assignmentName = (assignment) => {
+	if (assignment.demo_person_id) return assignment.demoPerson?.display_name || 'Demo persona';
+	return assignment.profile?.display_name || assignment.profile?.email || 'Workspace member';
+};
+const assignmentMeta = (assignment) => {
+	if (assignment.demo_person_id) {
+		const role = assignment.demoPerson?.workspace_role ? formatStatusLabel(assignment.demoPerson.workspace_role) : 'Demo persona';
+		const projectRole = assignment.demoPerson?.project_role ? ` / ${projectPeopleRoleLabel(assignment.demoPerson.project_role)}` : '';
+		return `${role}${projectRole}`;
+	}
+	return assignment.profile?.email || 'Real workspace member';
+};
+const optionLabel = (option) => {
+	const role = option.workspaceRole ? formatStatusLabel(option.workspaceRole) : 'Workspace member';
+	const projectRole = option.projectRole ? ` / ${projectPeopleRoleLabel(option.projectRole)}` : '';
+	return `${option.displayName} - ${role}${projectRole}`;
+};
+const followUpFields = [
+	'Start date',
+	'Target end date',
+	'Next review date',
+	'Review cadence',
+	'Governance route',
+	'Escalation route',
+	'Updated by',
+];
+
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug ?? '', accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+
+	if (!workspace || !organisation) {
+		message = 'Project not found or you do not have access.';
+		Astro.response.status = 404;
+	} else if (!can(workspace.role, 'project.view')) {
+		message = 'Your workspace role does not permit project access.';
+		Astro.response.status = 403;
+	} else {
+		workspaceName = organisation.name;
+		workspaceRole = workspace.role;
+
+		if (Astro.request.method === 'POST') {
+			const formData = await Astro.request.formData();
+			const intent = String(formData.get('intent') ?? '');
+			try {
+				if (intent === 'update-project-identity') {
+					await updateProjectCore(workspaceSlug ?? '', projectSlug ?? '', {
+						name: String(formData.get('name') ?? ''),
+						status: String(formData.get('status') ?? 'proposed'),
+					}, serverSupabase, accessToken);
+					saveMessage = 'Project identity saved.';
+				} else if (intent === 'update-project-description') {
+					await updateProjectCore(workspaceSlug ?? '', projectSlug ?? '', {
+						name: String(formData.get('name') ?? ''),
+						description: String(formData.get('description') ?? ''),
+						status: String(formData.get('status') ?? 'proposed'),
+					}, serverSupabase, accessToken);
+					saveMessage = 'Project description saved.';
+				} else if (intent === 'save-project-person') {
+					await saveProjectPersonForRole(workspaceSlug ?? '', projectSlug ?? '', {
+						projectRole: String(formData.get('project_role') ?? ''),
+						personSelection: String(formData.get('person_selection') ?? ''),
+						responsibility: String(formData.get('responsibility') ?? ''),
+					}, serverSupabase, accessToken);
+					saveMessage = 'Project responsibility saved.';
+				}
+			} catch (error) {
+				saveMessage = error instanceof Error ? error.message : 'Unable to save project details.';
+			}
+		}
+
+		const { data, error } = await serverSupabase
+			.from('projects')
+			.select('id, organisation_id, name, project_ref, description, slug, status, health, created_at, updated_at, created_by')
+			.eq('slug', projectSlug)
+			.eq('organisation_id', organisation.id)
+			.is('deleted_at', null)
+			.is('archived_at', null)
+			.maybeSingle();
+		if (error) throw error;
+		project = data;
+		if (!project) {
+			message = 'Project not found or you do not have access.';
+			Astro.response.status = 404;
+		} else {
+			if (project.created_by) {
+				const { data: creator, error: creatorError } = await serverSupabase
+					.from('profiles')
+					.select('display_name, email')
+					.eq('id', project.created_by)
+					.maybeSingle();
+				if (!creatorError && creator) creatorDisplayName = creator.display_name || creator.email || '';
+			}
+
+			try {
+				assignments = await listProjectPeople(organisation.id, project.id, workspace.role, serverSupabase);
+			} catch (error) {
+				assignments = [];
+				peopleLoadError = error instanceof Error ? error.message : 'Unable to load project responsibilities.';
+			}
+
+			if (can(workspace.role, 'project.editDetails')) {
+				try {
+					personOptions = await listProjectPersonOptions(organisation.id, workspace.role, serverSupabase);
+				} catch {
+					personOptions = [];
+				}
+			}
+		}
+	}
+} catch (error) {
+	message = error instanceof Error ? error.message : 'Unable to load project details.';
+	Astro.response.status = 500;
+}
+
+const canEditProject = can(workspaceRole, 'project.editDetails');
+const assignmentsByRole = new Map(assignments.map((assignment) => [assignment.project_role, assignment]));
+const realPersonOptions = personOptions.filter((option) => option.source === 'user');
+const demoPersonOptions = personOptions.filter((option) => option.source === 'demo');
+---
+<AuthenticatedLayout title={project ? `${project.name} details | WatchTower` : 'Project Details | WatchTower'}>
+	<section class="project-details-page" data-project-details>
+		{project ? (
+			<>
+				<ProjectPageHero
+					workspaceName={workspaceName}
+					projectName={project.name}
+					projectRef={project.project_ref}
+					title="Project Details"
+					description="Project setup, context, responsibilities and read-only system information."
+					headingId="project-details-heading"
+				/>
+
+				<nav class="project-details-top-links" aria-label="Project navigation">
+					<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project dashboard</a>
+				</nav>
+
+				<ProjectControlPanel title="Editing access" status={canEditProject ? 'Editable' : 'Read-only'} headingId="project-details-access-heading">
+					<p class="project-details-readonly" data-project-details-permission>
+						{canEditProject
+							? 'You can maintain permitted project detail fields for this workspace role.'
+							: 'You can view these project details, but you do not have permission to edit them.'}
+					</p>
+					{saveMessage && <p class="form-message" data-project-details-save-message>{saveMessage}</p>}
+				</ProjectControlPanel>
+
+				<ProjectContentPanel
+					label="Project setup"
+					title="Project identity"
+					helper="Project reference, workspace, internal ID and health are read-only."
+					headingId="project-identity-heading"
+				>
+					<div slot="action">
+						<DisabledActionHint
+							id="project-identity-edit-hint"
+							allowed={canEditProject}
+							allowedText="Name and status can be edited here."
+							disabledText="Identity editing is unavailable for your current role."
+						/>
+					</div>
+					{canEditProject ? (
+						<form class="project-details-form" method="post" aria-describedby="project-identity-edit-hint" data-project-identity-form>
+							<input type="hidden" name="intent" value="update-project-identity" />
+							<label>Project name <input name="name" value={project.name} required autocomplete="off" /></label>
+							<label>Status
+								<select name="status" aria-label="Project status">
+									{PROJECT_STATUSES.map((status) => <option value={status} selected={status === project.status}>{formatStatusLabel(status)}</option>)}
+								</select>
+							</label>
+							<button class="button button--primary" type="submit">Save identity</button>
+						</form>
+					) : null}
+					<dl class="details-grid">
+						<div><dt>Project name</dt><dd>{formatValue(project.name)}</dd></div>
+						<div><dt>Project reference</dt><dd>{formatValue(project.project_ref)}</dd></div>
+						<div><dt>Workspace</dt><dd>{workspaceName}</dd></div>
+						<div><dt>Project status</dt><dd>{formatStatusLabel(project.status)}</dd></div>
+						<div>
+							<dt>Project health</dt>
+							<dd>
+								<RagReferencePill
+									tone={healthTone(project.health)}
+									label={formatStatusLabel(formatValue(project.health, 'Not assessed'))}
+								/>
+							</dd>
+						</div>
+						<div><dt>Project slug</dt><dd>{formatValue(project.slug)}</dd></div>
+						<div><dt>Internal project ID</dt><dd class="mono-value">{project.id}</dd></div>
+					</dl>
+				</ProjectContentPanel>
+
+				<ProjectContentPanel
+					label="Context"
+					title="Project description and context"
+					helper="Only current project fields are shown in this slice."
+					headingId="project-context-heading"
+				>
+					{canEditProject ? (
+						<form class="project-details-form project-details-form--wide" method="post" data-project-description-form>
+							<input type="hidden" name="intent" value="update-project-description" />
+							<input type="hidden" name="name" value={project.name} />
+							<input type="hidden" name="status" value={project.status} />
+							<label>Description <textarea name="description" rows="5">{project.description ?? ''}</textarea></label>
+							<button class="button button--primary" type="submit">Save description</button>
+						</form>
+					) : null}
+					<dl class="details-grid details-grid--single">
+						<div><dt>Description</dt><dd>{formatValue(project.description)}</dd></div>
+					</dl>
+				</ProjectContentPanel>
+
+				<ProjectContentPanel
+					label="Governance"
+					title="Dates and governance"
+					helper="These fields are identified for follow-up schema work rather than added broadly in this slice."
+					headingId="project-governance-heading"
+				>
+					<ul class="follow-up-list" data-project-details-follow-up-fields>
+						{followUpFields.slice(0, 6).map((field) => <li>{field}</li>)}
+					</ul>
+				</ProjectContentPanel>
+
+				<ProjectContentPanel
+					label="Responsibilities"
+					title="Project roles and responsibilities"
+					helper="Assignments describe accountability only; they do not grant edit permissions."
+					headingId="project-people-heading"
+				>
+					<div slot="action">
+						<DisabledActionHint
+							id="project-people-edit-hint"
+							allowed={canEditProject}
+							allowedText="Real members and active demo personas can be assigned."
+							disabledText="Responsibility assignment is unavailable for your current role."
+						/>
+					</div>
+					{peopleLoadError && <p class="form-message">{peopleLoadError}</p>}
+					<div class="project-people-grid" data-project-people-section>
+						{PROJECT_PEOPLE_ROLES.map((role) => {
+							const assignment = assignmentsByRole.get(role);
+							const selectedValue = assignment?.user_id ? `user:${assignment.user_id}` : assignment?.demo_person_id ? `demo:${assignment.demo_person_id}` : '';
+							return (
+								<article class="project-person-card" data-project-role={role}>
+									<div class="project-person-card__summary">
+										<div>
+											<h3>{projectPeopleRoleLabel(role)}</h3>
+											{assignment ? (
+												<>
+													<p><strong>{assignmentName(assignment)}</strong></p>
+													<p>{assignmentMeta(assignment)}</p>
+													{assignment.demo_person_id && <span class="demo-person-badge">Demo persona</span>}
+												</>
+											) : (
+												<p>Unassigned</p>
+											)}
+										</div>
+										<p>{formatValue(assignment?.responsibility, projectPeopleRoleLabel(role))}</p>
+									</div>
+									{canEditProject && (
+										<form class="project-person-card__form" method="post" aria-describedby="project-people-edit-hint">
+											<input type="hidden" name="intent" value="save-project-person" />
+											<input type="hidden" name="project_role" value={role} />
+											<label>
+												Assign person
+												<select name="person_selection" aria-label={`Assign ${projectPeopleRoleLabel(role)}`}>
+													<option value="" selected={!selectedValue}>Unassigned</option>
+													{realPersonOptions.length > 0 && (
+														<optgroup label="Workspace members">
+															{realPersonOptions.map((option) => (
+																<option value={`user:${option.id}`} selected={selectedValue === `user:${option.id}`}>{optionLabel(option)}</option>
+															))}
+														</optgroup>
+													)}
+													{demoPersonOptions.length > 0 && (
+														<optgroup label="Demo personas">
+															{demoPersonOptions.map((option) => (
+																<option value={`demo:${option.id}`} selected={selectedValue === `demo:${option.id}`}>{optionLabel(option)}</option>
+															))}
+														</optgroup>
+													)}
+												</select>
+											</label>
+											<label>Responsibility <input name="responsibility" value={assignment?.responsibility ?? projectPeopleRoleLabel(role)} /></label>
+											<button class="button button--secondary" type="submit">Save assignment</button>
+										</form>
+									)}
+								</article>
+							);
+						})}
+					</div>
+				</ProjectContentPanel>
+
+				<ProjectContentPanel
+					label="Read-only"
+					title="System metadata"
+					helper="Generated and audit fields are displayed for context and cannot be edited here."
+					headingId="project-system-metadata-heading"
+				>
+					<dl class="details-grid">
+						<div><dt>Created by</dt><dd>{formatValue(creatorDisplayName)}</dd></div>
+						<div><dt>Created at</dt><dd>{formatDateTime(project.created_at)}</dd></div>
+						<div><dt>Updated at</dt><dd>{formatDateTime(project.updated_at)}</dd></div>
+						<div><dt>Updated by</dt><dd>Not captured in the current project schema</dd></div>
+					</dl>
+				</ProjectContentPanel>
+			</>
+		) : (
+			<section class="content-card"><p>{message}</p></section>
+		)}
+	</section>
+</AuthenticatedLayout>
+
+<style>
+	.project-details-page {
+		display: grid;
+		gap: 0.9rem;
+	}
+
+	.project-details-top-links {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.7rem;
+	}
+
+	.project-details-readonly {
+		margin: 0.75rem 0 0;
+		color: var(--muted-strong);
+	}
+
+	.details-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1rem;
+		margin: 0;
+	}
+
+	.details-grid--single {
+		grid-template-columns: 1fr;
+	}
+
+	.details-grid div {
+		display: grid;
+		gap: 0.25rem;
+		min-width: 0;
+	}
+
+	.details-grid dt {
+		color: var(--muted);
+		font-size: 0.83rem;
+		font-weight: 850;
+	}
+
+	.details-grid dd {
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.mono-value {
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+		font-size: 0.85rem;
+	}
+
+	.project-details-form {
+		display: grid;
+		grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 14rem) auto;
+		align-items: end;
+		gap: 0.9rem;
+		margin-bottom: 1.1rem;
+	}
+
+	.project-details-form--wide {
+		grid-template-columns: 1fr auto;
+		align-items: end;
+	}
+
+	.project-details-form label,
+	.project-person-card__form label {
+		display: grid;
+		gap: 0.35rem;
+		color: var(--muted-strong);
+		font-weight: 800;
+	}
+
+	.project-details-form input,
+	.project-details-form select,
+	.project-details-form textarea,
+	.project-person-card__form input,
+	.project-person-card__form select {
+		width: 100%;
+	}
+
+	.follow-up-list {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.7rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.follow-up-list li {
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 0.5rem;
+		padding: 0.75rem;
+		color: var(--muted-strong);
+		background: rgba(255, 255, 255, 0.03);
+	}
+
+	.project-people-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+		gap: 0.9rem;
+	}
+
+	.project-person-card {
+		display: grid;
+		gap: 0.9rem;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 0.5rem;
+		padding: 1rem;
+		background: rgba(255, 255, 255, 0.03);
+	}
+
+	.project-person-card h3 {
+		margin: 0;
+		font-size: 1rem;
+	}
+
+	.project-person-card p {
+		margin: 0.25rem 0 0;
+		color: var(--muted-strong);
+	}
+
+	.project-person-card__summary {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.project-person-card__form {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.demo-person-badge {
+		display: inline-flex;
+		width: fit-content;
+		border: 1px solid rgba(0, 160, 255, 0.32);
+		border-radius: 999px;
+		padding: 0.15rem 0.5rem;
+		background: rgba(0, 160, 255, 0.1);
+		color: var(--accent-strong);
+		font-size: 0.78rem;
+		font-weight: 900;
+	}
+
+	@media (max-width: 850px) {
+		.details-grid,
+		.follow-up-list,
+		.project-details-form,
+		.project-details-form--wide {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>
