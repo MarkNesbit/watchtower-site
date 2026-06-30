@@ -53,15 +53,19 @@ test('Project people helper enforces central RBAC and scopes assignment writes t
 	assert.match(source, /\.from\('organisation_members'\)[\s\S]*\.eq\('status', 'active'\)/);
 	assert.match(source, /\.from\('workspace_demo_people'\)[\s\S]*\.eq\('status', 'active'\)[\s\S]*\.eq\('is_demo_person', true\)/);
 	assert.match(source, /parseProjectPersonSelection\(input\.personSelection\)/);
+	assert.match(source, /assertActiveProjectPersonSelection\(organisation\.id, selection, client\)/);
 	assert.match(source, /\.from\('project_people'\)[\s\S]*\.update\(\{ status: 'removed' \}\)/);
 	assert.doesNotMatch(source, /organisation_members'\)\s*\.update|profiles'\)\s*\.update/);
+	assert.doesNotMatch(source, /\.delete\(\)/);
 });
 
-test('Project Details route displays full available details with controlled editing', async () => {
+test('Project Details route displays full available details read-first with modal editing', async () => {
 	const source = await readFile(detailsPageUrl, 'utf8');
 	assert.match(source, /data-project-details/);
 	assert.match(source, /ProjectPageHero/);
 	assert.match(source, /title="Project Details"/);
+	assert.match(source, /project-details-page :global\(\.project-content-panel h2\)/);
+	assert.match(source, /font-size: clamp\(1\.35rem, 2\.2vw, 1\.85rem\)/);
 	assert.match(source, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
 	assert.match(source, /\.eq\('slug', projectSlug\)/);
 	assert.match(source, /\.eq\('organisation_id', organisation\.id\)/);
@@ -73,6 +77,13 @@ test('Project Details route displays full available details with controlled edit
 	assert.match(source, /listProjectPeople\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
 	assert.match(source, /listProjectPersonOptions\(organisation\.id, workspace\.role, serverSupabase\)/);
 	assert.match(source, /You can view these project details, but you do not have permission to edit them\./);
+	assert.match(source, /data-project-dialog-open="project-identity-dialog"/);
+	assert.match(source, /id="project-identity-dialog"/);
+	assert.match(source, /data-project-identity-modal/);
+	assert.match(source, /data-project-description-modal/);
+	assert.match(source, /data-project-assignment-modal/);
+	assert.match(source, /data-add-team-member-modal/);
+	assert.match(source, /data-project-dialog-cancel/);
 	assert.match(source, /Project reference/);
 	assert.match(source, /Workspace/);
 	assert.match(source, /Project health/);
@@ -83,9 +94,34 @@ test('Project Details route displays full available details with controlled edit
 	assert.match(source, /Start date/);
 	assert.match(source, /Target end date/);
 	assert.match(source, /Governance route/);
+	assert.match(source, /Not set/);
 	assert.match(source, /Demo persona/);
 	assert.match(source, /Assignments describe accountability only; they do not grant edit permissions\./);
 	assert.doesNotMatch(source, /name="health"|name="project_ref"|name="organisation_id"|name="created_by"|name="updated_by"/);
+	assert.doesNotMatch(source, /label="Project setup"|label="Context"|label="Governance"|label="Responsibilities"|label="Read-only"/);
+	assert.doesNotMatch(source, /data-project-identity-form|data-project-description-form|project-person-card__form/);
+});
+
+test('Project Details roles use default slots, assignment modals, removal and add-team-member flow', async () => {
+	const source = await readFile(detailsPageUrl, 'utf8');
+	assert.match(source, /DEFAULT_PROJECT_PEOPLE_ROLES = \[/);
+	for (const role of ['sponsor', 'project_manager', 'delivery_lead', 'product_owner', 'assurance_lead', 'default_risk_owner']) {
+		assert.match(source, new RegExp(`'${role}'`));
+	}
+	assert.match(source, /No person assigned/);
+	assert.match(source, /projectRoleCards = \[/);
+	assert.match(source, /data-project-dialog-open={`project-person-dialog-\$\{role\}`}/);
+	assert.match(source, /id={`project-person-dialog-\$\{role\}`}/);
+	assert.match(source, /Save assignment/);
+	assert.match(source, /Remove assignment/);
+	assert.match(source, /value="remove-project-person"/);
+	assert.match(source, /Add another team member/);
+	assert.match(source, /id="project-add-person-dialog"/);
+	assert.match(source, /name="project_role"/);
+	assert.match(source, /PROJECT_PEOPLE_ROLES\.map/);
+	assert.match(source, /Workspace members/);
+	assert.match(source, /Demo personas/);
+	assert.match(source, /showModal\(\)/);
 });
 
 test('Project Details route helper is exported through project libraries', async () => {
@@ -94,4 +130,15 @@ test('Project Details route helper is exported through project libraries', async
 	assert.match(routes, /export function buildProjectDetailsPath/);
 	assert.match(routes, /\/details/);
 	assert.match(projects, /buildProjectDetailsPath/);
+});
+
+test('Shared button styles keep modal action and disabled button contrast readable', async () => {
+	const source = await readFile(new URL('../src/layouts/SiteLayout.astro', import.meta.url), 'utf8');
+	assert.match(source, /\.button--primary:disabled/);
+	assert.match(source, /background: #315064/);
+	assert.match(source, /color: #e4eef5/);
+	assert.match(source, /\.button--secondary:disabled/);
+	assert.match(source, /color: #c8d6df/);
+	assert.match(source, /\.button--destructive/);
+	assert.match(source, /color: #ffd7d3/);
 });

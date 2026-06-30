@@ -59,13 +59,20 @@ const optionLabel = (option) => {
 	return `${option.displayName} - ${role}${projectRole}`;
 };
 const followUpFields = [
-	'Start date',
-	'Target end date',
-	'Next review date',
-	'Review cadence',
-	'Governance route',
-	'Escalation route',
-	'Updated by',
+	{ label: 'Start date', value: 'Not set' },
+	{ label: 'Target end date', value: 'Not set' },
+	{ label: 'Next review date', value: 'Not set' },
+	{ label: 'Review cadence', value: 'Not set' },
+	{ label: 'Governance route', value: 'Not set' },
+	{ label: 'Escalation route', value: 'Not set' },
+];
+const DEFAULT_PROJECT_PEOPLE_ROLES = [
+	'sponsor',
+	'project_manager',
+	'delivery_lead',
+	'product_owner',
+	'assurance_lead',
+	'default_risk_owner',
 ];
 
 try {
@@ -100,13 +107,20 @@ try {
 						status: String(formData.get('status') ?? 'proposed'),
 					}, serverSupabase, accessToken);
 					saveMessage = 'Project description saved.';
-				} else if (intent === 'save-project-person') {
+				} else if (intent === 'save-project-person' || intent === 'add-project-person') {
 					await saveProjectPersonForRole(workspaceSlug ?? '', projectSlug ?? '', {
 						projectRole: String(formData.get('project_role') ?? ''),
 						personSelection: String(formData.get('person_selection') ?? ''),
 						responsibility: String(formData.get('responsibility') ?? ''),
 					}, serverSupabase, accessToken);
 					saveMessage = 'Project responsibility saved.';
+				} else if (intent === 'remove-project-person') {
+					await saveProjectPersonForRole(workspaceSlug ?? '', projectSlug ?? '', {
+						projectRole: String(formData.get('project_role') ?? ''),
+						personSelection: '',
+						responsibility: '',
+					}, serverSupabase, accessToken);
+					saveMessage = 'Project responsibility removed.';
 				}
 			} catch (error) {
 				saveMessage = error instanceof Error ? error.message : 'Unable to save project details.';
@@ -159,6 +173,10 @@ try {
 
 const canEditProject = can(workspaceRole, 'project.editDetails');
 const assignmentsByRole = new Map(assignments.map((assignment) => [assignment.project_role, assignment]));
+const projectRoleCards = [
+	...DEFAULT_PROJECT_PEOPLE_ROLES,
+	...PROJECT_PEOPLE_ROLES.filter((role) => !DEFAULT_PROJECT_PEOPLE_ROLES.includes(role) && assignmentsByRole.has(role)),
+];
 const realPersonOptions = personOptions.filter((option) => option.source === 'user');
 const demoPersonOptions = personOptions.filter((option) => option.source === 'demo');
 ---
@@ -189,31 +207,22 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 				</ProjectControlPanel>
 
 				<ProjectContentPanel
-					label="Project setup"
 					title="Project identity"
 					helper="Project reference, workspace, internal ID and health are read-only."
 					headingId="project-identity-heading"
 				>
 					<div slot="action">
-						<DisabledActionHint
-							id="project-identity-edit-hint"
-							allowed={canEditProject}
-							allowedText="Name and status can be edited here."
-							disabledText="Identity editing is unavailable for your current role."
-						/>
+						{canEditProject ? (
+							<button class="button button--secondary project-details-edit-action" type="button" data-project-dialog-open="project-identity-dialog">Edit identity</button>
+						) : (
+							<DisabledActionHint
+								id="project-identity-edit-hint"
+								allowed={false}
+								allowedText=""
+								disabledText="Identity editing is unavailable for your current role."
+							/>
+						)}
 					</div>
-					{canEditProject ? (
-						<form class="project-details-form" method="post" aria-describedby="project-identity-edit-hint" data-project-identity-form>
-							<input type="hidden" name="intent" value="update-project-identity" />
-							<label>Project name <input name="name" value={project.name} required autocomplete="off" /></label>
-							<label>Status
-								<select name="status" aria-label="Project status">
-									{PROJECT_STATUSES.map((status) => <option value={status} selected={status === project.status}>{formatStatusLabel(status)}</option>)}
-								</select>
-							</label>
-							<button class="button button--primary" type="submit">Save identity</button>
-						</form>
-					) : null}
 					<dl class="details-grid">
 						<div><dt>Project name</dt><dd>{formatValue(project.name)}</dd></div>
 						<div><dt>Project reference</dt><dd>{formatValue(project.project_ref)}</dd></div>
@@ -234,57 +243,66 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 				</ProjectContentPanel>
 
 				<ProjectContentPanel
-					label="Context"
 					title="Project description and context"
 					helper="Only current project fields are shown in this slice."
 					headingId="project-context-heading"
 				>
-					{canEditProject ? (
-						<form class="project-details-form project-details-form--wide" method="post" data-project-description-form>
-							<input type="hidden" name="intent" value="update-project-description" />
-							<input type="hidden" name="name" value={project.name} />
-							<input type="hidden" name="status" value={project.status} />
-							<label>Description <textarea name="description" rows="5">{project.description ?? ''}</textarea></label>
-							<button class="button button--primary" type="submit">Save description</button>
-						</form>
-					) : null}
+					<div slot="action">
+						{canEditProject ? (
+							<button class="button button--secondary project-details-edit-action" type="button" data-project-dialog-open="project-description-dialog">Edit description</button>
+						) : (
+							<DisabledActionHint
+								id="project-description-edit-hint"
+								allowed={false}
+								allowedText=""
+								disabledText="Description editing is unavailable for your current role."
+							/>
+						)}
+					</div>
 					<dl class="details-grid details-grid--single">
 						<div><dt>Description</dt><dd>{formatValue(project.description)}</dd></div>
 					</dl>
 				</ProjectContentPanel>
 
 				<ProjectContentPanel
-					label="Governance"
 					title="Dates and governance"
 					helper="These fields are identified for follow-up schema work rather than added broadly in this slice."
 					headingId="project-governance-heading"
 				>
-					<ul class="follow-up-list" data-project-details-follow-up-fields>
-						{followUpFields.slice(0, 6).map((field) => <li>{field}</li>)}
-					</ul>
+					<dl class="details-grid governance-grid" data-project-details-follow-up-fields>
+						{followUpFields.map((field) => (
+							<div class="follow-up-field">
+								<dt>{field.label}</dt>
+								<dd>{field.value}</dd>
+							</div>
+						))}
+					</dl>
 				</ProjectContentPanel>
 
 				<ProjectContentPanel
-					label="Responsibilities"
 					title="Project roles and responsibilities"
 					helper="Assignments describe accountability only; they do not grant edit permissions."
 					headingId="project-people-heading"
 				>
 					<div slot="action">
-						<DisabledActionHint
-							id="project-people-edit-hint"
-							allowed={canEditProject}
-							allowedText="Real members and active demo personas can be assigned."
-							disabledText="Responsibility assignment is unavailable for your current role."
-						/>
+						{canEditProject ? (
+							<button class="button button--primary project-details-edit-action" type="button" data-project-dialog-open="project-add-person-dialog">Add another team member</button>
+						) : (
+							<DisabledActionHint
+								id="project-people-edit-hint"
+								allowed={false}
+								allowedText=""
+								disabledText="Responsibility assignment is unavailable for your current role."
+							/>
+						)}
 					</div>
 					{peopleLoadError && <p class="form-message">{peopleLoadError}</p>}
 					<div class="project-people-grid" data-project-people-section>
-						{PROJECT_PEOPLE_ROLES.map((role) => {
+						{projectRoleCards.map((role) => {
 							const assignment = assignmentsByRole.get(role);
 							const selectedValue = assignment?.user_id ? `user:${assignment.user_id}` : assignment?.demo_person_id ? `demo:${assignment.demo_person_id}` : '';
 							return (
-								<article class="project-person-card" data-project-role={role}>
+								<article class={`project-person-card ${canEditProject ? 'project-person-card--editable' : ''}`} data-project-role={role}>
 									<div class="project-person-card__summary">
 										<div>
 											<h3>{projectPeopleRoleLabel(role)}</h3>
@@ -295,38 +313,63 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 													{assignment.demo_person_id && <span class="demo-person-badge">Demo persona</span>}
 												</>
 											) : (
-												<p>Unassigned</p>
+												<p>No person assigned</p>
 											)}
 										</div>
 										<p>{formatValue(assignment?.responsibility, projectPeopleRoleLabel(role))}</p>
 									</div>
 									{canEditProject && (
-										<form class="project-person-card__form" method="post" aria-describedby="project-people-edit-hint">
-											<input type="hidden" name="intent" value="save-project-person" />
-											<input type="hidden" name="project_role" value={role} />
-											<label>
-												Assign person
-												<select name="person_selection" aria-label={`Assign ${projectPeopleRoleLabel(role)}`}>
-													<option value="" selected={!selectedValue}>Unassigned</option>
-													{realPersonOptions.length > 0 && (
-														<optgroup label="Workspace members">
-															{realPersonOptions.map((option) => (
-																<option value={`user:${option.id}`} selected={selectedValue === `user:${option.id}`}>{optionLabel(option)}</option>
-															))}
-														</optgroup>
+										<button class="project-person-card__button" type="button" data-project-dialog-open={`project-person-dialog-${role}`} aria-label={`${assignment ? 'Edit' : 'Assign'} ${projectPeopleRoleLabel(role)}`}>
+											{assignment ? 'Edit assignment' : 'Assign person'}
+										</button>
+									)}
+									{canEditProject && (
+										<dialog class="project-details-dialog" id={`project-person-dialog-${role}`} aria-labelledby={`project-person-dialog-${role}-title`} data-project-details-dialog>
+											<div class="project-details-dialog__header">
+												<div>
+													<h3 id={`project-person-dialog-${role}-title`}>{assignment ? 'Edit assignment' : 'Assign person'}</h3>
+													<p>{projectPeopleRoleLabel(role)}</p>
+												</div>
+												<form method="dialog">
+													<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+												</form>
+											</div>
+											<form class="project-details-modal-form" method="post" data-project-assignment-modal>
+												<input type="hidden" name="intent" value="save-project-person" />
+												<input type="hidden" name="project_role" value={role} />
+												<label>
+													<span>Assign person</span>
+													<select name="person_selection" aria-label={`Assign ${projectPeopleRoleLabel(role)}`}>
+														<option value="" selected={!selectedValue}>Unassigned</option>
+														{realPersonOptions.length > 0 && (
+															<optgroup label="Workspace members">
+																{realPersonOptions.map((option) => (
+																	<option value={`user:${option.id}`} selected={selectedValue === `user:${option.id}`}>{optionLabel(option)}</option>
+																))}
+															</optgroup>
+														)}
+														{demoPersonOptions.length > 0 && (
+															<optgroup label="Demo personas">
+																{demoPersonOptions.map((option) => (
+																	<option value={`demo:${option.id}`} selected={selectedValue === `demo:${option.id}`}>{optionLabel(option)}</option>
+																))}
+															</optgroup>
+														)}
+													</select>
+												</label>
+												<label>
+													<span>Responsibility</span>
+													<input name="responsibility" value={assignment?.responsibility ?? projectPeopleRoleLabel(role)} />
+												</label>
+												<div class="project-details-modal-form__actions">
+													{assignment && (
+														<button class="button button--destructive" type="submit" name="intent" value="remove-project-person">Remove assignment</button>
 													)}
-													{demoPersonOptions.length > 0 && (
-														<optgroup label="Demo personas">
-															{demoPersonOptions.map((option) => (
-																<option value={`demo:${option.id}`} selected={selectedValue === `demo:${option.id}`}>{optionLabel(option)}</option>
-															))}
-														</optgroup>
-													)}
-												</select>
-											</label>
-											<label>Responsibility <input name="responsibility" value={assignment?.responsibility ?? projectPeopleRoleLabel(role)} /></label>
-											<button class="button button--secondary" type="submit">Save assignment</button>
-										</form>
+													<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
+													<button class="button button--primary" type="submit">Save assignment</button>
+												</div>
+											</form>
+										</dialog>
 									)}
 								</article>
 							);
@@ -335,7 +378,6 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 				</ProjectContentPanel>
 
 				<ProjectContentPanel
-					label="Read-only"
 					title="System metadata"
 					helper="Generated and audit fields are displayed for context and cannot be edited here."
 					headingId="project-system-metadata-heading"
@@ -347,12 +389,143 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 						<div><dt>Updated by</dt><dd>Not captured in the current project schema</dd></div>
 					</dl>
 				</ProjectContentPanel>
+
+				{canEditProject && (
+					<>
+						<dialog class="project-details-dialog" id="project-identity-dialog" aria-labelledby="project-identity-dialog-title" data-project-details-dialog>
+							<div class="project-details-dialog__header">
+								<div>
+									<h3 id="project-identity-dialog-title">Edit project identity</h3>
+									<p>Only project name and status are editable here.</p>
+								</div>
+								<form method="dialog">
+									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+								</form>
+							</div>
+							<form class="project-details-modal-form" method="post" data-project-identity-modal>
+								<input type="hidden" name="intent" value="update-project-identity" />
+								<label>
+									<span>Project name</span>
+									<input name="name" value={project.name} required autocomplete="off" />
+								</label>
+								<label>
+									<span>Status</span>
+									<select name="status" aria-label="Project status">
+										{PROJECT_STATUSES.map((status) => <option value={status} selected={status === project.status}>{formatStatusLabel(status)}</option>)}
+									</select>
+								</label>
+								<dl class="project-details-modal-readonly">
+									<div><dt>Project reference</dt><dd>{formatValue(project.project_ref)}</dd></div>
+									<div><dt>Workspace</dt><dd>{workspaceName}</dd></div>
+									<div><dt>Project health</dt><dd>{formatStatusLabel(formatValue(project.health, 'Not assessed'))}</dd></div>
+									<div><dt>Project slug</dt><dd>{formatValue(project.slug)}</dd></div>
+									<div><dt>Internal project ID</dt><dd class="mono-value">{project.id}</dd></div>
+								</dl>
+								<div class="project-details-modal-form__actions">
+									<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
+									<button class="button button--primary" type="submit">Save identity</button>
+								</div>
+							</form>
+						</dialog>
+
+						<dialog class="project-details-dialog" id="project-description-dialog" aria-labelledby="project-description-dialog-title" data-project-details-dialog>
+							<div class="project-details-dialog__header">
+								<div>
+									<h3 id="project-description-dialog-title">Edit project description</h3>
+									<p>Use current project schema fields only.</p>
+								</div>
+								<form method="dialog">
+									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+								</form>
+							</div>
+							<form class="project-details-modal-form" method="post" data-project-description-modal>
+								<input type="hidden" name="intent" value="update-project-description" />
+								<input type="hidden" name="name" value={project.name} />
+								<input type="hidden" name="status" value={project.status} />
+								<label>
+									<span>Description</span>
+									<textarea name="description" rows="6">{project.description ?? ''}</textarea>
+								</label>
+								<div class="project-details-modal-form__actions">
+									<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
+									<button class="button button--primary" type="submit">Save description</button>
+								</div>
+							</form>
+						</dialog>
+
+						<dialog class="project-details-dialog" id="project-add-person-dialog" aria-labelledby="project-add-person-dialog-title" data-project-details-dialog>
+							<div class="project-details-dialog__header">
+								<div>
+									<h3 id="project-add-person-dialog-title">Add another team member</h3>
+									<p>Select a project role and assign a real member or active demo persona.</p>
+								</div>
+								<form method="dialog">
+									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+								</form>
+							</div>
+							<form class="project-details-modal-form" method="post" data-add-team-member-modal>
+								<input type="hidden" name="intent" value="add-project-person" />
+								<label>
+									<span>Project role</span>
+									<select name="project_role" required>
+										{PROJECT_PEOPLE_ROLES.map((role) => <option value={role}>{projectPeopleRoleLabel(role)}</option>)}
+									</select>
+								</label>
+								<label>
+									<span>Assign person</span>
+									<select name="person_selection" required aria-label="Assign team member">
+										<option value="">Select a person</option>
+										{realPersonOptions.length > 0 && (
+											<optgroup label="Workspace members">
+												{realPersonOptions.map((option) => (
+													<option value={`user:${option.id}`}>{optionLabel(option)}</option>
+												))}
+											</optgroup>
+										)}
+										{demoPersonOptions.length > 0 && (
+											<optgroup label="Demo personas">
+												{demoPersonOptions.map((option) => (
+													<option value={`demo:${option.id}`}>{optionLabel(option)}</option>
+												))}
+											</optgroup>
+										)}
+									</select>
+								</label>
+								<label>
+									<span>Responsibility</span>
+									<input name="responsibility" value="" />
+								</label>
+								<div class="project-details-modal-form__actions">
+									<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
+									<button class="button button--primary" type="submit">Save team member</button>
+								</div>
+							</form>
+						</dialog>
+					</>
+				)}
 			</>
 		) : (
 			<section class="content-card"><p>{message}</p></section>
 		)}
 	</section>
 </AuthenticatedLayout>
+
+<script>
+	document.querySelectorAll('[data-project-dialog-open]').forEach((trigger) => {
+		trigger.addEventListener('click', () => {
+			if (!(trigger instanceof HTMLElement)) return;
+			const dialog = document.getElementById(trigger.dataset.projectDialogOpen || '');
+			if (dialog instanceof HTMLDialogElement) dialog.showModal();
+		});
+	});
+
+	document.querySelectorAll('[data-project-dialog-cancel]').forEach((button) => {
+		button.addEventListener('click', () => {
+			const dialog = button.closest('dialog');
+			if (dialog instanceof HTMLDialogElement) dialog.close();
+		});
+	});
+</script>
 
 <style>
 	.project-details-page {
@@ -369,6 +542,11 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 	.project-details-readonly {
 		margin: 0.75rem 0 0;
 		color: var(--muted-strong);
+	}
+
+	.project-details-page :global(.project-content-panel h2) {
+		font-size: clamp(1.35rem, 2.2vw, 1.85rem);
+		letter-spacing: 0;
 	}
 
 	.details-grid {
@@ -404,45 +582,7 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 		font-size: 0.85rem;
 	}
 
-	.project-details-form {
-		display: grid;
-		grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 14rem) auto;
-		align-items: end;
-		gap: 0.9rem;
-		margin-bottom: 1.1rem;
-	}
-
-	.project-details-form--wide {
-		grid-template-columns: 1fr auto;
-		align-items: end;
-	}
-
-	.project-details-form label,
-	.project-person-card__form label {
-		display: grid;
-		gap: 0.35rem;
-		color: var(--muted-strong);
-		font-weight: 800;
-	}
-
-	.project-details-form input,
-	.project-details-form select,
-	.project-details-form textarea,
-	.project-person-card__form input,
-	.project-person-card__form select {
-		width: 100%;
-	}
-
-	.follow-up-list {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 0.7rem;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.follow-up-list li {
+	.follow-up-field {
 		border: 1px solid rgba(148, 163, 184, 0.18);
 		border-radius: 0.5rem;
 		padding: 0.75rem;
@@ -457,12 +597,17 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 	}
 
 	.project-person-card {
+		position: relative;
 		display: grid;
 		gap: 0.9rem;
 		border: 1px solid rgba(148, 163, 184, 0.18);
 		border-radius: 0.5rem;
 		padding: 1rem;
 		background: rgba(255, 255, 255, 0.03);
+	}
+
+	.project-person-card--editable {
+		border-color: rgba(0, 160, 255, 0.28);
 	}
 
 	.project-person-card h3 {
@@ -480,9 +625,21 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 		gap: 0.75rem;
 	}
 
-	.project-person-card__form {
-		display: grid;
-		gap: 0.75rem;
+	.project-person-card__button {
+		border: 1px solid rgba(215, 226, 234, 0.24);
+		border-radius: 999px;
+		padding: 0.65rem 0.85rem;
+		background: rgba(255, 255, 255, 0.04);
+		color: var(--text);
+		font: inherit;
+		font-weight: 850;
+		cursor: pointer;
+	}
+
+	.project-person-card__button:hover,
+	.project-person-card__button:focus-visible {
+		border-color: rgba(0, 160, 255, 0.5);
+		outline: none;
 	}
 
 	.demo-person-badge {
@@ -497,12 +654,117 @@ const demoPersonOptions = personOptions.filter((option) => option.source === 'de
 		font-weight: 900;
 	}
 
+	.project-details-dialog {
+		width: min(100% - 2rem, 42rem);
+		border: 1px solid rgba(124, 199, 244, 0.28);
+		border-radius: 0.75rem;
+		padding: 0;
+		background: #08111b;
+		color: var(--text);
+		box-shadow: 0 28px 90px rgba(0, 0, 0, 0.52);
+	}
+
+	.project-details-dialog::backdrop {
+		background: rgba(0, 8, 16, 0.72);
+		backdrop-filter: blur(4px);
+	}
+
+	.project-details-dialog__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+		padding: 1.1rem;
+	}
+
+	.project-details-dialog__header h3 {
+		margin: 0;
+		font-size: 1.25rem;
+		letter-spacing: 0;
+	}
+
+	.project-details-dialog__header p {
+		margin: 0.35rem 0 0;
+		color: var(--muted-strong);
+	}
+
+	.project-details-dialog__close {
+		border: 1px solid rgba(215, 226, 234, 0.24);
+		border-radius: 999px;
+		padding: 0.45rem 0.7rem;
+		background: rgba(255, 255, 255, 0.04);
+		color: var(--text);
+		font: inherit;
+		font-weight: 850;
+		cursor: pointer;
+	}
+
+	.project-details-modal-form {
+		display: grid;
+		gap: 1rem;
+		padding: 1.1rem;
+	}
+
+	.project-details-modal-form label {
+		display: grid;
+		gap: 0.35rem;
+		color: var(--muted-strong);
+		font-weight: 800;
+	}
+
+	.project-details-modal-form input,
+	.project-details-modal-form select,
+	.project-details-modal-form textarea {
+		width: 100%;
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 0.75rem 0.85rem;
+		background: #07111d;
+		color: var(--text);
+		font: inherit;
+	}
+
+	.project-details-modal-readonly {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.75rem;
+		margin: 0;
+		border-top: 1px solid rgba(148, 163, 184, 0.16);
+		padding-top: 1rem;
+	}
+
+	.project-details-modal-readonly dt {
+		color: var(--muted);
+		font-size: 0.82rem;
+		font-weight: 850;
+	}
+
+	.project-details-modal-readonly dd {
+		margin: 0.2rem 0 0;
+		overflow-wrap: anywhere;
+	}
+
+	.project-details-modal-form__actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 0.75rem;
+	}
+
 	@media (max-width: 850px) {
 		.details-grid,
-		.follow-up-list,
-		.project-details-form,
-		.project-details-form--wide {
+		.governance-grid,
+		.project-details-modal-readonly {
 			grid-template-columns: 1fr;
+		}
+
+		.project-details-modal-form__actions {
+			justify-content: stretch;
+		}
+
+		.project-details-modal-form__actions .button {
+			width: 100%;
 		}
 	}
 </style>

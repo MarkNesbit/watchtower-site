@@ -1,6 +1,6 @@
 # Watchtower Project Model
 
-**Status:** Product working reference through WT-PROJ-DETAILS-001
+**Status:** Product working reference through WT-PROJ-DETAILS-002
 
 **Last updated:** 30 June 2026
 
@@ -204,6 +204,14 @@ The Details page displays the current project schema fields: project name, proje
 The project responsibility foundation stores assignments in `project_people`. Each assignment links one project role to either a real active workspace member (`organisation_members.user_id`, aligned with `profiles.id` / `auth.users.id`) or an active `workspace_demo_people` demo persona. Demo assignments remain visibly labelled as demo/persona records. Project roles describe accountability/context only and do not grant project edit rights or change workspace RBAC.
 
 The following project date/governance fields remain follow-up schema candidates rather than part of this slice: start date, target end date, next review date, review cadence, governance route, escalation route and project-level `updated_by`.
+
+## WT-PROJ-DETAILS-002 read-first layout and modal editing
+
+WT-PROJ-DETAILS-002 refines Project Details into a read-first page. Users see project information in readable sections by default. Authorised edits for project identity, project description and project responsibility assignments open focused modals with explicit Save and Cancel actions. Read-only users retain full visibility of available information but do not see editable controls.
+
+Project responsibility assignments are shown as cards. Six default empty slots guide setup: Sponsor, Project Manager, Delivery Lead, Product Owner, Assurance Lead and Default Risk Owner. Additional assigned roles appear after those defaults. The Add another team member modal lets permitted users select a real workspace member or active demo persona, choose a controlled project role and add responsibility text.
+
+Removing an assignment marks the project responsibility inactive through the `project_people` status model. It does not delete the real workspace member, demo person, auth user or profile, and it does not grant or revoke workspace permissions. Dates and governance remain read-only follow-up-ready fields with `Not set` values until dedicated schema exists; future work should make those fields editable through the same modal pattern.
 
 ## WT-US-0202B system-generated fixed project references
 
