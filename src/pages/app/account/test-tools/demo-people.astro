@@ -1,0 +1,280 @@
+---
+import AuthenticatedLayout from '../../../../layouts/AuthenticatedLayout.astro';
+import {
+	activateDemoPersonSimulation,
+	getInternalRoleSimulationState,
+	roleLabel,
+	resetRoleSimulation,
+} from '../../../../lib/internalTesting';
+import {
+	DEMO_PERSON_IMPORT_COLUMNS,
+	type DemoPeopleCsvValidation,
+	type DemoPerson,
+	listWorkspaceDemoPeople,
+	parseDemoPeopleCsv,
+	replaceWorkspaceDemoPeople,
+} from '../../../../lib/demoPeople';
+import { buildLoginRedirectPath, createSupabaseServerClient, getServerAccessToken } from '../../../../lib/supabaseServer';
+
+const accessToken = getServerAccessToken(Astro.cookies);
+if (!accessToken) return Astro.redirect(buildLoginRedirectPath(Astro.url.pathname));
+
+const serverSupabase = createSupabaseServerClient(accessToken);
+let state = await getInternalRoleSimulationState(serverSupabase, accessToken);
+let message = '';
+let csvText = '';
+let validation: DemoPeopleCsvValidation | null = null;
+let demoPeople: DemoPerson[] = [];
+
+if (!state.isInternalTester || !state.workspace) {
+	return Astro.redirect('/app/account');
+}
+
+if (Astro.request.method === 'POST') {
+	const formData = await Astro.request.formData();
+	const action = String(formData.get('action') ?? '');
+
+	try {
+		if (action === 'preview') {
+			const csvFile = formData.get('csv_file');
+			if (!(csvFile instanceof File) || csvFile.size === 0) {
+				throw new Error('Choose a CSV file to preview.');
+			}
+			csvText = await csvFile.text();
+			validation = parseDemoPeopleCsv(csvText);
+			message = validation.errors.length > 0
+				? 'CSV preview found validation errors.'
+				: `CSV preview ready: ${validation.rows.length} demo people.`;
+		} else if (action === 'confirm_import') {
+			csvText = String(formData.get('csv_text') ?? '');
+			validation = parseDemoPeopleCsv(csvText);
+			if (validation.errors.length > 0) throw new Error('Resolve CSV validation errors before importing.');
+			const imported = await replaceWorkspaceDemoPeople(serverSupabase, validation.rows, accessToken);
+			message = `Imported ${imported.length} demo people and replaced existing demo people for this workspace.`;
+			csvText = '';
+			validation = null;
+		} else if (action === 'simulate_demo_person') {
+			const demoPersonId = String(formData.get('demo_person_id') ?? '');
+			state = await activateDemoPersonSimulation(serverSupabase, demoPersonId, accessToken);
+			message = state.activeSimulation?.demoPerson
+				? `Testing as ${state.activeSimulation.demoPerson.display_name}.`
+				: 'Persona simulation is active.';
+		} else if (action === 'reset') {
+			state = await resetRoleSimulation(serverSupabase, accessToken);
+			message = 'Testing mode has been reset to real permissions.';
+		} else {
+			throw new Error('Choose a demo people action.');
+		}
+	} catch (error) {
+		message = error instanceof Error ? error.message : 'Unable to update demo people.';
+	}
+}
+
+demoPeople = await listWorkspaceDemoPeople(serverSupabase, accessToken);
+const activeDemoPerson = state.activeSimulation?.demoPerson;
+const activeRole = state.activeSimulation?.simulated_role ?? state.effectiveRole;
+const importColumns = DEMO_PERSON_IMPORT_COLUMNS.join(', ');
+---
+<AuthenticatedLayout title="Demo people | WatchTower">
+	<section class="content-card demo-people-page" data-demo-people-page>
+		<div class="demo-people-page__header">
+			<div>
+				<p class="eyebrow">Internal test tools</p>
+				<h1>Demo people</h1>
+				<p>CSV import and persona simulation for {state.workspace.name}.</p>
+			</div>
+			<a class="button button--secondary" href="/app/account/test-tools">Back to Test tools</a>
+		</div>
+
+		{message && <p class="form-message demo-people-page__message" role="alert">{message}</p>}
+
+		<div class="test-tools-summary" aria-label="Current persona simulation status">
+			<div>
+				<span>Real account role</span>
+				<strong>{roleLabel(state.actualRole)}</strong>
+			</div>
+			<div>
+				<span>Effective role</span>
+				<strong>{roleLabel(activeRole)}</strong>
+			</div>
+			<div>
+				<span>Testing as</span>
+				<strong data-active-demo-person>{activeDemoPerson?.display_name ?? 'Real account'}</strong>
+			</div>
+			<div>
+				<span>Project role</span>
+				<strong>{activeDemoPerson?.project_role || 'Not simulated'}</strong>
+			</div>
+		</div>
+
+		<section class="demo-tool-section" aria-labelledby="csv-import-heading">
+			<div>
+				<h2 id="csv-import-heading">CSV import</h2>
+				<p>Upload a CSV with columns: {importColumns}. Import replaces existing demo people for this workspace only.</p>
+			</div>
+			<form class="auth-card demo-people-form" method="post" enctype="multipart/form-data">
+				<label>
+					CSV file
+					<input type="file" name="csv_file" accept=".csv,text/csv" required />
+				</label>
+				<p class="form-help">Demo people are test personas only. They are not Supabase auth users and do not replace real profiles or workspace memberships.</p>
+				<button class="button button--primary" type="submit" name="action" value="preview">Validate and preview</button>
+			</form>
+		</section>
+
+		{validation && (
+			<section class="demo-tool-section" aria-labelledby="csv-preview-heading" data-demo-people-preview>
+				<div>
+					<h2 id="csv-preview-heading">Import preview</h2>
+					<p>{validation.errors.length > 0 ? 'Resolve these validation errors before importing.' : 'Review the rows before replacing existing demo people.'}</p>
+				</div>
+
+				{validation.errors.length > 0 && (
+					<div class="demo-validation-errors" role="alert">
+						<h3>Validation errors</h3>
+						<ul>
+							{validation.errors.map((error) => (
+								<li>Row {error.rowNumber}{error.field ? `, ${error.field}` : ''}: {error.message}</li>
+							))}
+						</ul>
+					</div>
+				)}
+
+				{validation.rows.length > 0 && (
+					<div class="projects-table-scroll">
+						<table class="simple-table">
+							<thead>
+								<tr><th>Name</th><th>Email</th><th>Notify</th><th>Role</th><th>Project role</th><th>Risk owner</th><th>Risk actioner</th><th>Notes</th></tr>
+							</thead>
+							<tbody>
+								{validation.rows.map((person) => (
+									<tr>
+										<td>{person.display_name}</td>
+										<td>{person.email}</td>
+										<td>{person.notification_email}</td>
+										<td>{roleLabel(person.workspace_role)}</td>
+										<td>{person.project_role || 'Not set'}</td>
+										<td>{person.is_default_risk_owner ? 'Yes' : 'No'}</td>
+										<td>{person.is_default_risk_actioner ? 'Yes' : 'No'}</td>
+										<td>{person.notes || ''}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				)}
+
+				{validation.errors.length === 0 && validation.rows.length > 0 && (
+					<form method="post" class="demo-confirm-form">
+						<input type="hidden" name="csv_text" value={csvText} />
+						<button class="button button--primary" type="submit" name="action" value="confirm_import">Confirm import and replace demo people</button>
+					</form>
+				)}
+			</section>
+		)}
+
+		<section class="demo-tool-section" aria-labelledby="persona-heading">
+			<div>
+				<h2 id="persona-heading">Persona simulation</h2>
+				<p>Select an imported demo person to simulate their effective workspace role. Normal RBAC remains active.</p>
+			</div>
+			{demoPeople.length > 0 ? (
+				<>
+					<form class="auth-card demo-people-form" method="post">
+						<label>
+							Demo person
+							<select name="demo_person_id" required data-demo-person-selector>
+								<option value="">Select demo person</option>
+								{demoPeople.map((person) => (
+									<option value={person.id} selected={person.id === activeDemoPerson?.id}>
+										{person.display_name} - {roleLabel(person.workspace_role)}{person.project_role ? ` / ${person.project_role}` : ''}
+									</option>
+								))}
+							</select>
+						</label>
+						<div class="demo-people-form__actions">
+							<button class="button button--primary" type="submit" name="action" value="simulate_demo_person">Simulate persona</button>
+							<button class="button button--secondary" type="submit" name="action" value="reset">Reset to real account</button>
+						</div>
+					</form>
+					<div class="projects-table-scroll">
+						<table class="simple-table" data-demo-people-list>
+							<thead>
+								<tr><th>Name</th><th>Email</th><th>Notify</th><th>Workspace role</th><th>Project role</th><th>Defaults</th><th>Notes</th></tr>
+							</thead>
+							<tbody>
+								{demoPeople.map((person) => (
+									<tr>
+										<td>{person.display_name}</td>
+										<td>{person.email}</td>
+										<td>{person.notification_email}</td>
+										<td>{roleLabel(person.workspace_role)}</td>
+										<td>{person.project_role || 'Not set'}</td>
+										<td>{[
+											person.is_default_risk_owner ? 'Risk owner' : '',
+											person.is_default_risk_actioner ? 'Risk actioner' : '',
+										].filter(Boolean).join(', ') || 'None'}</td>
+										<td>{person.notes || ''}</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+				</>
+			) : (
+				<p data-demo-people-empty>No demo people imported yet.</p>
+			)}
+		</section>
+	</section>
+</AuthenticatedLayout>
+
+<style>
+	.demo-people-page,
+	.demo-tool-section {
+		display: grid;
+		gap: 1rem;
+	}
+
+	.demo-people-page h1 {
+		font-size: clamp(2.25rem, 5vw, 4rem);
+	}
+
+	.demo-people-page h2 {
+		font-size: clamp(1.6rem, 3vw, 2.4rem);
+	}
+
+	.demo-people-page__header,
+	.demo-people-form__actions {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.demo-people-page__message {
+		min-height: auto;
+	}
+
+	.demo-validation-errors {
+		border: 1px solid rgba(255, 122, 122, 0.44);
+		border-radius: 0.5rem;
+		padding: 1rem;
+		background: rgba(91, 20, 20, 0.54);
+	}
+
+	.demo-validation-errors h3 {
+		font-size: 1.1rem;
+	}
+
+	.demo-confirm-form {
+		display: flex;
+	}
+
+	@media (max-width: 720px) {
+		.demo-people-page__header,
+		.demo-people-form__actions,
+		.demo-confirm-form {
+			display: grid;
+		}
+	}
+</style>

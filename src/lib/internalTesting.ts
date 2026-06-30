@@ -14,10 +14,18 @@ export type RoleSimulation = {
 	user_id: string;
 	organisation_id: string;
 	simulated_role: WorkspaceRole;
+	demo_person_id?: string | null;
 	is_active: boolean;
 	expires_at: string;
 	created_at?: string;
 	updated_at?: string;
+	demoPerson?: {
+		id: string;
+		display_name: string;
+		workspace_role: WorkspaceRole;
+		project_role?: string | null;
+		notification_email?: string | null;
+	} | null;
 };
 
 export type RoleSimulationState = {
@@ -84,7 +92,7 @@ export async function getActiveRoleSimulation(
 ): Promise<RoleSimulation | null> {
 	const { data, error } = await client
 		.from('internal_role_simulations')
-		.select('id, user_id, organisation_id, simulated_role, is_active, expires_at, created_at, updated_at')
+		.select('id, user_id, organisation_id, simulated_role, demo_person_id, is_active, expires_at, created_at, updated_at, workspace_demo_people(id, display_name, workspace_role, project_role, notification_email)')
 		.eq('user_id', userId)
 		.eq('organisation_id', organisationId)
 		.eq('is_active', true)
@@ -95,7 +103,18 @@ export async function getActiveRoleSimulation(
 
 	if (error) throw error;
 	if (!data || data.is_active !== true || !isWorkspaceRole(data.simulated_role) || isRoleSimulationExpired(data, now)) return null;
-	return data as RoleSimulation;
+	const demoPerson = Array.isArray(data.workspace_demo_people)
+		? data.workspace_demo_people[0]
+		: data.workspace_demo_people;
+	if (data.demo_person_id && (!demoPerson || !isWorkspaceRole(demoPerson.workspace_role))) return null;
+	const simulatedRole = demoPerson && isWorkspaceRole(demoPerson.workspace_role)
+		? demoPerson.workspace_role
+		: data.simulated_role;
+	return {
+		...data,
+		simulated_role: simulatedRole,
+		demoPerson: demoPerson && isWorkspaceRole(demoPerson.workspace_role) ? demoPerson : null,
+	} as RoleSimulation;
 }
 
 export async function applyRoleSimulationToMembership<T extends MembershipWithOrganisation>(
@@ -194,6 +213,51 @@ export async function activateRoleSimulation(client, simulatedRole: WorkspaceRol
 			user_id: user.id,
 			organisation_id: state.workspace?.id,
 			simulated_role: simulatedRole,
+			is_active: true,
+			expires_at: expiresAt,
+		});
+
+	if (error) throw error;
+	return getInternalRoleSimulationState(client, accessToken);
+}
+
+export async function activateDemoPersonSimulation(client, demoPersonId: string, accessToken?: string): Promise<RoleSimulationState> {
+	if (!demoPersonId.trim()) throw new Error('Select a demo person to simulate.');
+	const { user, state } = await requireInternalRoleSimulationScope(client, accessToken);
+
+	const { data: demoPerson, error: demoPersonError } = await client
+		.from('workspace_demo_people')
+		.select('id, organisation_id, display_name, workspace_role, status, is_demo_person')
+		.eq('id', demoPersonId)
+		.eq('organisation_id', state.workspace?.id)
+		.eq('status', 'active')
+		.eq('is_demo_person', true)
+		.maybeSingle();
+
+	if (demoPersonError) throw demoPersonError;
+	if (!demoPerson || !isWorkspaceRole(demoPerson.workspace_role)) {
+		throw new Error('Select an active demo person from this workspace.');
+	}
+	if (demoPerson.workspace_role === 'owner') {
+		throw new Error('Owner demo personas are blocked for MVP safety.');
+	}
+
+	const expiresAt = new Date(Date.now() + ROLE_SIMULATION_TTL_HOURS * 60 * 60 * 1000).toISOString();
+	const { error: deactivateError } = await client
+		.from('internal_role_simulations')
+		.update({ is_active: false })
+		.eq('user_id', user.id)
+		.eq('organisation_id', state.workspace?.id)
+		.eq('is_active', true);
+	if (deactivateError) throw deactivateError;
+
+	const { error } = await client
+		.from('internal_role_simulations')
+		.insert({
+			user_id: user.id,
+			organisation_id: state.workspace?.id,
+			simulated_role: demoPerson.workspace_role,
+			demo_person_id: demoPerson.id,
 			is_active: true,
 			expires_at: expiresAt,
 		});

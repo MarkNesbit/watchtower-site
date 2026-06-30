@@ -35,6 +35,8 @@ Workspace access is derived from active organisation membership and the fixed MV
 
 WT-TEST-001 adds Account -> Test tools for the authorised Mark.Nesbit.Professional internal tester only. The tool can simulate Viewer, Member, Admin or Owner in the `mark-nesbit-professional-workspace` production test workspace for smoke-testing and permission validation. It stores short-lived simulation state, expires after 4 hours, changes effective permissions only, preserves the real `organisation_members.role`, and shows a persistent testing-mode banner while active. It is not impersonation, not customer-facing permission management, and not a global admin tool.
 
+WT-TEST-002 adds internal CSV demo people import and persona simulation under Account -> Test tools. Demo people are workspace-scoped test personas, not Supabase Auth users, invitations, customer records or real profiles. Imports replace only demo people for the scoped Mark.Nesbit.Professional workspace and include `notification_email` for future test notification routing. Selecting a demo person simulates that persona's effective workspace role while preserving the real authenticated Mark account for audit/debug context; normal RBAC remains enforceable.
+
 ## Feature availability and preview access
 
 Global product features move through `hidden`, `disabled`, `preview` and `enabled` states. Missing or malformed configuration fails closed as hidden. Approved preview accounts can enter `preview` features, but remain subject to authentication, active workspace membership, fixed-role permissions and Row Level Security. See `docs/feature-flags.md` for keys, integration rules, release transitions and UAT validation.

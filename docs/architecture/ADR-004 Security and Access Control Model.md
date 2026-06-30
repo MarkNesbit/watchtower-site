@@ -236,6 +236,10 @@ Simulation state is stored in `internal_role_simulations`, is scoped to the `mar
 
 This is not impersonation, not a global administrator capability, not customer-facing permission management, and not an expansion of the MVP permission model.
 
+WT-TEST-002 extends the same internal boundary with `workspace_demo_people`, a scoped demo-persona table used for CSV import and persona simulation. Demo people are test data only: they are not Supabase Auth users, not invitations, not customer records and not replacements for real profiles. Persona simulation may use a demo person's workspace role as the effective role for normal RBAC checks while preserving the real authenticated Mark/internal tester account for audit/debug context.
+
+The Mark internal tester has broad pre-external-user test-administration capability only inside these explicit internal tools. That temporary authority must be reviewed before external users or customer workspaces are onboarded and must not silently override simulated persona permissions during normal browsing.
+
 ---
 
 # Row Level Security (RLS)

@@ -85,6 +85,17 @@ const expiryText = state.activeSimulation?.expires_at
 			</div>
 		</div>
 
+		<section class="test-tools-links" aria-labelledby="test-tools-links-heading">
+			<h2 id="test-tools-links-heading">Internal tools</h2>
+			<a class="test-tools-links__item" href="/app/account/test-tools/demo-people" data-demo-people-tool-link>
+				<span>
+					<strong>Demo people</strong>
+					<small>Import workspace personas and simulate team access profiles.</small>
+				</span>
+				<span class="text-link">Open</span>
+			</a>
+		</section>
+
 		<form class="auth-card test-tools-form" method="post">
 			<fieldset>
 				<legend>Testing mode</legend>
@@ -136,6 +147,38 @@ const expiryText = state.activeSimulation?.expires_at
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
 		gap: 0.75rem;
+	}
+
+	.test-tools-links {
+		display: grid;
+		gap: 0.75rem;
+		max-width: 44rem;
+	}
+
+	.test-tools-links h2 {
+		font-size: clamp(1.4rem, 3vw, 2rem);
+	}
+
+	.test-tools-links__item {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		border: 1px solid var(--border);
+		border-radius: 0.5rem;
+		padding: 1rem;
+		background: rgba(18, 31, 42, 0.72);
+		text-decoration: none;
+	}
+
+	.test-tools-links__item span:first-child {
+		display: grid;
+		gap: 0.15rem;
+	}
+
+	.test-tools-links__item small {
+		color: var(--muted);
+		font-weight: 700;
 	}
 
 	.test-tools-summary > div {

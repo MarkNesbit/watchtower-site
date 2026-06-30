@@ -28,6 +28,8 @@ WT-DASH-RISK-001 adds an icon-only assurance signal to the project dashboard Ris
 
 WT-TEST-001 adds `/app/account` and the restricted `/app/account/test-tools` route for the authorised Mark.Nesbit.Professional internal tester. Test tools can simulate Viewer, Member, Admin and Owner effective permissions in the `mark-nesbit-professional-workspace` workspace only. Simulation state is database-backed, expires after 4 hours, does not change `organisation_members.role`, displays a persistent authenticated-app banner while active, and is not customer-facing permission management, impersonation or a global admin feature.
 
+WT-TEST-002 extends the restricted Test tools area with `/app/account/test-tools/demo-people` for CSV demo people import and persona simulation. Demo people are workspace-scoped test personas with notification routing metadata; they are not Supabase auth users and do not replace real profiles or workspace memberships. Persona simulation uses the selected demo person's effective workspace role for normal RBAC testing and continues to distinguish the real authenticated Mark account from the simulated persona.
+
 Authenticated project pages should follow the reusable layout, action, empty-state and restricted-action guidance in `docs/ui-page-design-standard.md`.
 
 ## Development
@@ -42,7 +44,7 @@ npm run build
 
 This repository includes a Supabase CLI configuration at `supabase/config.toml`, migrations for the current profile/workspace/project/risk/Project Narrative foundation, public environment-variable documentation and lightweight Supabase client modules. The Project Narrative migrations include structured manual entries and entry links while preserving Risk, Issue, Dependency, and Assumption records as their own future authoritative modules. The authentication foundation uses Supabase Auth, creates application profile/workspace records through migrations and preserves Row Level Security as the database access boundary.
 
-Stateful product feature flags and account-level preview access are documented in `docs/feature-flags.md`. Preview access is stored on the profile and requires no additional environment variable; it does not replace workspace membership or RBAC. Internal role simulation is documented in `docs/access-foundation.md` and is limited to the authorised Mark.Nesbit.Professional production test workspace/profile.
+Stateful product feature flags and account-level preview access are documented in `docs/feature-flags.md`. Preview access is stored on the profile and requires no additional environment variable; it does not replace workspace membership or RBAC. Internal role and persona simulation is documented in `docs/access-foundation.md` and is limited to the authorised Mark.Nesbit.Professional production test workspace/profile.
 
 ### Local environment variables
 

@@ -312,6 +312,7 @@ This table changes effective permission resolution only. It must not update or r
 | `user_id`         | `uuid`        |       No | None                | `auth.users.id`    | Authorised internal tester running the simulation.                                |
 | `organisation_id` | `uuid`        |       No | None                | `organisations.id` | Scoped Mark.Nesbit.Professional test workspace.                                   |
 | `simulated_role`  | `text`        |       No | None                | None               | Effective role to simulate: `owner`, `admin`, `member`, or `viewer`.              |
+| `demo_person_id`  | `uuid`        |      Yes | `null`              | `workspace_demo_people.id` | Optional WT-TEST-002 demo persona driving the effective role.              |
 | `is_active`       | `boolean`     |       No | `true`              | None               | Whether the simulation can still be considered active before expiry checks.        |
 | `expires_at`      | `timestamptz` |       No | None                | None               | Automatic expiry timestamp, capped to 4 hours from creation by RLS insert policy. |
 | `created_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the simulation was created.                                        |
@@ -322,6 +323,42 @@ This table changes effective permission resolution only. It must not update or r
 Only one active simulation should exist per user/workspace. RLS limits create/reset access to the authenticated user whose profile is marked `is_internal_tester = true`, who is an active member of the scoped `mark-nesbit-professional-workspace` workspace, and whose simulation expires within 4 hours. Expired or inactive rows are ignored by effective-role resolution.
 
 This is not customer-facing permission management, not impersonation and not a global admin model.
+
+---
+
+# Table: `workspace_demo_people`
+
+## Purpose
+
+Stores WT-TEST-002 workspace-scoped demo people/personas for internal testing in the Mark.Nesbit.Professional production test workspace.
+
+Demo people are not Supabase Auth users, invitations or real profile records. They provide team-modelling metadata for internal RBAC, ownership/actioner and future notification-routing tests.
+
+## Fields
+
+| Field                      | Type          | Nullable | Default             | Foreign Key        | Description                                                                  |
+| -------------------------- | ------------- | -------: | ------------------- | ------------------ | ---------------------------------------------------------------------------- |
+| `id`                       | `uuid`        |       No | `gen_random_uuid()` | None               | Primary key for the demo person.                                             |
+| `organisation_id`          | `uuid`        |       No | None                | `organisations.id` | Scoped Mark.Nesbit.Professional test workspace.                              |
+| `display_name`             | `text`        |       No | None                | None               | Demo person's display name.                                                  |
+| `email`                    | `text`        |       No | None                | None               | Demo persona email identity. Not an auth account.                             |
+| `notification_email`       | `text`        |       No | None                | None               | Future test notification routing address.                                     |
+| `workspace_role`           | `text`        |       No | None                | None               | Demo effective role: `admin`, `member`, or `viewer`; owner personas blocked. |
+| `project_role`             | `text`        |      Yes | `null`              | None               | Optional persona/project responsibility label.                                |
+| `is_default_risk_owner`    | `boolean`     |       No | `false`             | None               | Test metadata for future risk ownership defaults.                             |
+| `is_default_risk_actioner` | `boolean`     |       No | `false`             | None               | Test metadata for future risk action responsibility defaults.                 |
+| `notes`                    | `text`        |      Yes | `null`              | None               | Internal tester notes.                                                       |
+| `status`                   | `text`        |       No | `active`            | None               | `active` or `removed`.                                                       |
+| `is_demo_person`           | `boolean`     |       No | `true`              | None               | Enforced demo/test data marker.                                               |
+| `linked_profile_id`        | `uuid`        |      Yes | `null`              | `profiles.id`      | Future optional link to a real profile; CSV import keeps this null.          |
+| `created_by`               | `uuid`        |      Yes | `auth.uid()`        | `auth.users.id`    | Authenticated internal tester who created the row.                            |
+| `updated_by`               | `uuid`        |      Yes | `auth.uid()`        | `auth.users.id`    | Last authenticated internal tester to update the row.                         |
+| `created_at`               | `timestamptz` |       No | `now()`             | None               | Timestamp when the row was created.                                          |
+| `updated_at`               | `timestamptz` |       No | `now()`             | None               | Timestamp when the row was last updated.                                     |
+
+## Notes
+
+CSV import replaces demo people for the scoped workspace only. It must not insert into `auth.users`, must not replace real `profiles`, and must not alter `organisation_members`. Persona simulation may reference one active demo person from this table; the real authenticated user remains the Mark/internal tester while the demo person's workspace role drives effective RBAC.
 
 ---
 
