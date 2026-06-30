@@ -9,6 +9,7 @@ type Props = {
 const { state, returnTo = '/app' } = Astro.props;
 const simulation = state?.activeSimulation;
 const simulatedRole = simulation?.simulated_role;
+const demoPerson = simulation?.demoPerson;
 const expiresAt = simulation?.expires_at
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(simulation.expires_at))
 	: '';
@@ -17,7 +18,11 @@ const expiresAt = simulation?.expires_at
 	<aside class="testing-mode-banner" data-testing-mode-banner role="status">
 		<div>
 			<strong>Testing mode active:</strong>
-			<span>viewing {state.workspace?.name ?? 'this workspace'} as {roleLabel(simulatedRole)}.</span>
+			{demoPerson ? (
+				<span>Testing as {demoPerson.display_name} - {roleLabel(simulatedRole)}{demoPerson.project_role ? ` / ${demoPerson.project_role}` : ''}.</span>
+			) : (
+				<span>viewing {state.workspace?.name ?? 'this workspace'} as {roleLabel(simulatedRole)}.</span>
+			)}
 			{expiresAt && <span class="testing-mode-banner__expiry">Expires {expiresAt} UTC.</span>}
 		</div>
 		<form method="post" action="/app/account/test-tools">
