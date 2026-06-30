@@ -1,5 +1,6 @@
 import { assertCan } from './permissions.ts';
 import {
+	buildProjectDetailsPath,
 	buildProjectEditPath,
 	buildProjectNarrativePath,
 	buildProjectNewRiskPath,
@@ -27,6 +28,7 @@ export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'c
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 
 export {
+	buildProjectDetailsPath,
 	buildProjectEditPath,
 	buildProjectNarrativePath,
 	buildProjectNewRiskPath,
