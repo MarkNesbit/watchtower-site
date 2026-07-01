@@ -355,13 +355,17 @@ const {
 		justify-content: center;
 		border-radius: 999px;
 		font-weight: 850;
+		line-height: 1.1;
 		text-decoration: none;
-		transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+		transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease;
 	}
 
 	.button {
+		border: 1px solid transparent;
+		appearance: none;
 		min-height: 3.15rem;
 		padding: 0.9rem 1.2rem;
+		font: inherit;
 		cursor: pointer;
 	}
 
@@ -371,58 +375,81 @@ const {
 	}
 
 	.button:focus-visible {
-		outline: 3px solid var(--accent-strong);
+		outline: 3px solid #7cc7f4;
 		outline-offset: 3px;
 	}
 
 	.button:disabled,
 	.button[aria-disabled='true'] {
 		cursor: not-allowed;
-		opacity: 0.68;
+		opacity: 1;
 		transform: none;
 	}
 
 	.button--primary {
+		border-color: rgba(57, 194, 255, 0.58);
 		background: var(--accent);
 		box-shadow: 0 14px 34px rgba(0, 160, 255, 0.24);
 		color: #00111e;
 	}
 
+	.button--primary:hover,
+	.button--primary:focus-visible {
+		border-color: rgba(124, 199, 244, 0.86);
+		background: #39c2ff;
+		color: #00111e;
+		box-shadow: 0 16px 38px rgba(0, 160, 255, 0.32);
+	}
+
 	.button--primary:disabled,
 	.button--primary[aria-disabled='true'] {
+		border-color: rgba(164, 189, 204, 0.28);
 		background: #315064;
 		box-shadow: none;
 		color: #e4eef5;
 	}
 
 	.button--secondary {
-		border: 1px solid rgba(215, 226, 234, 0.24);
-		color: var(--text);
+		border-color: rgba(215, 226, 234, 0.38);
+		background: #07111d;
+		color: #f4f8fb;
+		box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+	}
+
+	.button--secondary:hover,
+	.button--secondary:focus-visible {
+		border-color: rgba(124, 199, 244, 0.68);
+		background: #102033;
+		color: #ffffff;
 	}
 
 	.button--secondary:disabled,
 	.button--secondary[aria-disabled='true'] {
 		border-color: rgba(215, 226, 234, 0.16);
-		background: rgba(215, 226, 234, 0.08);
+		background: #263744;
+		box-shadow: none;
 		color: #c8d6df;
 	}
 
 	.button--destructive {
-		border: 1px solid rgba(255, 129, 122, 0.42);
-		background: rgba(255, 69, 58, 0.13);
-		color: #ffd7d3;
+		border-color: rgba(255, 129, 122, 0.7);
+		background: #5c1612;
+		color: #fff1ef;
+		box-shadow: 0 10px 24px rgba(92, 22, 18, 0.22);
 	}
 
 	.button--destructive:hover,
 	.button--destructive:focus-visible {
-		border-color: rgba(255, 129, 122, 0.68);
-		background: rgba(255, 69, 58, 0.2);
+		border-color: rgba(255, 171, 166, 0.86);
+		background: #7a211c;
+		color: #ffffff;
 	}
 
 	.button--destructive:disabled,
 	.button--destructive[aria-disabled='true'] {
 		border-color: rgba(255, 129, 122, 0.2);
-		background: rgba(255, 69, 58, 0.08);
+		background: #432927;
+		box-shadow: none;
 		color: #e9c5c1;
 	}
 
