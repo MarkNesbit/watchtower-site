@@ -397,7 +397,7 @@ const governanceFields = [
 										<p>{formatValue(assignment?.responsibility, projectPeopleRoleLabel(role))}</p>
 									</div>
 									{canEditProject && (
-										<button class="project-person-card__button" type="button" data-project-dialog-open={`project-person-dialog-${role}`} aria-label={`${assignment ? 'Edit' : 'Assign'} ${projectPeopleRoleLabel(role)}`}>
+										<button class="button button--secondary project-person-card__button" type="button" data-project-dialog-open={`project-person-dialog-${role}`} aria-label={`${assignment ? 'Edit' : 'Assign'} ${projectPeopleRoleLabel(role)}`}>
 											{assignment ? 'Edit assignment' : 'Assign person'}
 										</button>
 									)}
@@ -409,7 +409,7 @@ const governanceFields = [
 													<p>{projectPeopleRoleLabel(role)}</p>
 												</div>
 												<form method="dialog">
-													<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+													<button class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close">Close</button>
 												</form>
 											</div>
 											<form class="project-details-modal-form" method="post" data-project-assignment-modal>
@@ -477,7 +477,7 @@ const governanceFields = [
 									<p>Only project name and status are editable here.</p>
 								</div>
 								<form method="dialog">
-									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+									<button class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close">Close</button>
 								</form>
 							</div>
 							<form class="project-details-modal-form" method="post" data-project-identity-modal>
@@ -513,7 +513,7 @@ const governanceFields = [
 									<p>Use current project schema fields only.</p>
 								</div>
 								<form method="dialog">
-									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+									<button class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close">Close</button>
 								</form>
 							</div>
 							<form class="project-details-modal-form" method="post" data-project-description-modal>
@@ -538,7 +538,7 @@ const governanceFields = [
 									<p>These fields support project setup and future assurance.</p>
 								</div>
 								<form method="dialog">
-									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+									<button class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close">Close</button>
 								</form>
 							</div>
 							<form class="project-details-modal-form" method="post" data-project-context-modal>
@@ -585,7 +585,7 @@ const governanceFields = [
 									<p>These fields support review planning. RAID items remain managed in their own modules.</p>
 								</div>
 								<form method="dialog">
-									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+									<button class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close">Close</button>
 								</form>
 							</div>
 							<form class="project-details-modal-form" method="post" data-project-governance-modal>
@@ -631,7 +631,7 @@ const governanceFields = [
 									<p>Select a project role and assign a real member or active demo persona.</p>
 								</div>
 								<form method="dialog">
-									<button class="project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+									<button class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close">Close</button>
 								</form>
 							</div>
 							<form class="project-details-modal-form" method="post" data-add-team-member-modal>
@@ -797,20 +797,9 @@ const governanceFields = [
 	}
 
 	.project-person-card__button {
-		border: 1px solid rgba(215, 226, 234, 0.24);
-		border-radius: 999px;
+		width: fit-content;
+		min-height: 2.65rem;
 		padding: 0.65rem 0.85rem;
-		background: rgba(255, 255, 255, 0.04);
-		color: var(--text);
-		font: inherit;
-		font-weight: 850;
-		cursor: pointer;
-	}
-
-	.project-person-card__button:hover,
-	.project-person-card__button:focus-visible {
-		border-color: rgba(0, 160, 255, 0.5);
-		outline: none;
 	}
 
 	.demo-person-badge {
@@ -861,14 +850,8 @@ const governanceFields = [
 	}
 
 	.project-details-dialog__close {
-		border: 1px solid rgba(215, 226, 234, 0.24);
-		border-radius: 999px;
+		min-height: 2.45rem;
 		padding: 0.45rem 0.7rem;
-		background: rgba(255, 255, 255, 0.04);
-		color: var(--text);
-		font: inherit;
-		font-weight: 850;
-		cursor: pointer;
 	}
 
 	.project-details-modal-form {

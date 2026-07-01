@@ -94,6 +94,16 @@ Examples:
 
 Secondary actions should not compete visually with the primary page-level action.
 
+## Authenticated Button Styling
+
+Use the shared `.button` variants for authenticated page and modal actions:
+
+- `.button--primary` for the main positive action such as Save, Add, Create, Update or Confirm.
+- `.button--secondary` for Cancel, Close, Back and other supporting actions.
+- `.button--destructive` for Remove, Delete, Archive or other destructive actions.
+
+Button variants must carry their own readable background, text, hover, focus and disabled states. Do not create white-filled or pale-filled buttons with white or low-contrast text, and do not rely on the surrounding panel colour to make a button readable.
+
 ## Empty State Pattern
 
 Use `EmptyState` for no-record states and recoverable content-load failures.

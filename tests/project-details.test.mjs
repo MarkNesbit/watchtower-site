@@ -200,6 +200,8 @@ test('Project Details roles use default slots, assignment modals, removal and ad
 	assert.match(source, /Save assignment/);
 	assert.match(source, /Remove assignment/);
 	assert.match(source, /value="remove-project-person"/);
+	assert.match(source, /class="button button--destructive" type="submit" name="intent" value="remove-project-person"/);
+	assert.match(source, /class="button button--secondary project-person-card__button"/);
 	assert.match(source, /Add another team member/);
 	assert.match(source, /id="project-add-person-dialog"/);
 	assert.match(source, /name="project_role"/);
@@ -207,6 +209,18 @@ test('Project Details roles use default slots, assignment modals, removal and ad
 	assert.match(source, /Workspace members/);
 	assert.match(source, /Demo personas/);
 	assert.match(source, /showModal\(\)/);
+});
+
+test('Project Details modal actions use the shared authenticated button variants', async () => {
+	const source = await readFile(detailsPageUrl, 'utf8');
+	assert.match(source, /class="button button--secondary project-details-edit-action" type="button" data-project-dialog-open="project-identity-dialog"/);
+	assert.match(source, /class="button button--secondary project-details-edit-action" type="button" data-project-dialog-open="project-governance-dialog"/);
+	assert.match(source, /class="button button--primary project-details-edit-action" type="button" data-project-dialog-open="project-add-person-dialog"/);
+	assert.match(source, /class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close"/);
+	assert.match(source, /class="button button--secondary" type="button" data-project-dialog-cancel>Cancel<\/button>/);
+	assert.match(source, /class="button button--primary" type="submit">Save dates and governance<\/button>/);
+	assert.doesNotMatch(source, /class="project-details-dialog__close"/);
+	assert.doesNotMatch(source, /class="project-person-card__button"/);
 });
 
 test('Project Details route helper is exported through project libraries', async () => {
@@ -219,11 +233,29 @@ test('Project Details route helper is exported through project libraries', async
 
 test('Shared button styles keep modal action and disabled button contrast readable', async () => {
 	const source = await readFile(new URL('../src/layouts/SiteLayout.astro', import.meta.url), 'utf8');
+	assert.match(source, /\.button:focus-visible/);
 	assert.match(source, /\.button--primary:disabled/);
 	assert.match(source, /background: #315064/);
 	assert.match(source, /color: #e4eef5/);
+	assert.match(source, /\.button--secondary \{/);
+	assert.match(source, /background: #07111d/);
+	assert.match(source, /color: #f4f8fb/);
+	assert.match(source, /\.button--secondary:hover/);
 	assert.match(source, /\.button--secondary:disabled/);
+	assert.match(source, /background: #263744/);
 	assert.match(source, /color: #c8d6df/);
 	assert.match(source, /\.button--destructive/);
-	assert.match(source, /color: #ffd7d3/);
+	assert.match(source, /background: #5c1612/);
+	assert.match(source, /color: #fff1ef/);
+	assert.match(source, /\.button--destructive:disabled/);
+	assert.match(source, /background: #432927/);
+});
+
+test('Authenticated button standard is documented for future project pages', async () => {
+	const source = await readFile(new URL('../docs/ui-page-design-standard.md', import.meta.url), 'utf8');
+	assert.match(source, /## Authenticated Button Styling/);
+	assert.match(source, /\.button--primary/);
+	assert.match(source, /\.button--secondary/);
+	assert.match(source, /\.button--destructive/);
+	assert.match(source, /Do not create white-filled or pale-filled buttons with white or low-contrast text/);
 });
