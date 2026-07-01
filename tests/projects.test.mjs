@@ -20,6 +20,16 @@ const projectPolicyFixMigrationPath = new URL(
 	import.meta.url,
 );
 
+function escapeRegExp(value) {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function projectAreasSource(source) {
+	const start = source.indexOf('title="Project areas"');
+	const end = source.indexOf('label="Read-only metadata"', start);
+	return source.slice(start, end);
+}
+
 test('Project slug generation creates URL-safe slugs', () => {
 	assert.equal(slugifyProjectName(' Watchtower Test Project '), 'watchtower-test-project');
 	assert.equal(slugifyProjectName('München / Delivery!'), 'munchen-delivery');
@@ -193,7 +203,7 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	const risksIndex = detailSource.indexOf("title: 'Risks'");
 
 	assert.notEqual(narrativeIndex, -1);
-	assert.match(detailSource, /line: 'View key project events, updates, decisions and history\.'/);
+	assert.match(detailSource, /title: 'Project Details'[\s\S]*?ariaLabel: 'Open Project Details'[\s\S]*?destination: 'details'/);
 	assert.match(detailSource, /title: 'Project Narrative'[\s\S]*?destination: 'narrative',[\s\S]*?featureKey: 'projectDiary'/);
 	assert.ok(narrativeIndex < timelineIndex);
 	assert.ok(timelineIndex < risksIndex);
@@ -201,17 +211,30 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	assert.match(detailSource, /buildProjectNarrativePath\(workspaceSlug \?\? '', project\.slug\)/);
 });
 
-test('Project dashboard tiles show static helper text without rollover-only behaviour', async () => {
+test('Project dashboard areas tiles render icon and title only with equal square sizing', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+	const areasSource = projectAreasSource(detailSource);
+	const removedCopy = [
+		'View setup, context, roles and responsibilities.',
+		'View key project events, updates, decisions and history.',
+		'Not assessed',
+		'Open risk management',
+		'No data yet',
+	];
 
-	assert.match(detailSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?aria-disabled="true"[\s\S]*?aria-describedby={[\s\S]*?tabindex="0"/);
-	assert.match(detailSource, /<small id={`dashboard-tile-help-\$\{index\}`}>/);
-	assert.match(detailSource, /\.dashboard-tile small \{\s*color: var\(--muted-strong\);/);
-	assert.doesNotMatch(detailSource, /\.dashboard-tile small \{\s*display: none;/);
-	assert.doesNotMatch(detailSource, /\.dashboard-tile:hover small,[\s\S]*?\.dashboard-tile:focus-visible small,[\s\S]*?\.dashboard-tile:focus-within small \{/);
+	assert.match(areasSource, /<span class="dashboard-tile__icon" aria-hidden="true">\{tile\.icon\}<\/span>/);
+	assert.match(areasSource, /<strong>\{tile\.title\}<\/strong>/);
+	assert.match(areasSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?aria-disabled="true"[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable`\}[\s\S]*?tabindex="0"/);
+	assert.match(areasSource, /<a[\s\S]*?class={`dashboard-tile[\s\S]*?href=\{tile\.href\}[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `Open \$\{tile\.title\}`\}/);
+	assert.doesNotMatch(areasSource, /<small|tile\.line|aria-describedby=\{`dashboard-tile-help-/);
+	for (const copy of removedCopy) {
+		assert.doesNotMatch(areasSource, new RegExp(escapeRegExp(copy)));
+	}
+	assert.match(detailSource, /\.dashboard-tile-grid \{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(9\.5rem, 10\.75rem\)\);[\s\S]*?justify-content: center;/);
+	assert.match(detailSource, /\.dashboard-tile \{[\s\S]*?aspect-ratio: 1;/);
+	assert.match(detailSource, /\.dashboard-tile strong \{[\s\S]*?min-height: 2\.8rem;[\s\S]*?line-height: 1\.18;/);
 	assert.doesNotMatch(detailSource, /\.dashboard-tile--unavailable\s*\{[^}]*opacity:/);
 	assert.doesNotMatch(detailSource, /\.dashboard-tile--unavailable:hover/);
-	assert.match(detailSource, /<a[\s\S]*?class={`dashboard-tile[\s\S]*?href=\{tile\.href\}/);
 });
 
 test('Project dashboard Risk tile uses icon-only assurance state', async () => {
@@ -223,8 +246,8 @@ test('Project dashboard Risk tile uses icon-only assurance state', async () => {
 	assert.match(detailSource, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
 	assert.match(detailSource, /deriveProjectRiskDashboardAssuranceTone\(risks, new Date\(\)\)/);
 	assert.match(detailSource, /riskDashboardIconLabel\(riskDashboardIconTone\)/);
-	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? tile\.title\}/);
-	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\}: \$\{tile\.line\}`\}/);
+	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable`\}/);
+	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `Open \$\{tile\.title\}`\}/);
 	assert.match(detailSource, /data-risk-icon-state=\{tile\.destination === 'risks' \? tile\.iconTone : undefined\}/);
 	assert.match(detailSource, /dashboard-tile--icon-\$\{tile\.iconTone \?\? 'default'\}/);
 	assert.match(detailSource, /\.dashboard-tile__icon \{[\s\S]*?color: var\(--tile-icon-status, var\(--tile-status\)\)/);
