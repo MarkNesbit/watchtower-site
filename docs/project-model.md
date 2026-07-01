@@ -1,8 +1,8 @@
 # Watchtower Project Model
 
-**Status:** Product working reference through WT-PROJ-INFO-001
+**Status:** Product working reference through WT-PROJ-DATES-001
 
-**Last updated:** 30 June 2026
+**Last updated:** 1 July 2026
 
 **Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/ui-page-design-standard.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`, `supabase/migrations/20260625000100_project_narrative_entry_links.sql`
 
@@ -220,6 +220,22 @@ WT-PROJ-INFO-001 adds the first controlled project setup fields to the existing 
 Project context fields are `project_type`, `delivery_method`, `priority` and `criticality`. Date and governance fields are `start_date`, `target_end_date`, `next_review_date`, `review_cadence`, `governance_route` and `escalation_route`. Empty values display as `Not set`. Controlled values are constrained in both application validation and database checks, and free-text governance/escalation routes are trimmed and limited to 500 characters.
 
 The date rules are intentionally simple: start date, target end date and next review date are optional, but target end date cannot be before start date when both are populated. These fields support project setup and future assurance; they do not create or edit Risks, Issues, Dependencies, Assumptions, Actions, Decisions or Project Narrative entries. Project reference, slug, workspace, internal ID, health and audit fields remain read-only on Project Details.
+
+## WT-PROJ-DATES-001 project dates and timeline readiness
+
+WT-PROJ-DATES-001 moves project milestones toward structured `project_dates` records. The Details page now presents Project dates as status cards rather than generic form fields, with default cards for Start date, Target end date and Review date. Additional dates can be added from a controlled list of seven date types: `start_date`, `target_end_date`, `review_date`, `uat`, `stage_gate`, `load_test` and `other`. When `other` is selected, `custom_label` is required.
+
+Date status is derived in application code, not stored permanently. The default warning period is 14 days: missing dates are Amber, overdue dates are Red, dates due today or within 14 days are Amber, and dates more than 14 days away are Green. A configurable warning period remains future scope, although each record stores `warning_days` so the future Timeline and assurance views can consume the value.
+
+`project_date_comments` stores context for one project date at a time. Comments preserve author and timestamp and do not change the date. Removing a project date uses `removed_at` soft removal, so comments are not unexpectedly deleted by normal deactivation.
+
+Governance route and escalation route remain project-level text fields on `projects`, with default contextual guidance shown when no saved text exists. Review cadence also remains on the project record. Project dates are intended to auto-populate the future Project Timeline capability; each active record carries workspace, project, type, display label, target date, warning window, audit fields and removal state.
+
+For compatibility with WT-PROJ-INFO-001, the three legacy project date columns (`start_date`, `target_end_date`, `next_review_date`) are still selected and displayed as fallback values for default cards. Saving a structured default date mirrors the value back to the matching legacy column. A later consolidation should remove long-term duplication once all consumers read from `project_dates`.
+
+Date edit authority is deliberately narrower than broad project detail editing. Owners and admins can maintain dates. Project Manager, Delivery Lead/Delivery Manager and Product Owner assignments can maintain dates where safely resolved from `project_people`. This assignment-based authority does not grant general project edit permission. Viewers, including simulated Viewer personas, remain unable to mutate project dates. The current database RLS remains workspace-writer oriented, so a future hardening task should add a dedicated database function for assignment-aware date mutation checks.
+
+Project dates do not replace Risks, Issues, Dependencies, Assumptions, Actions, Decisions or Project Narrative. They are setup and timeline records only.
 
 ## WT-US-0202B system-generated fixed project references
 

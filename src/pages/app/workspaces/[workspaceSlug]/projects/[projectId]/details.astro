@@ -6,6 +6,16 @@ import ProjectControlPanel from '../../../../../../components/app/ProjectControl
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
 import {
+	PROJECT_DATE_TYPES,
+	buildProjectDateCards,
+	canChangeProjectDates,
+	canCommentOnProjectDates,
+	createProjectDateComment,
+	listProjectDates,
+	projectDateTypeLabel,
+	saveProjectDate,
+} from '../../../../../../lib/projectDates';
+import {
 	PROJECT_PEOPLE_ROLES,
 	listProjectPeople,
 	listProjectPersonOptions,
@@ -38,8 +48,12 @@ let message = '';
 let saveMessage = '';
 let creatorDisplayName = '';
 let peopleLoadError = '';
+let datesLoadError = '';
 let assignments = [];
 let personOptions = [];
+let projectDateCards = [];
+let canEditProjectDates = false;
+let canCommentProjectDates = false;
 
 const formatValue = (value, fallback = 'Not available') => value || fallback;
 const formatStatusLabel = (value) => value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Unknown';
@@ -81,6 +95,8 @@ const DEFAULT_PROJECT_PEOPLE_ROLES = [
 	'assurance_lead',
 	'default_risk_owner',
 ];
+const GOVERNANCE_ROUTE_GUIDANCE = 'Define how this project is reviewed, governed and approved, including the forum, meeting or authority used for decisions.';
+const ESCALATION_ROUTE_GUIDANCE = 'Define where delivery concerns, risks, blockers or decisions should be escalated, including the key role, team or governance forum.';
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -124,14 +140,36 @@ try {
 					saveMessage = 'Project context saved.';
 				} else if (intent === 'update-project-governance') {
 					await updateProjectInformation(workspaceSlug ?? '', projectSlug ?? '', {
-						startDate: String(formData.get('start_date') ?? ''),
-						targetEndDate: String(formData.get('target_end_date') ?? ''),
-						nextReviewDate: String(formData.get('next_review_date') ?? ''),
 						reviewCadence: String(formData.get('review_cadence') ?? ''),
 						governanceRoute: String(formData.get('governance_route') ?? ''),
 						escalationRoute: String(formData.get('escalation_route') ?? ''),
 					}, serverSupabase, accessToken);
-					saveMessage = 'Dates and governance saved.';
+					saveMessage = 'Governance and escalation saved.';
+				} else if (intent === 'save-project-date') {
+					await saveProjectDate(workspaceSlug ?? '', projectSlug ?? '', {
+						projectDateId: String(formData.get('project_date_id') ?? ''),
+						dateType: String(formData.get('date_type') ?? ''),
+						customLabel: String(formData.get('custom_label') ?? ''),
+						targetDate: String(formData.get('target_date') ?? ''),
+						comment: String(formData.get('comment') ?? ''),
+					}, serverSupabase, accessToken);
+					saveMessage = 'Project date saved.';
+				} else if (intent === 'remove-project-date') {
+					await saveProjectDate(workspaceSlug ?? '', projectSlug ?? '', {
+						projectDateId: String(formData.get('project_date_id') ?? ''),
+						remove: true,
+					}, serverSupabase, accessToken);
+					saveMessage = 'Project date removed.';
+				} else if (intent === 'add-project-date-comment') {
+					await createProjectDateComment(
+						workspaceSlug ?? '',
+						projectSlug ?? '',
+						String(formData.get('project_date_id') ?? ''),
+						String(formData.get('comment') ?? ''),
+						serverSupabase,
+						accessToken,
+					);
+					saveMessage = 'Project date comment added.';
 				} else if (intent === 'save-project-person' || intent === 'add-project-person') {
 					await saveProjectPersonForRole(workspaceSlug ?? '', projectSlug ?? '', {
 						projectRole: String(formData.get('project_role') ?? ''),
@@ -182,6 +220,22 @@ try {
 				peopleLoadError = error instanceof Error ? error.message : 'Unable to load project responsibilities.';
 			}
 
+			try {
+				const projectDates = await listProjectDates(organisation.id, project.id, workspace.role, serverSupabase);
+				projectDateCards = buildProjectDateCards(projectDates, project);
+			} catch (error) {
+				projectDateCards = buildProjectDateCards([], project);
+				datesLoadError = error instanceof Error ? error.message : 'Unable to load project dates.';
+			}
+
+			try {
+				canEditProjectDates = await canChangeProjectDates(workspace, organisation.id, project.id, serverSupabase, accessToken);
+				canCommentProjectDates = await canCommentOnProjectDates(workspace, organisation.id, project.id, serverSupabase, accessToken);
+			} catch {
+				canEditProjectDates = false;
+				canCommentProjectDates = false;
+			}
+
 			if (can(workspace.role, 'project.editDetails')) {
 				try {
 					personOptions = await listProjectPersonOptions(organisation.id, workspace.role, serverSupabase);
@@ -211,12 +265,9 @@ const projectContextFields = [
 	{ label: 'Criticality', value: projectFieldLabel(project?.criticality) },
 ];
 const governanceFields = [
-	{ label: 'Start date', value: formatDate(project?.start_date) },
-	{ label: 'Target end date', value: formatDate(project?.target_end_date) },
-	{ label: 'Next review date', value: formatDate(project?.next_review_date) },
-	{ label: 'Review cadence', value: projectFieldLabel(project?.review_cadence) },
-	{ label: 'Governance route', value: formatValue(project?.governance_route, 'Not set') },
-	{ label: 'Escalation route', value: formatValue(project?.escalation_route, 'Not set') },
+	{ label: 'Review cadence', value: projectFieldLabel(project?.review_cadence), guidance: '' },
+	{ label: 'Governance route', value: project?.governance_route || GOVERNANCE_ROUTE_GUIDANCE, guidance: !project?.governance_route },
+	{ label: 'Escalation route', value: project?.escalation_route || ESCALATION_ROUTE_GUIDANCE, guidance: !project?.escalation_route },
 ];
 ---
 <AuthenticatedLayout title={project ? `${project.name} details | WatchTower` : 'Project Details | WatchTower'}>
@@ -331,25 +382,169 @@ const governanceFields = [
 				</ProjectContentPanel>
 
 				<ProjectContentPanel
-					title="Dates and governance"
-					helper="Review and governance information supports project setup and assurance planning."
+					title="Project dates"
+					helper="Timeline-ready setup dates show missing, approaching and overdue states without becoming RAID records."
+					headingId="project-dates-heading"
+				>
+					<div slot="action">
+						{canEditProjectDates ? (
+							<button class="button button--primary project-details-edit-action" type="button" data-project-dialog-open="project-date-add-dialog">Add new date</button>
+						) : (
+							<DisabledActionHint
+								id="project-date-add-hint"
+								allowed={false}
+								allowedText=""
+								disabledText="Project date changes are unavailable for your current role."
+							/>
+						)}
+					</div>
+					{datesLoadError && <p class="form-message">{datesLoadError}</p>}
+					<div class="project-date-grid" data-project-dates-section>
+						{projectDateCards.map((card, index) => {
+							const dialogId = `project-date-dialog-${index}`;
+							return (
+								<>
+									<button
+										class={`project-date-card project-date-card--${card.status.tone}`}
+										type="button"
+										data-project-dialog-open={dialogId}
+										aria-label={`Open ${card.label} project date details`}
+									>
+										<span class="project-date-card__label">{card.label}</span>
+										<span class="project-date-card__value">{formatDate(card.targetDate)}</span>
+										<span class={`project-date-card__status project-date-card__status--${card.status.tone}`}>{card.status.text}</span>
+										<span class="project-date-card__meta">
+											{card.commentCount > 0 ? `${card.commentCount} comment${card.commentCount === 1 ? '' : 's'}` : 'No comments'}
+										</span>
+									</button>
+									<dialog class="project-details-dialog" id={dialogId} aria-labelledby={`${dialogId}-title`} data-project-details-dialog>
+										<div class="project-details-dialog__header">
+											<div>
+												<h3 id={`${dialogId}-title`}>{card.label}</h3>
+												<p>{card.status.text}</p>
+											</div>
+											<form method="dialog">
+												<button class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+											</form>
+										</div>
+										{canEditProjectDates ? (
+											<form class="project-details-modal-form" method="post" data-project-date-modal>
+												<input type="hidden" name="intent" value="save-project-date" />
+												<input type="hidden" name="project_date_id" value={card.id ?? ''} />
+												{card.isDefault ? (
+													<>
+														<input type="hidden" name="date_type" value={card.dateType} />
+														<dl class="project-details-modal-readonly">
+															<div><dt>Date type</dt><dd>{projectDateTypeLabel(card.dateType)}</dd></div>
+															<div><dt>Warning period</dt><dd>{card.warningDays} days</dd></div>
+														</dl>
+													</>
+												) : (
+													<label>
+														<span>Date type</span>
+														<select name="date_type" required data-project-date-type-select>
+															{PROJECT_DATE_TYPES.map((type) => (
+																<option value={type} selected={type === card.dateType}>{projectDateTypeLabel(type)}</option>
+															))}
+														</select>
+													</label>
+												)}
+												{!card.isDefault && (
+													<label class="project-date-custom-label">
+														<span>Custom label</span>
+														<input name="custom_label" value={card.customLabel ?? ''} maxlength="120" data-project-date-custom-label />
+													</label>
+												)}
+												<label>
+													<span>Target date</span>
+													<span class="project-date-input-row">
+														<input name="target_date" type="date" value={card.targetDate ?? ''} data-project-date-input />
+														<button class="button button--secondary project-date-picker-button" type="button" data-project-date-picker>Open calendar</button>
+													</span>
+												</label>
+												<label>
+													<span>Add comment</span>
+													<textarea name="comment" rows="3" maxlength="1000" placeholder="Add context without changing the date"></textarea>
+												</label>
+												{card.comments.length > 0 && (
+													<div class="project-date-comments" aria-label={`${card.label} comments`}>
+														{card.comments.map((comment) => (
+															<article>
+																<p>{comment.comment}</p>
+																<small>{comment.author?.display_name || comment.author?.email || 'Project participant'} - {formatDateTime(comment.created_at)}</small>
+															</article>
+														))}
+													</div>
+												)}
+												<div class="project-details-modal-form__actions">
+													{!card.isDefault && card.id && (
+														<button class="button button--destructive" type="submit" name="intent" value="remove-project-date">Remove date</button>
+													)}
+													<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
+													<button class="button button--primary" type="submit">Save project date</button>
+												</div>
+											</form>
+										) : (
+											<div class="project-details-modal-form" data-project-date-readonly-modal>
+												<dl class="project-details-modal-readonly">
+													<div><dt>Date value</dt><dd>{formatDate(card.targetDate)}</dd></div>
+													<div><dt>Status</dt><dd>{card.status.text}</dd></div>
+													<div><dt>Warning period</dt><dd>{card.warningDays} days</dd></div>
+													<div><dt>Comments</dt><dd>{card.commentCount}</dd></div>
+												</dl>
+												{card.comments.length > 0 && (
+													<div class="project-date-comments" aria-label={`${card.label} comments`}>
+														{card.comments.map((comment) => (
+															<article>
+																<p>{comment.comment}</p>
+																<small>{comment.author?.display_name || comment.author?.email || 'Project participant'} - {formatDateTime(comment.created_at)}</small>
+															</article>
+														))}
+													</div>
+												)}
+												{canCommentProjectDates && card.id && (
+													<form class="project-date-comment-form" method="post">
+														<input type="hidden" name="intent" value="add-project-date-comment" />
+														<input type="hidden" name="project_date_id" value={card.id} />
+														<label>
+															<span>Add comment</span>
+															<textarea name="comment" rows="3" maxlength="1000" required></textarea>
+														</label>
+														<div class="project-details-modal-form__actions">
+															<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
+															<button class="button button--primary" type="submit">Add comment</button>
+														</div>
+													</form>
+												)}
+											</div>
+										)}
+									</dialog>
+								</>
+							);
+						})}
+					</div>
+				</ProjectContentPanel>
+
+				<ProjectContentPanel
+					title="Governance and escalation"
+					helper="Project-level guidance for review forums, approvals and escalation routes."
 					headingId="project-governance-heading"
 				>
 					<div slot="action">
 						{canEditProject ? (
-							<button class="button button--secondary project-details-edit-action" type="button" data-project-dialog-open="project-governance-dialog">Edit dates and governance</button>
+							<button class="button button--secondary project-details-edit-action" type="button" data-project-dialog-open="project-governance-dialog">Edit governance and escalation</button>
 						) : (
 							<DisabledActionHint
 								id="project-governance-edit-hint"
 								allowed={false}
 								allowedText=""
-								disabledText="Dates and governance editing is unavailable for your current role."
+								disabledText="Governance and escalation editing is unavailable for your current role."
 							/>
 						)}
 					</div>
 					<dl class="details-grid governance-grid" data-project-governance-fields>
 						{governanceFields.map((field) => (
-							<div class="follow-up-field">
+							<div class={`follow-up-field ${field.guidance ? 'follow-up-field--guidance' : ''}`}>
 								<dt>{field.label}</dt>
 								<dd>{field.value}</dd>
 							</div>
@@ -468,6 +663,50 @@ const governanceFields = [
 					</dl>
 				</ProjectContentPanel>
 
+				{canEditProjectDates && (
+					<dialog class="project-details-dialog" id="project-date-add-dialog" aria-labelledby="project-date-add-dialog-title" data-project-details-dialog>
+						<div class="project-details-dialog__header">
+							<div>
+								<h3 id="project-date-add-dialog-title">Add new date</h3>
+								<p>Project dates are intended to auto-populate the future Project Timeline capability.</p>
+							</div>
+							<form method="dialog">
+								<button class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close">Close</button>
+							</form>
+						</div>
+						<form class="project-details-modal-form" method="post" data-project-date-add-modal>
+							<input type="hidden" name="intent" value="save-project-date" />
+							<label>
+								<span>Date type</span>
+								<select name="date_type" required data-project-date-type-select>
+									{PROJECT_DATE_TYPES.map((type) => (
+										<option value={type}>{projectDateTypeLabel(type)}</option>
+									))}
+								</select>
+							</label>
+							<label class="project-date-custom-label">
+								<span>Custom label</span>
+								<input name="custom_label" maxlength="120" data-project-date-custom-label />
+							</label>
+							<label>
+								<span>Target date</span>
+								<span class="project-date-input-row">
+									<input name="target_date" type="date" data-project-date-input />
+									<button class="button button--secondary project-date-picker-button" type="button" data-project-date-picker>Open calendar</button>
+								</span>
+							</label>
+							<label>
+								<span>Comment</span>
+								<textarea name="comment" rows="3" maxlength="1000" placeholder="Add context without changing the date"></textarea>
+							</label>
+							<div class="project-details-modal-form__actions">
+								<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
+								<button class="button button--primary" type="submit">Save project date</button>
+							</div>
+						</form>
+					</dialog>
+				)}
+
 				{canEditProject && (
 					<>
 						<dialog class="project-details-dialog" id="project-identity-dialog" aria-labelledby="project-identity-dialog-title" data-project-details-dialog>
@@ -581,8 +820,8 @@ const governanceFields = [
 						<dialog class="project-details-dialog" id="project-governance-dialog" aria-labelledby="project-governance-dialog-title" data-project-details-dialog>
 							<div class="project-details-dialog__header">
 								<div>
-									<h3 id="project-governance-dialog-title">Edit dates and governance</h3>
-									<p>These fields support review planning. RAID items remain managed in their own modules.</p>
+									<h3 id="project-governance-dialog-title">Edit governance and escalation</h3>
+									<p>These fields describe decision and escalation routes. RAID items remain managed in their own modules.</p>
 								</div>
 								<form method="dialog">
 									<button class="button button--secondary project-details-dialog__close" type="submit" aria-label="Close">Close</button>
@@ -590,18 +829,6 @@ const governanceFields = [
 							</div>
 							<form class="project-details-modal-form" method="post" data-project-governance-modal>
 								<input type="hidden" name="intent" value="update-project-governance" />
-								<label>
-									<span>Start date</span>
-									<input name="start_date" type="date" value={project.start_date ?? ''} />
-								</label>
-								<label>
-									<span>Target end date</span>
-									<input name="target_end_date" type="date" value={project.target_end_date ?? ''} />
-								</label>
-								<label>
-									<span>Next review date</span>
-									<input name="next_review_date" type="date" value={project.next_review_date ?? ''} />
-								</label>
 								<label>
 									<span>Review cadence</span>
 									<select name="review_cadence">
@@ -611,15 +838,15 @@ const governanceFields = [
 								</label>
 								<label>
 									<span>Governance route</span>
-									<textarea name="governance_route" rows="4" maxlength="500">{project.governance_route ?? ''}</textarea>
+									<textarea name="governance_route" rows="4" maxlength="500" placeholder={GOVERNANCE_ROUTE_GUIDANCE}>{project.governance_route ?? ''}</textarea>
 								</label>
 								<label>
 									<span>Escalation route</span>
-									<textarea name="escalation_route" rows="4" maxlength="500">{project.escalation_route ?? ''}</textarea>
+									<textarea name="escalation_route" rows="4" maxlength="500" placeholder={ESCALATION_ROUTE_GUIDANCE}>{project.escalation_route ?? ''}</textarea>
 								</label>
 								<div class="project-details-modal-form__actions">
 									<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
-									<button class="button button--primary" type="submit">Save dates and governance</button>
+									<button class="button button--primary" type="submit">Save governance and escalation</button>
 								</div>
 							</form>
 						</dialog>
@@ -696,6 +923,31 @@ const governanceFields = [
 			if (dialog instanceof HTMLDialogElement) dialog.close();
 		});
 	});
+
+	document.querySelectorAll('[data-project-date-picker]').forEach((button) => {
+		button.addEventListener('click', () => {
+			const row = button.closest('.project-date-input-row');
+			const input = row?.querySelector('[data-project-date-input]');
+			if (!(input instanceof HTMLInputElement)) return;
+			if (typeof input.showPicker === 'function') input.showPicker();
+			else input.focus();
+		});
+	});
+
+	const syncCustomLabel = (select) => {
+		if (!(select instanceof HTMLSelectElement)) return;
+		const form = select.closest('form');
+		const label = form?.querySelector('.project-date-custom-label');
+		const input = form?.querySelector('[data-project-date-custom-label]');
+		const isOther = select.value === 'other';
+		if (label instanceof HTMLElement) label.hidden = !isOther;
+		if (input instanceof HTMLInputElement) input.required = isOther;
+	};
+
+	document.querySelectorAll('[data-project-date-type-select]').forEach((select) => {
+		syncCustomLabel(select);
+		select.addEventListener('change', () => syncCustomLabel(select));
+	});
 </script>
 
 <style>
@@ -759,6 +1011,136 @@ const governanceFields = [
 		padding: 0.75rem;
 		color: var(--muted-strong);
 		background: rgba(255, 255, 255, 0.03);
+	}
+
+	.follow-up-field--guidance dd {
+		color: var(--muted);
+		font-style: italic;
+	}
+
+	.project-date-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
+		gap: 0.9rem;
+	}
+
+	.project-date-card {
+		display: grid;
+		gap: 0.55rem;
+		width: 100%;
+		min-height: 10.25rem;
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-left-width: 0.35rem;
+		border-radius: 0.5rem;
+		padding: 1rem;
+		background: rgba(255, 255, 255, 0.035);
+		color: var(--text);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.project-date-card:hover,
+	.project-date-card:focus-visible {
+		border-color: rgba(124, 199, 244, 0.48);
+		outline: none;
+		box-shadow: 0 0 0 3px rgba(0, 160, 255, 0.18);
+	}
+
+	.project-date-card--green {
+		border-left-color: #3fbf7f;
+	}
+
+	.project-date-card--amber {
+		border-left-color: #f1b84b;
+	}
+
+	.project-date-card--red {
+		border-left-color: #f87171;
+	}
+
+	.project-date-card__label {
+		color: var(--muted);
+		font-size: 0.83rem;
+		font-weight: 900;
+	}
+
+	.project-date-card__value {
+		font-size: 1.22rem;
+		font-weight: 900;
+		letter-spacing: 0;
+	}
+
+	.project-date-card__status {
+		display: inline-flex;
+		width: fit-content;
+		border: 1px solid currentColor;
+		border-radius: 999px;
+		padding: 0.18rem 0.55rem;
+		font-size: 0.78rem;
+		font-weight: 900;
+	}
+
+	.project-date-card__status--green {
+		color: #8ee4b6;
+		background: rgba(63, 191, 127, 0.12);
+	}
+
+	.project-date-card__status--amber {
+		color: #ffd27a;
+		background: rgba(241, 184, 75, 0.14);
+	}
+
+	.project-date-card__status--red {
+		color: #ffb1ad;
+		background: rgba(248, 113, 113, 0.14);
+	}
+
+	.project-date-card__meta {
+		color: var(--muted-strong);
+		font-size: 0.84rem;
+	}
+
+	.project-date-input-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: 0.55rem;
+		align-items: center;
+	}
+
+	.project-date-picker-button {
+		min-height: 2.75rem;
+		padding: 0.55rem 0.75rem;
+		white-space: nowrap;
+	}
+
+	.project-date-comments {
+		display: grid;
+		gap: 0.65rem;
+		border-top: 1px solid rgba(148, 163, 184, 0.16);
+		padding-top: 0.85rem;
+	}
+
+	.project-date-comments article {
+		border: 1px solid rgba(148, 163, 184, 0.16);
+		border-radius: 0.5rem;
+		padding: 0.75rem;
+		background: rgba(255, 255, 255, 0.03);
+	}
+
+	.project-date-comments p {
+		margin: 0;
+	}
+
+	.project-date-comments small {
+		display: block;
+		margin-top: 0.35rem;
+		color: var(--muted);
+	}
+
+	.project-date-comment-form {
+		display: grid;
+		gap: 0.8rem;
 	}
 
 	.project-people-grid {
@@ -919,6 +1301,10 @@ const governanceFields = [
 
 		.project-details-modal-form__actions .button {
 			width: 100%;
+		}
+
+		.project-date-input-row {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>
