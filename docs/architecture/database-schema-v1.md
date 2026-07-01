@@ -663,3 +663,15 @@ For WT-001B, create the foundation schema and safe RLS baseline.
 Do not yet implement full onboarding behaviour unless explicitly instructed.
 
 The priority is to establish the database foundation safely and repeatably through migrations.
+
+---
+
+# Project Dates Addendum
+
+WT-PROJ-DATES-001 adds `project_dates` and `project_date_comments` as structured, workspace-scoped project setup records.
+
+`project_dates` belongs to one `organisation_id` and one `project_id`, with a composite foreign key back to `projects(id, organisation_id)`. Supported `date_type` values are limited to seven options: `start_date`, `target_end_date`, `review_date`, `uat`, `stage_gate`, `load_test` and `other`. `other` requires `custom_label`; non-`other` values keep `custom_label` null. `warning_days` defaults to 14 so future configurable warning periods can be added without changing the table shape. `removed_at` is used for soft removal.
+
+`project_date_comments` belongs to one project date and repeats `organisation_id` and `project_id` for explicit workspace/project scoping. A composite foreign key ensures comments cannot cross-link to a date from another project or workspace. Comments preserve author and timestamp and do not change the date itself.
+
+Project dates are intended to auto-populate the future Project Timeline capability. They do not replace Risks, Issues, Dependencies, Assumptions, Actions, Decisions or Project Narrative.
