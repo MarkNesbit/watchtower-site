@@ -45,7 +45,6 @@ type ProjectTile = {
 	icon: string;
 	tone: string;
 	iconTone?: RiskDashboardAssuranceTone;
-	line: string;
 	ariaLabel?: string;
 	href: string | null;
 	destination?: 'details' | 'narrative' | 'risks';
@@ -57,7 +56,7 @@ const projectTiles: ProjectTile[] = [
 		title: 'Project Details',
 		icon: 'i',
 		tone: 'blue',
-		line: 'View setup, context, roles and responsibilities.',
+		ariaLabel: 'Open Project Details',
 		href: null,
 		destination: 'details',
 	},
@@ -65,18 +64,18 @@ const projectTiles: ProjectTile[] = [
 		title: 'Project Narrative',
 		icon: '≡',
 		tone: 'blue',
-		line: 'View key project events, updates, decisions and history.',
+		ariaLabel: 'Open Project Narrative',
 		href: null,
 		destination: 'narrative',
 		featureKey: 'projectDiary',
 	},
-	{ title: 'Timeline', icon: '▦', tone: 'blue', line: 'Not assessed', href: '#timeline' },
-	{ title: 'Risks', icon: '⚠', tone: 'blue', line: 'Open risk management', href: null, destination: 'risks', featureKey: 'riskManagement' },
-	{ title: 'Issues', icon: '!', tone: 'blue', line: 'No data yet', href: '#issues' },
-	{ title: 'Dependencies', icon: '↔', tone: 'blue', line: 'No data yet', href: '#dependencies' },
-	{ title: 'Assumptions', icon: '?', tone: 'blue', line: 'No data yet', href: '#assumptions' },
-	{ title: 'Decisions', icon: '⚖', tone: 'blue', line: 'No data yet', href: '#decisions' },
-	{ title: 'Actions', icon: '☑', tone: 'blue', line: 'No data yet', href: '#actions' },
+	{ title: 'Timeline', icon: '▦', tone: 'blue', ariaLabel: 'Open Timeline', href: '#timeline' },
+	{ title: 'Risks', icon: '⚠', tone: 'blue', href: null, destination: 'risks', featureKey: 'riskManagement' },
+	{ title: 'Issues', icon: '!', tone: 'blue', ariaLabel: 'Open Issues', href: '#issues' },
+	{ title: 'Dependencies', icon: '↔', tone: 'blue', ariaLabel: 'Open Dependencies', href: '#dependencies' },
+	{ title: 'Assumptions', icon: '?', tone: 'blue', ariaLabel: 'Open Assumptions', href: '#assumptions' },
+	{ title: 'Decisions', icon: '⚖', tone: 'blue', ariaLabel: 'Open Decisions', href: '#decisions' },
+	{ title: 'Actions', icon: '☑', tone: 'blue', ariaLabel: 'Open Actions', href: '#actions' },
 ];
 
 const gatedFeatureKeys = [...new Set(projectTiles.flatMap((tile) => tile.featureKey ? [tile.featureKey] : []))];
@@ -212,30 +211,27 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 						<a class="button button--secondary project-dashboard__details" href={buildProjectDetailsPath(workspaceSlug ?? '', project.slug)}>Project details</a>
 					</div>
 					<div class="dashboard-tile-grid" aria-label="Project dashboard areas">
-						{resolvedProjectTiles.map((tile, index) => !tile.isAccessible ? (
+						{resolvedProjectTiles.map((tile) => !tile.isAccessible ? (
 							<article
 								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'} dashboard-tile--unavailable`}
 								aria-disabled="true"
-								aria-label={tile.ariaLabel ?? tile.title}
-								aria-describedby={`dashboard-tile-help-${index}`}
+								aria-label={tile.ariaLabel ?? `${tile.title} unavailable`}
 								tabindex="0"
 								data-risk-icon-state={tile.destination === 'risks' ? tile.iconTone : undefined}
 								data-feature-unavailable={tile.featureAccess?.state ?? 'route-unavailable'}
 							>
 								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
 								<strong>{tile.title}</strong>
-								<small id={`dashboard-tile-help-${index}`}>{tile.unavailableReason}</small>
 							</article>
 						) : (
 							<a
 								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'}`}
 								href={tile.href}
-								aria-label={tile.ariaLabel ?? `${tile.title}: ${tile.line}`}
+								aria-label={tile.ariaLabel ?? `Open ${tile.title}`}
 								data-risk-icon-state={tile.destination === 'risks' ? tile.iconTone : undefined}
 							>
 								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
 								<strong>{tile.title}</strong>
-								<small>{tile.line}</small>
 							</a>
 						))}
 					</div>
@@ -307,7 +303,8 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 
 	.dashboard-tile-grid {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
+		grid-template-columns: repeat(auto-fit, minmax(9.5rem, 10.75rem));
+		justify-content: center;
 		gap: 1rem;
 		max-width: 70rem;
 		margin-inline: auto;
@@ -344,19 +341,18 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 	}
 
 	.dashboard-tile__icon {
-		font-size: clamp(2.2rem, 5vw, 3.4rem);
+		font-size: 2.8rem;
 		font-weight: 900;
 		line-height: 1;
 		color: var(--tile-icon-status, var(--tile-status));
 	}
 
 	.dashboard-tile strong {
+		display: grid;
+		place-items: center;
+		min-height: 2.8rem;
 		font-size: 1.1rem;
-	}
-
-	.dashboard-tile small {
-		color: var(--muted-strong);
-		font-size: 0.9rem;
+		line-height: 1.18;
 	}
 
 	.dashboard-tile--blue { --tile-status: #00a0ff; }
