@@ -115,7 +115,8 @@ try {
 
 		if (Astro.request.method === 'POST') {
 			const formData = await Astro.request.formData();
-			const intent = String(formData.get('intent') ?? '');
+			const intentValues = formData.getAll('intent');
+			const intent = String(intentValues.at(-1) ?? '');
 			try {
 				if (intent === 'update-project-identity') {
 					await updateProjectCore(workspaceSlug ?? '', projectSlug ?? '', {
@@ -477,8 +478,8 @@ const governanceFields = [
 													</div>
 												)}
 												<div class="project-details-modal-form__actions">
-													{!card.isDefault && card.id && (
-														<button class="button button--destructive" type="submit" name="intent" value="remove-project-date">Remove date</button>
+													{card.id && (
+														<button class="button button--destructive" type="submit" name="intent" value="remove-project-date">{card.isDefault ? 'Clear date' : 'Remove date'}</button>
 													)}
 													<button class="button button--secondary" type="button" data-project-dialog-cancel>Cancel</button>
 													<button class="button button--primary" type="submit">Save project date</button>
