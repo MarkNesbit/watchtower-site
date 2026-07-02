@@ -5,7 +5,7 @@ import ProjectContentPanel from '../../../../../../components/app/ProjectContent
 import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
-import { deriveProjectDetailsAreaSignal } from '../../../../../../lib/dashboardTileSignals';
+import { deriveProjectDetailsAreaSignal, deriveProjectDetailsSectionSignals } from '../../../../../../lib/dashboardTileSignals';
 import {
 	PROJECT_DATE_TYPES,
 	buildProjectDateCards,
@@ -254,10 +254,30 @@ try {
 
 const canEditProject = can(workspaceRole, 'project.editDetails');
 const assignmentsByRole = new Map(assignments.map((assignment) => [assignment.project_role, assignment]));
+const projectDetailsSectionSignals = deriveProjectDetailsSectionSignals(project, projectDateCards, peopleLoadError ? null : assignments);
 const projectDetailsSignal = deriveProjectDetailsAreaSignal(project, projectDateCards, peopleLoadError ? null : assignments);
 const projectDetailsAttentionReasons = projectDetailsSignal.reasons.filter((reason) => reason.state === 'red' || reason.state === 'amber');
-const projectDetailsRedReasons = projectDetailsAttentionReasons.filter((reason) => reason.state === 'red');
-const projectDetailsAmberReasons = projectDetailsAttentionReasons.filter((reason) => reason.state === 'amber');
+const projectDetailsAttentionSections = projectDetailsSectionSignals
+	.map((signal) => ({
+		...signal,
+		redReasons: signal.reasons.filter((reason) => reason.state === 'red'),
+		amberReasons: signal.reasons.filter((reason) => reason.state === 'amber'),
+	}))
+	.filter((signal) => signal.redReasons.length > 0 || signal.amberReasons.length > 0);
+const projectSectionSignal = (section) => projectDetailsSectionSignals.find((signal) => signal.section === section) ?? {
+	section,
+	state: 'unknown',
+	label: 'Project section',
+	anchor: '',
+	reasons: [{ state: 'unknown', message: 'This section could not be assessed safely.' }],
+};
+const identitySignal = projectSectionSignal('project_identity');
+const descriptionSignal = projectSectionSignal('project_description');
+const contextSignal = projectSectionSignal('project_context');
+const datesSignal = projectSectionSignal('project_dates');
+const governanceSignal = projectSectionSignal('governance_escalation');
+const peopleSignal = projectSectionSignal('project_roles_responsibilities');
+const metadataSignal = projectSectionSignal('system_metadata');
 const projectRoleCards = [
 	...DEFAULT_PROJECT_PEOPLE_ROLES,
 	...PROJECT_PEOPLE_ROLES.filter((role) => !DEFAULT_PROJECT_PEOPLE_ROLES.includes(role) && assignmentsByRole.has(role)),
@@ -316,32 +336,37 @@ const governanceFields = [
 							<RagReferencePill tone={projectDetailsSignal.state} label={formatStatusLabel(projectDetailsSignal.state)} statusLabel="Project Details" />
 						</div>
 						<div class="project-details-attention__groups">
-							{projectDetailsRedReasons.length > 0 && (
+							{projectDetailsAttentionSections.map((section) => (
 								<div class="project-details-attention__group">
-									<h3>Red attention</h3>
-									<ul>
-										{projectDetailsRedReasons.map((reason) => (
-											<li>
-												<span>{reason.message}</span>
-												{reason.target && <a href={reason.target}>{reason.actionLabel ?? 'Review'}</a>}
-											</li>
-										))}
-									</ul>
+									<h3>{section.label}</h3>
+									{section.redReasons.length > 0 && (
+										<>
+											<p class="project-details-attention__level">Red attention</p>
+											<ul>
+												{section.redReasons.map((reason) => (
+													<li>
+														<span>{reason.message}</span>
+														{reason.target && <a href={reason.target}>{reason.actionLabel ?? 'Review'}</a>}
+													</li>
+												))}
+											</ul>
+										</>
+									)}
+									{section.amberReasons.length > 0 && (
+										<>
+											<p class="project-details-attention__level">Amber attention</p>
+											<ul>
+												{section.amberReasons.map((reason) => (
+													<li>
+														<span>{reason.message}</span>
+														{reason.target && <a href={reason.target}>{reason.actionLabel ?? 'Review'}</a>}
+													</li>
+												))}
+											</ul>
+										</>
+									)}
 								</div>
-							)}
-							{projectDetailsAmberReasons.length > 0 && (
-								<div class="project-details-attention__group">
-									<h3>Amber attention</h3>
-									<ul>
-										{projectDetailsAmberReasons.map((reason) => (
-											<li>
-												<span>{reason.message}</span>
-												{reason.target && <a href={reason.target}>{reason.actionLabel ?? 'Review'}</a>}
-											</li>
-										))}
-									</ul>
-								</div>
-							)}
+							))}
 						</div>
 					</section>
 				)}
@@ -362,6 +387,15 @@ const governanceFields = [
 								disabledText="Identity editing is unavailable for your current role."
 							/>
 						)}
+					</div>
+					<div class={`project-section-signal rag-card rag-card--${identitySignal.state}`} data-project-section-signal="project_identity" aria-label={`${identitySignal.label}: ${formatStatusLabel(identitySignal.state)}, ${identitySignal.reasons.map((reason) => reason.message).join(' ')}`}>
+						<div class="project-section-signal__header">
+							<h3>{identitySignal.label}</h3>
+							<RagReferencePill tone={identitySignal.state} label={formatStatusLabel(identitySignal.state)} statusLabel="Section" />
+						</div>
+						<ul>
+							{identitySignal.reasons.map((reason) => <li>{reason.message}</li>)}
+						</ul>
 					</div>
 					<dl class="details-grid">
 						<div><dt>Project name</dt><dd>{formatValue(project.name)}</dd></div>
@@ -399,6 +433,15 @@ const governanceFields = [
 							/>
 						)}
 					</div>
+					<div class={`project-section-signal rag-card rag-card--${descriptionSignal.state}`} data-project-section-signal="project_description" aria-label={`${descriptionSignal.label}: ${formatStatusLabel(descriptionSignal.state)}, ${descriptionSignal.reasons.map((reason) => reason.message).join(' ')}`}>
+						<div class="project-section-signal__header">
+							<h3>{descriptionSignal.label}</h3>
+							<RagReferencePill tone={descriptionSignal.state} label={formatStatusLabel(descriptionSignal.state)} statusLabel="Section" />
+						</div>
+						<ul>
+							{descriptionSignal.reasons.map((reason) => <li>{reason.message}</li>)}
+						</ul>
+					</div>
 					<dl class="details-grid details-grid--single">
 						<div><dt>Description</dt><dd>{formatValue(project.description)}</dd></div>
 					</dl>
@@ -420,6 +463,15 @@ const governanceFields = [
 								disabledText="Project context editing is unavailable for your current role."
 							/>
 						)}
+					</div>
+					<div class={`project-section-signal rag-card rag-card--${contextSignal.state}`} data-project-section-signal="project_context" aria-label={`${contextSignal.label}: ${formatStatusLabel(contextSignal.state)}, ${contextSignal.reasons.map((reason) => reason.message).join(' ')}`}>
+						<div class="project-section-signal__header">
+							<h3>{contextSignal.label}</h3>
+							<RagReferencePill tone={contextSignal.state} label={formatStatusLabel(contextSignal.state)} statusLabel="Section" />
+						</div>
+						<ul>
+							{contextSignal.reasons.map((reason) => <li>{reason.message}</li>)}
+						</ul>
 					</div>
 					<dl class="details-grid" data-project-context-fields>
 						{projectContextFields.map((field) => (
@@ -447,6 +499,15 @@ const governanceFields = [
 								disabledText="Project date changes are unavailable for your current role."
 							/>
 						)}
+					</div>
+					<div class={`project-section-signal rag-card rag-card--${datesSignal.state}`} data-project-section-signal="project_dates" aria-label={`${datesSignal.label}: ${formatStatusLabel(datesSignal.state)}, ${datesSignal.reasons.map((reason) => reason.message).join(' ')}`}>
+						<div class="project-section-signal__header">
+							<h3>{datesSignal.label}</h3>
+							<RagReferencePill tone={datesSignal.state} label={formatStatusLabel(datesSignal.state)} statusLabel="Section" />
+						</div>
+						<ul>
+							{datesSignal.reasons.map((reason) => <li>{reason.message}</li>)}
+						</ul>
 					</div>
 					{datesLoadError && <p class="form-message">{datesLoadError}</p>}
 					<div class="project-date-grid" data-project-dates-section>
@@ -592,6 +653,15 @@ const governanceFields = [
 							/>
 						)}
 					</div>
+					<div class={`project-section-signal rag-card rag-card--${governanceSignal.state}`} data-project-section-signal="governance_escalation" aria-label={`${governanceSignal.label}: ${formatStatusLabel(governanceSignal.state)}, ${governanceSignal.reasons.map((reason) => reason.message).join(' ')}`}>
+						<div class="project-section-signal__header">
+							<h3>{governanceSignal.label}</h3>
+							<RagReferencePill tone={governanceSignal.state} label={formatStatusLabel(governanceSignal.state)} statusLabel="Section" />
+						</div>
+						<ul>
+							{governanceSignal.reasons.map((reason) => <li>{reason.message}</li>)}
+						</ul>
+					</div>
 					<dl class="details-grid governance-grid" data-project-governance-fields>
 						{governanceFields.map((field) => (
 							<div class={`follow-up-field ${field.guidance ? 'follow-up-field--guidance' : ''}`}>
@@ -618,6 +688,15 @@ const governanceFields = [
 								disabledText="Responsibility assignment is unavailable for your current role."
 							/>
 						)}
+					</div>
+					<div class={`project-section-signal rag-card rag-card--${peopleSignal.state}`} data-project-section-signal="project_roles_responsibilities" aria-label={`${peopleSignal.label}: ${formatStatusLabel(peopleSignal.state)}, ${peopleSignal.reasons.map((reason) => reason.message).join(' ')}`}>
+						<div class="project-section-signal__header">
+							<h3>{peopleSignal.label}</h3>
+							<RagReferencePill tone={peopleSignal.state} label={formatStatusLabel(peopleSignal.state)} statusLabel="Section" />
+						</div>
+						<ul>
+							{peopleSignal.reasons.map((reason) => <li>{reason.message}</li>)}
+						</ul>
 					</div>
 					{peopleLoadError && <p class="form-message">{peopleLoadError}</p>}
 					<div class="project-people-grid" data-project-people-section>
@@ -705,6 +784,15 @@ const governanceFields = [
 					helper="Generated and audit fields are displayed for context and cannot be edited here."
 					headingId="project-system-metadata-heading"
 				>
+					<div class={`project-section-signal rag-card rag-card--${metadataSignal.state}`} data-project-section-signal="system_metadata" aria-label={`${metadataSignal.label}: ${formatStatusLabel(metadataSignal.state)}, ${metadataSignal.reasons.map((reason) => reason.message).join(' ')}`}>
+						<div class="project-section-signal__header">
+							<h3>{metadataSignal.label}</h3>
+							<RagReferencePill tone={metadataSignal.state} label={formatStatusLabel(metadataSignal.state)} statusLabel="Section" />
+						</div>
+						<ul>
+							{metadataSignal.reasons.map((reason) => <li>{reason.message}</li>)}
+						</ul>
+					</div>
 					<dl class="details-grid">
 						<div><dt>Created by</dt><dd>{formatValue(creatorDisplayName)}</dd></div>
 						<div><dt>Created at</dt><dd>{formatDateTime(project.created_at)}</dd></div>
@@ -1052,6 +1140,14 @@ const governanceFields = [
 		font-size: 0.96rem;
 	}
 
+	.project-details-attention__level {
+		margin: 0;
+		color: var(--muted);
+		font-size: 0.78rem;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
 	.project-details-attention__group ul {
 		display: grid;
 		gap: 0.45rem;
@@ -1074,6 +1170,34 @@ const governanceFields = [
 	.project-details-page :global(.project-content-panel h2) {
 		font-size: clamp(1.35rem, 2.2vw, 1.85rem);
 		letter-spacing: 0;
+	}
+
+	.project-section-signal {
+		display: grid;
+		gap: 0.65rem;
+		margin-bottom: 1rem;
+		padding: 0.85rem;
+	}
+
+	.project-section-signal__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+
+	.project-section-signal__header h3 {
+		margin: 0;
+		font-size: 0.98rem;
+		letter-spacing: 0;
+	}
+
+	.project-section-signal ul {
+		display: grid;
+		gap: 0.35rem;
+		margin: 0;
+		padding-left: 1.05rem;
+		color: var(--muted-strong);
 	}
 
 	.details-grid {

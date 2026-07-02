@@ -282,9 +282,11 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(source, /listProjectDates\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
 	assert.match(source, /listProjectPersonOptions\(organisation\.id, workspace\.role, serverSupabase\)/);
 	assert.match(source, /You can view these project details, but you do not have permission to edit them\./);
-	assert.match(source, /import \{ deriveProjectDetailsAreaSignal \}/);
+	assert.match(source, /import \{ deriveProjectDetailsAreaSignal, deriveProjectDetailsSectionSignals \}/);
+	assert.match(source, /projectDetailsSectionSignals = deriveProjectDetailsSectionSignals\(project, projectDateCards, peopleLoadError \? null : assignments\)/);
 	assert.match(source, /projectDetailsSignal = deriveProjectDetailsAreaSignal\(project, projectDateCards, peopleLoadError \? null : assignments\)/);
 	assert.match(source, /projectDetailsAttentionReasons = projectDetailsSignal\.reasons\.filter/);
+	assert.match(source, /projectDetailsAttentionSections = projectDetailsSectionSignals/);
 	assert.match(source, /data-project-details-attention/);
 	assert.match(source, /Project setup attention/);
 	assert.match(source, /Red attention/);
@@ -292,11 +294,34 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(source, /rag-panel rag-panel--\$\{projectDetailsSignal\.state\}/);
 	assert.match(source, /<RagReferencePill tone=\{projectDetailsSignal\.state\} label=\{formatStatusLabel\(projectDetailsSignal\.state\)\} statusLabel="Project Details" \/>/);
 	assert.match(source, /href=\{reason\.target\}/);
+	for (const section of [
+		'project_identity',
+		'project_description',
+		'project_context',
+		'project_dates',
+		'governance_escalation',
+		'project_roles_responsibilities',
+		'system_metadata',
+	]) {
+		assert.match(source, new RegExp(`data-project-section-signal="${section}"`));
+	}
+	assert.match(signalSource, /Project Identity/);
+	assert.match(signalSource, /Project Description/);
+	assert.match(signalSource, /Project Context/);
+	assert.match(signalSource, /Project Dates/);
+	assert.match(signalSource, /Governance and Escalation/);
+	assert.match(signalSource, /Project Roles and Responsibilities/);
+	assert.match(signalSource, /System Metadata/);
+	assert.match(source, /rag-card rag-card--\$\{identitySignal\.state\}/);
+	assert.match(source, /rag-card rag-card--\$\{contextSignal\.state\}/);
+	assert.match(signalSource, /Expected identity fields are present/);
 	assert.match(signalSource, /#project-description-heading/);
 	assert.match(signalSource, /#project-context-heading/);
 	assert.match(signalSource, /#project-dates-heading/);
 	assert.match(signalSource, /#project-governance-heading/);
 	assert.match(signalSource, /#project-people-heading/);
+	assert.match(signalSource, /Target end date is not set while the project is Proposed/);
+	assert.match(signalSource, /Target end date is not set for an Active project/);
 	assert.match(source, /data-project-dialog-open="project-identity-dialog"/);
 	assert.match(source, /id="project-identity-dialog"/);
 	assert.match(source, /data-project-identity-modal/);

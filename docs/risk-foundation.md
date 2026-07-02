@@ -101,6 +101,8 @@ The project dashboard Risk tile routes to the project Risk Register when Risk Ma
 
 WT-SIGNAL-CONSISTENCY-001 reuses that same Risk attention/assurance signal for project-list attention aggregation. Risks can contribute Amber or Red project attention when active risks have unresolved assurance gaps, but raw exposure alone still does not drive project attention or Project Health.
 
+WT-PROJ-DETAILS-SIGNALS-001 does not change risk exposure, risk assurance or overall concern rules. It keeps Risk as one included project-area attention source alongside Project Details, while Project Details section readiness is derived from project setup/date/responsibility fields only.
+
 The following are also future scope and are not created by this foundation:
 
 - Assumptions tables;
