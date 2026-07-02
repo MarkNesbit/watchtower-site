@@ -319,7 +319,10 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 														class="narrative-ref"
 														type="button"
 														data-entry-id={entry.id}
-														aria-label={`Open ${getNarrativeDisplayRef(entry)}, ${formatAttention(entry.attention_level)} attention`}
+														data-risk-detail-trigger={entry.source_type === 'risk' && entry.source_record_id ? '' : undefined}
+														aria-label={entry.source_type === 'risk' && entry.source_record_id
+															? `View risk detail for ${getNarrativeDisplayRef(entry)}`
+															: `Open ${getNarrativeDisplayRef(entry)}, ${formatAttention(entry.attention_level)} attention`}
 													>
 														<RagReferencePill
 															tone={getAttentionPillTone(entry.attention_level)}
@@ -331,15 +334,6 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 												<td class="narrative-details">
 													{entry.title && <strong>{entry.title}</strong>}
 													{entry.details && <span>{entry.details}</span>}
-													{entry.source_type === 'risk' && entry.source_record_id && (
-														<button
-															class="button button--secondary narrative-risk-action"
-															type="button"
-															data-entry-id={entry.id}
-															data-risk-detail-trigger
-															aria-label={`View current risk detail for ${getNarrativeDisplayRef(entry)}`}
-														>View risk detail</button>
-													)}
 												</td>
 												<td>{creatorName(entry)}</td>
 												<td><time datetime={entry.created_at}>{formatCreatedAt(entry.created_at)}</time></td>
@@ -758,7 +752,6 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-details strong, .narrative-details span { display: block; }
 	.narrative-details span { color: var(--muted-strong); }
 	.narrative-details strong + span { margin-top: 0.25rem; }
-	.narrative-risk-action { margin-top: 0.55rem; padding: 0.42rem 0.7rem; font-size: 0.82rem; }
 	.narrative-back-link { justify-self: start; }
 	.narrative-modal { width: min(92vw, 48rem); max-height: 88vh; overflow: auto; border: 1px solid var(--border); border-radius: 1rem; padding: 0; background: #0b1724; color: var(--text); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.46); }
 	.narrative-modal::backdrop { background: rgba(0, 0, 0, 0.68); }
