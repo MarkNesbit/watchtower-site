@@ -169,6 +169,8 @@ Dashboard capability tiles should:
 - Provide accessible labels for the state.
 - Avoid count badges, red/amber dots, notification markers or health-score decoration unless a later slice explicitly introduces that pattern.
 
+Parent surfaces such as the Projects list and Project Dashboard must not show Red or Amber attention without a destination page explaining why. WT-SIGNAL-CONSISTENCY-001 applies this first to Project Details: the dashboard tile, Project Details attention panel and Projects list reference pill share the same setup/date/responsibility reasons. The Project Details attention panel appears below the hero/access area and before the detail sections, using a shared RAG panel with grouped Red and Amber reasons plus keyboard-accessible section links.
+
 ## Mobile Behaviour
 
 Project pages must remain usable from narrow mobile widths:

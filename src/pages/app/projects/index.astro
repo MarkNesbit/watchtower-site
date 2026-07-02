@@ -6,6 +6,7 @@ import ProjectContentPanel from '../../../components/app/ProjectContentPanel.ast
 import RagReferencePill from '../../../components/app/RagReferencePill.astro';
 import { can } from '../../../lib/permissions';
 import { deriveProjectAttentionStatesByProject, projectAttentionLabel } from '../../../lib/projectAttention';
+import { buildProjectDateCards } from '../../../lib/projectDates';
 import { buildProjectPath, getCurrentWorkspace } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
@@ -41,7 +42,7 @@ try {
 		}
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('id, name, project_ref, slug, status, health, updated_at')
+			.select('id, name, project_ref, slug, status, health, description, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, governance_route, escalation_route, updated_at')
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
 			.is('archived_at', null)
@@ -49,15 +50,57 @@ try {
 		if (error) throw error;
 		projects = data ?? [];
 		const projectIds = projects.map((project) => project.id).filter(Boolean);
-		if (projectIds.length > 0 && can(workspace.role, 'risk.view')) {
-			const { data: risks, error: risksError } = await serverSupabase
-				.from('project_risks')
-				.select('project_id, status, owner_id, actioner_id, review_date, due_date, mitigation_plan, contingency_plan, probability, impact, updated_at')
-				.eq('organisation_id', organisation.id)
-				.in('project_id', projectIds)
-				.is('deleted_at', null)
-				.is('archived_at', null);
-			projectAttentionStates = deriveProjectAttentionStatesByProject(projectIds, risksError ? null : risks ?? [], new Date());
+		if (projectIds.length > 0) {
+			const [{ data: projectDates, error: projectDatesError }, { data: projectPeople, error: projectPeopleError }, risksResult] = await Promise.all([
+				serverSupabase
+					.from('project_dates')
+					.select('id, project_id, date_type, custom_label, target_date, warning_days, is_key_date, removed_at')
+					.eq('organisation_id', organisation.id)
+					.in('project_id', projectIds),
+				serverSupabase
+					.from('project_people')
+					.select('project_id, project_role, user_id, demo_person_id, status')
+					.eq('organisation_id', organisation.id)
+					.in('project_id', projectIds)
+					.eq('status', 'active'),
+				can(workspace.role, 'risk.view')
+					? serverSupabase
+						.from('project_risks')
+						.select('project_id, risk_ref, title, status, owner_id, actioner_id, review_date, due_date, mitigation_plan, contingency_plan, probability, impact, updated_at')
+						.eq('organisation_id', organisation.id)
+						.in('project_id', projectIds)
+						.is('deleted_at', null)
+						.is('archived_at', null)
+					: Promise.resolve({ data: null, error: new Error('Risk attention unavailable for this role.') }),
+			]);
+			const projectDatesByProjectId = new Map();
+			for (const projectDate of projectDates ?? []) {
+				const bucket = projectDatesByProjectId.get(projectDate.project_id) ?? [];
+				bucket.push(projectDate);
+				projectDatesByProjectId.set(projectDate.project_id, bucket);
+			}
+			const projectPeopleByProjectId = new Map();
+			for (const person of projectPeople ?? []) {
+				const bucket = projectPeopleByProjectId.get(person.project_id) ?? [];
+				bucket.push(person);
+				projectPeopleByProjectId.set(person.project_id, bucket);
+			}
+			const risksByProjectId = new Map();
+			for (const risk of risksResult.data ?? []) {
+				const bucket = risksByProjectId.get(risk.project_id) ?? [];
+				bucket.push(risk);
+				risksByProjectId.set(risk.project_id, bucket);
+			}
+			const factsByProjectId = new Map(projects.map((project) => [
+				project.id,
+				{
+					project,
+					projectDateCards: projectDatesError ? null : buildProjectDateCards(projectDatesByProjectId.get(project.id) ?? [], project, new Date()),
+					projectPeople: projectPeopleError ? null : projectPeopleByProjectId.get(project.id) ?? [],
+					risks: risksResult.error ? null : risksByProjectId.get(project.id) ?? [],
+				},
+			]));
+			projectAttentionStates = deriveProjectAttentionStatesByProject(projectIds, factsByProjectId, new Date());
 		} else {
 			projectAttentionStates = deriveProjectAttentionStatesByProject(projectIds, null);
 		}
