@@ -237,13 +237,13 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 
 					<div class="risk-assurance-grid" data-risk-assurance-blocks>
 						{assuranceBlocks.map((block) => (
-							<article class={`risk-assurance-block risk-assurance-block--${block.tone}`} data-risk-assurance-block={block.id} data-assurance-tone={block.tone}>
+							<article class={`risk-assurance-block risk-assurance-block--${block.tone} rag-card rag-card--${block.tone}`} data-risk-assurance-block={block.id} data-assurance-tone={block.tone}>
 								{hasModalConfig(block.id) ? (
 									<>
 										<button class="risk-assurance-block__button" type="button" aria-haspopup="dialog" data-risk-dialog-open={`risk-dialog-${block.id}`}>
 											<span class="risk-assurance-block__heading">
 												<span class="risk-assurance-block__title">{block.title}</span>
-												<span class={`assurance-badge assurance-badge--${block.tone}`}>{block.statusLabel}</span>
+												<RagReferencePill tone={block.tone} label={block.statusLabel} />
 											</span>
 											<span class="risk-assurance-block__value">{blockValue(block)}</span>
 											{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
@@ -384,7 +384,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 									<div class="risk-assurance-block__button risk-assurance-block__button--static">
 										<span class="risk-assurance-block__heading">
 											<span class="risk-assurance-block__title">{block.title}</span>
-											<span class={`assurance-badge assurance-badge--${block.tone}`}>{block.statusLabel}</span>
+											<RagReferencePill tone={block.tone} label={block.statusLabel} />
 										</span>
 										<span class="risk-assurance-block__value">{blockValue(block)}</span>
 										{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
@@ -599,16 +599,8 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 	}
 
 	.risk-assurance-block {
-		--assurance-tone: #7c8b98;
-		border: 1px solid color-mix(in srgb, var(--assurance-tone) 42%, var(--border));
-		border-radius: 0.5rem;
-		background: color-mix(in srgb, var(--assurance-tone) 8%, rgba(4, 12, 24, 0.36));
+		--assurance-tone: var(--rag-tone);
 	}
-
-	.risk-assurance-block--green { --assurance-tone: #21d36b; }
-	.risk-assurance-block--amber { --assurance-tone: #f6a400; }
-	.risk-assurance-block--red { --assurance-tone: #ff453a; }
-	.risk-assurance-block--neutral { --assurance-tone: #7c8b98; }
 
 	.risk-assurance-block__button {
 		display: grid;
@@ -646,25 +638,13 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		font-weight: 900;
 	}
 
+	.risk-assurance-block__heading :global(.rag-reference-pill) {
+		flex: 0 0 auto;
+	}
+
 	.risk-assurance-block__value {
 		color: var(--muted-strong);
 		overflow-wrap: anywhere;
-	}
-
-	.assurance-badge {
-		display: inline-flex;
-		align-items: center;
-		border: 1px solid color-mix(in srgb, var(--assurance-tone) 65%, transparent);
-		border-radius: 999px;
-		padding: 0.22rem 0.55rem;
-		color: var(--text);
-		font-size: 0.78rem;
-		font-weight: 900;
-		white-space: nowrap;
-	}
-
-	.assurance-badge--neutral {
-		color: var(--muted-strong);
 	}
 
 	.risk-assurance-block__prompt {

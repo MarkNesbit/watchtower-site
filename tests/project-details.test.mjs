@@ -332,7 +332,9 @@ test('Project Details loads project dates as status cards and keeps governance s
 	assert.match(source, /data-project-dates-section/);
 	assert.match(source, /projectDateCards\.map/);
 	assert.match(source, /project-date-card--\$\{card\.status\.tone\}/);
+	assert.match(source, /rag-card rag-card--\$\{card\.status\.tone\}/);
 	assert.match(source, /card\.status\.text/);
+	assert.match(source, /<RagReferencePill tone=\{card\.status\.tone\} label=\{card\.status\.text\} \/>/);
 	assert.match(source, /Add new date/);
 	assert.match(source, /PROJECT_DATE_TYPES\.map/);
 	assert.match(source, /name="date_type"/);

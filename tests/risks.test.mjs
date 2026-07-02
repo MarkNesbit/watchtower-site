@@ -1145,6 +1145,8 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.doesNotMatch(route, /ownerName\(risk\)/);
 	assert.match(route, /getRiskAssuranceBlocks\(risk, new Date\(\)\)/);
 	assert.match(route, /data-risk-assurance-blocks/);
+	assert.match(route, /risk-assurance-block--\$\{block\.tone\} rag-card rag-card--\$\{block\.tone\}/);
+	assert.match(route, /<RagReferencePill tone=\{block\.tone\} label=\{block\.statusLabel\} \/>/);
 	for (const block of ['description', 'status', 'overall-concern', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
 		assert.match(route, new RegExp(`data-risk-assurance-block=\\{block\\.id\\}`));
 	}

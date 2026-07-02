@@ -203,7 +203,7 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	const risksIndex = detailSource.indexOf("title: 'Risks'");
 
 	assert.notEqual(narrativeIndex, -1);
-	assert.match(detailSource, /title: 'Project Details'[\s\S]*?ariaLabel: 'Open Project Details'[\s\S]*?destination: 'details'/);
+	assert.match(detailSource, /title: 'Project Details'[\s\S]*?ariaLabel: 'Open Project Details, Informational state'[\s\S]*?destination: 'details'/);
 	assert.match(detailSource, /title: 'Project Narrative'[\s\S]*?destination: 'narrative',[\s\S]*?featureKey: 'projectDiary'/);
 	assert.ok(narrativeIndex < timelineIndex);
 	assert.ok(timelineIndex < risksIndex);
@@ -211,9 +211,10 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	assert.match(detailSource, /buildProjectNarrativePath\(workspaceSlug \?\? '', project\.slug\)/);
 });
 
-test('Project dashboard areas tiles render icon and title only with equal square sizing', async () => {
+test('Project dashboard areas tiles render icon and title only with equal square sizing and RAG state', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	const areasSource = projectAreasSource(detailSource);
+	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
 	const removedCopy = [
 		'View setup, context, roles and responsibilities.',
 		'View key project events, updates, decisions and history.',
@@ -224,12 +225,17 @@ test('Project dashboard areas tiles render icon and title only with equal square
 
 	assert.match(areasSource, /<span class="dashboard-tile__icon" aria-hidden="true">\{tile\.icon\}<\/span>/);
 	assert.match(areasSource, /<strong>\{tile\.title\}<\/strong>/);
-	assert.match(areasSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?aria-disabled="true"[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable`\}[\s\S]*?tabindex="0"/);
-	assert.match(areasSource, /<a[\s\S]*?class={`dashboard-tile[\s\S]*?href=\{tile\.href\}[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `Open \$\{tile\.title\}`\}/);
+	assert.match(areasSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'unknown'\}[\s\S]*?aria-disabled="true"[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable, \$\{tile\.statusLabel \?\? 'Unknown state'\}`\}[\s\S]*?tabindex="0"/);
+	assert.match(areasSource, /<a[\s\S]*?class={`dashboard-tile[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'neutral'\}[\s\S]*?href=\{tile\.href\}[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `Open \$\{tile\.title\}, \$\{tile\.statusLabel \?\? 'Neutral state'\}`\}/);
+	assert.match(areasSource, /data-rag-tile-state=\{tile\.attentionTone \?\? 'unknown'\}/);
+	assert.match(areasSource, /data-rag-tile-state=\{tile\.attentionTone \?\? 'neutral'\}/);
 	assert.doesNotMatch(areasSource, /<small|tile\.line|aria-describedby=\{`dashboard-tile-help-/);
 	for (const copy of removedCopy) {
 		assert.doesNotMatch(areasSource, new RegExp(escapeRegExp(copy)));
 	}
+	assert.match(ragStyles, /\.rag-tile/);
+	assert.match(ragStyles, /\.rag-tile--attention-red/);
+	assert.match(ragStyles, /\.visually-hidden/);
 	assert.match(detailSource, /\.dashboard-tile-grid \{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(9\.5rem, 10\.75rem\)\);[\s\S]*?justify-content: center;/);
 	assert.match(detailSource, /\.dashboard-tile \{[\s\S]*?aspect-ratio: 1;/);
 	assert.match(detailSource, /\.dashboard-tile strong \{[\s\S]*?min-height: 2\.8rem;[\s\S]*?line-height: 1\.18;/);
@@ -237,7 +243,7 @@ test('Project dashboard areas tiles render icon and title only with equal square
 	assert.doesNotMatch(detailSource, /\.dashboard-tile--unavailable:hover/);
 });
 
-test('Project dashboard Risk tile uses icon-only assurance state', async () => {
+test('Project dashboard Risk tile uses shared RAG assurance state styling', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 
 	assert.match(detailSource, /import \{[\s\S]*deriveProjectRiskDashboardAssuranceTone,[\s\S]*listProjectRisks,[\s\S]*riskAssuranceToneLabel/);
@@ -246,11 +252,15 @@ test('Project dashboard Risk tile uses icon-only assurance state', async () => {
 	assert.match(detailSource, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
 	assert.match(detailSource, /deriveProjectRiskDashboardAssuranceTone\(risks, new Date\(\)\)/);
 	assert.match(detailSource, /riskDashboardIconLabel\(riskDashboardIconTone\)/);
-	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable`\}/);
-	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `Open \$\{tile\.title\}`\}/);
+	assert.match(detailSource, /attentionTone: riskDashboardIconTone/);
+	assert.match(detailSource, /statusLabel: riskDashboardIconTone === 'neutral' \? 'No active risks recorded' : `\$\{riskAssuranceToneLabel\(riskDashboardIconTone\)\} assurance state`/);
+	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable, \$\{tile\.statusLabel \?\? 'Unknown state'\}`\}/);
+	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `Open \$\{tile\.title\}, \$\{tile\.statusLabel \?\? 'Neutral state'\}`\}/);
 	assert.match(detailSource, /data-risk-icon-state=\{tile\.destination === 'risks' \? tile\.iconTone : undefined\}/);
+	assert.match(detailSource, /data-rag-tile-state=\{tile\.attentionTone \?\? 'neutral'\}/);
 	assert.match(detailSource, /dashboard-tile--icon-\$\{tile\.iconTone \?\? 'default'\}/);
-	assert.match(detailSource, /\.dashboard-tile__icon \{[\s\S]*?color: var\(--tile-icon-status, var\(--tile-status\)\)/);
+	assert.match(detailSource, /rag-tile--attention-\$\{tile\.attentionTone \?\? 'neutral'\}/);
+	assert.match(detailSource, /\.dashboard-tile__icon \{[\s\S]*?color: var\(--rag-icon-tone, var\(--tile-icon-status, var\(--tile-status\)\)\)/);
 	for (const tone of ['green', 'amber', 'red', 'neutral']) {
 		assert.match(detailSource, new RegExp(`dashboard-tile--icon-${tone}`));
 	}

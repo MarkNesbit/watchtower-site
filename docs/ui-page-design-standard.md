@@ -143,13 +143,27 @@ Cards should be reserved for individual repeated items, modals, and genuinely fr
 
 ## RAG And Reference Pill Pattern
 
-Use `RagReferencePill` or an equivalent local badge for project references, RAG states, attention states, and future compound record references where a small pill improves scanning.
+Use `RagReferencePill` for project references, RAG states, attention states, and future compound record references where a small pill improves scanning. Shared RAG styling lives in `src/styles/rag.css` and supports `red`, `amber`, `green`, `neutral`, and `unknown` states. The older blue treatment is reserved for non-RAG reference accents, not health or attention meaning.
 
 Pills should:
 
 - Preserve the human-readable reference or status text.
 - Use colour as a supplement, not the only signal.
 - Avoid replacing canonical labels or accessible text.
+
+RAG cards and panels should:
+
+- Use the shared `rag-card` or `rag-panel` classes with a state class such as `rag-card--amber`.
+- Keep the surface subdued rather than flooding the card with bright colour.
+- Use a left accent border for scannability.
+- Include or support an explicit RAG pill for the state label.
+
+Dashboard capability tiles should:
+
+- Use the shared `rag-tile` treatment and a state class such as `rag-tile--attention-red` when a capability has an attention or assurance state.
+- Keep icon and title visible without permanent helper copy inside the tile.
+- Provide accessible labels for the state.
+- Avoid count badges, red/amber dots, notification markers or health-score decoration unless a later slice explicitly introduces that pattern.
 
 ## Mobile Behaviour
 
@@ -186,7 +200,7 @@ WT-US-0209 introduced these lightweight components in `src/components/app/`:
 
 Project Narrative uses the shared hero, control panel, content panel, disabled-action helper, and empty state. The project dashboard now also uses the shared hero, status/control panel, and content panel shell while preserving its existing feature-gated tile behaviour. The project list page uses the shared content panel, empty state, disabled-action hint, and reference pill treatment without adding a single-project hero. WT-RISK-002A applies the same project-page pattern to the Risk Register and risk detail foundation, WT-RISK-002B extends it with project-scoped New Risk and Edit Risk form pages, WT-RISK-002C adds a compact register plus block-level assurance cards on risk detail, WT-RISK-003 keeps those patterns while adding actioner assignment to the risk form and action responsibility block, WT-RISK-004 makes risk detail cards focused modal entry points with comments below the assurance content, WT-RISK-004A/004B consolidate and polish the detail page into a Current risk metadata strip plus Core Risk Detail section, and WT-RISK-005 keeps the same pill treatment while deriving the risk concern state from exposure plus assurance rather than manual RAG selection. WT-RISK-NARRATIVE-001 extends the Project Narrative detail modal for source-risk entries with a concise read-only preview and Open full risk action; it does not add risk editing controls or turn Narrative into an audit table.
 
-WT-DASH-RISK-001 keeps dashboard capability tiles understandable from visible text rather than rollover-only helper text. The Risk tile may colour only its icon to reflect the highest active risk assurance state; Draft and Closed risks are excluded, exposure does not drive the icon, and tiles must not gain count badges, dots, notification markers or health-scoring decorations.
+Dashboard capability tiles stay understandable from visible title text and accessible labels rather than rollover-only helper text. The Risk tile may use the shared RAG tile treatment to reflect the highest active risk assurance state; Draft and Closed risks are excluded, exposure does not drive the state, and tiles must not gain count badges, dots, notification markers or health-scoring decorations.
 
 ## Duplication Opportunities Identified
 

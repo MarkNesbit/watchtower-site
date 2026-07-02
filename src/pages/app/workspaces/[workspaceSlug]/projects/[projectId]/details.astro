@@ -68,7 +68,7 @@ const healthTone = (value) => {
 	if (health === 'green') return 'green';
 	if (health === 'amber') return 'amber';
 	if (health === 'red') return 'red';
-	return 'blue';
+	return 'unknown';
 };
 const assignmentName = (assignment) => {
 	if (assignment.demo_person_id) return assignment.demoPerson?.display_name || 'Demo persona';
@@ -406,14 +406,14 @@ const governanceFields = [
 							return (
 								<>
 									<button
-										class={`project-date-card project-date-card--${card.status.tone}`}
+										class={`project-date-card project-date-card--${card.status.tone} rag-card rag-card--${card.status.tone}`}
 										type="button"
 										data-project-dialog-open={dialogId}
-										aria-label={`Open ${card.label} project date details`}
+										aria-label={`Open ${card.label} project date details, ${card.status.text}`}
 									>
 										<span class="project-date-card__label">{card.label}</span>
 										<span class="project-date-card__value">{formatDate(card.targetDate)}</span>
-										<span class={`project-date-card__status project-date-card__status--${card.status.tone}`}>{card.status.text}</span>
+										<RagReferencePill tone={card.status.tone} label={card.status.text} />
 										<span class="project-date-card__meta">
 											{card.commentCount > 0 ? `${card.commentCount} comment${card.commentCount === 1 ? '' : 's'}` : 'No comments'}
 										</span>
@@ -1030,34 +1030,7 @@ const governanceFields = [
 		gap: 0.55rem;
 		width: 100%;
 		min-height: 10.25rem;
-		border: 1px solid rgba(148, 163, 184, 0.2);
-		border-left-width: 0.35rem;
-		border-radius: 0.5rem;
 		padding: 1rem;
-		background: rgba(255, 255, 255, 0.035);
-		color: var(--text);
-		font: inherit;
-		text-align: left;
-		cursor: pointer;
-	}
-
-	.project-date-card:hover,
-	.project-date-card:focus-visible {
-		border-color: rgba(124, 199, 244, 0.48);
-		outline: none;
-		box-shadow: 0 0 0 3px rgba(0, 160, 255, 0.18);
-	}
-
-	.project-date-card--green {
-		border-left-color: #3fbf7f;
-	}
-
-	.project-date-card--amber {
-		border-left-color: #f1b84b;
-	}
-
-	.project-date-card--red {
-		border-left-color: #f87171;
 	}
 
 	.project-date-card__label {
@@ -1070,31 +1043,6 @@ const governanceFields = [
 		font-size: 1.22rem;
 		font-weight: 900;
 		letter-spacing: 0;
-	}
-
-	.project-date-card__status {
-		display: inline-flex;
-		width: fit-content;
-		border: 1px solid currentColor;
-		border-radius: 999px;
-		padding: 0.18rem 0.55rem;
-		font-size: 0.78rem;
-		font-weight: 900;
-	}
-
-	.project-date-card__status--green {
-		color: #8ee4b6;
-		background: rgba(63, 191, 127, 0.12);
-	}
-
-	.project-date-card__status--amber {
-		color: #ffd27a;
-		background: rgba(241, 184, 75, 0.14);
-	}
-
-	.project-date-card__status--red {
-		color: #ffb1ad;
-		background: rgba(248, 113, 113, 0.14);
 	}
 
 	.project-date-card__meta {

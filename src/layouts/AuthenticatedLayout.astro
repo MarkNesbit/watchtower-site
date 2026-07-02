@@ -4,6 +4,7 @@ import TestingModeBanner from '../components/app/TestingModeBanner.astro';
 import SiteLayout from './SiteLayout.astro';
 import { getInternalRoleSimulationState, type RoleSimulationState } from '../lib/internalTesting';
 import { createSupabaseServerClient, getServerAccessToken } from '../lib/supabaseServer';
+import '../styles/rag.css';
 
 type Props = { title?: string; description?: string };
 const { title = 'WatchTower App', description = 'Authenticated WatchTower workspace area.' } = Astro.props;
