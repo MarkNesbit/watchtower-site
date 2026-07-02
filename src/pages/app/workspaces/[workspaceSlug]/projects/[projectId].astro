@@ -4,16 +4,19 @@ import ProjectContentPanel from '../../../../../components/app/ProjectContentPan
 import ProjectControlPanel from '../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../components/app/RagReferencePill.astro';
+import {
+	dashboardTileSignalStatusLabel,
+	deriveProjectDetailsTileSignal,
+	deriveProjectNarrativeTileSignal,
+	deriveRiskTileAttentionSignal,
+	type DashboardTileSignalState,
+} from '../../../../../lib/dashboardTileSignals';
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../lib/featureFlags';
 import type { FeatureAccess, FeatureKey } from '../../../../../lib/featureFlags';
 import { can } from '../../../../../lib/permissions';
+import { buildProjectDateCards, listProjectDates, type ProjectDateCard } from '../../../../../lib/projectDates';
 import { buildProjectDetailsPath, buildProjectNarrativePath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
-import {
-	deriveProjectRiskDashboardAssuranceTone,
-	listProjectRisks,
-	riskAssuranceToneLabel,
-	type RiskDashboardAssuranceTone,
-} from '../../../../../lib/projectRisks';
+import { listProjectRisks } from '../../../../../lib/projectRisks';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -24,7 +27,10 @@ let workspaceName = '';
 let canEditProject = false;
 let message = '';
 let creatorDisplayName = '';
-let riskDashboardIconTone: RiskDashboardAssuranceTone = 'neutral';
+let projectDateCards: ProjectDateCard[] | null = null;
+let projectDetailsTileSignal: DashboardTileSignalState = 'unknown';
+let projectNarrativeTileSignal: DashboardTileSignalState = 'unknown';
+let riskTileSignal: DashboardTileSignalState = 'neutral';
 
 const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not available';
 const formatValue = (value, fallback = 'Not available') => value || fallback;
@@ -36,16 +42,14 @@ const healthTone = (value) => {
 	if (health === 'red') return 'red';
 	return 'unknown';
 };
-const riskDashboardIconLabel = (tone: RiskDashboardAssuranceTone) => tone === 'neutral'
-	? 'Risks: no active risks recorded'
-	: `Risks: ${riskAssuranceToneLabel(tone)} assurance state`;
+const tileAriaLabel = (title: string, state: DashboardTileSignalState) => `${title}: ${dashboardTileSignalStatusLabel(state)}`;
 
 type ProjectTile = {
 	title: string;
 	icon: string;
 	tone: string;
-	iconTone?: RiskDashboardAssuranceTone;
-	attentionTone?: RiskDashboardAssuranceTone | 'unknown';
+	iconTone?: DashboardTileSignalState;
+	attentionTone?: DashboardTileSignalState;
 	statusLabel?: string;
 	ariaLabel?: string;
 	href: string | null;
@@ -60,7 +64,7 @@ const projectTiles: ProjectTile[] = [
 		tone: 'blue',
 		attentionTone: 'neutral',
 		statusLabel: 'Informational',
-		ariaLabel: 'Open Project Details, Informational state',
+		ariaLabel: 'Project Details: Neutral state',
 		href: null,
 		destination: 'details',
 	},
@@ -70,7 +74,7 @@ const projectTiles: ProjectTile[] = [
 		tone: 'blue',
 		attentionTone: 'neutral',
 		statusLabel: 'Informational',
-		ariaLabel: 'Open Project Narrative, Informational state',
+		ariaLabel: 'Project Narrative: Neutral state',
 		href: null,
 		destination: 'narrative',
 		featureKey: 'projectDiary',
@@ -110,7 +114,7 @@ try {
 		));
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('id, name, project_ref, description, slug, status, health, created_at, updated_at, created_by')
+			.select('id, name, project_ref, description, slug, status, health, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, review_cadence, governance_route, escalation_route, created_at, updated_at, created_by')
 			.eq('slug', projectSlug)
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
@@ -130,13 +134,21 @@ try {
 					.maybeSingle();
 				if (!creatorError && creator) creatorDisplayName = creator.display_name || creator.email || '';
 			}
+			try {
+				const projectDates = await listProjectDates(organisation.id, project.id, workspace.role, serverSupabase);
+				projectDateCards = buildProjectDateCards(projectDates, project, new Date());
+			} catch {
+				projectDateCards = null;
+			}
+			projectDetailsTileSignal = deriveProjectDetailsTileSignal(project, projectDateCards);
+			projectNarrativeTileSignal = deriveProjectNarrativeTileSignal(null);
 			const riskFeatureAccess = featureAccessByKey.riskManagement ?? getFeatureAccess('riskManagement');
 			if (riskFeatureAccess.isAccessible && can(workspace.role, 'risk.view')) {
 				try {
 					const risks = await listProjectRisks(organisation.id, project.id, workspace.role, serverSupabase);
-					riskDashboardIconTone = deriveProjectRiskDashboardAssuranceTone(risks, new Date());
+					riskTileSignal = deriveRiskTileAttentionSignal(risks, new Date());
 				} catch {
-					riskDashboardIconTone = 'neutral';
+					riskTileSignal = 'unknown';
 				}
 			}
 		}
@@ -169,15 +181,22 @@ const visibleProjectTiles = projectTiles.flatMap((tile) => {
 	return [{ ...tile, href, featureAccess, isAccessible, unavailableReason }];
 });
 
-const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination === 'risks'
-	? {
+const resolvedProjectTiles = visibleProjectTiles.map((tile) => {
+	const tileSignal = tile.destination === 'details'
+		? projectDetailsTileSignal
+		: tile.destination === 'narrative'
+			? projectNarrativeTileSignal
+			: tile.destination === 'risks'
+				? riskTileSignal
+				: tile.attentionTone ?? 'unknown';
+	return {
 		...tile,
-		iconTone: riskDashboardIconTone,
-		attentionTone: riskDashboardIconTone,
-		statusLabel: riskDashboardIconTone === 'neutral' ? 'No active risks recorded' : `${riskAssuranceToneLabel(riskDashboardIconTone)} assurance state`,
-		ariaLabel: riskDashboardIconLabel(riskDashboardIconTone),
-	}
-	: tile);
+		iconTone: tileSignal,
+		attentionTone: tileSignal,
+		statusLabel: dashboardTileSignalStatusLabel(tileSignal),
+		ariaLabel: tileAriaLabel(tile.title, tileSignal),
+	};
+});
 ---
 <AuthenticatedLayout title={project ? `${project.name} | WatchTower` : 'Project | WatchTower'}>
 	<section class="project-dashboard" data-project-dashboard>
@@ -223,10 +242,12 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 							<article
 								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'} dashboard-tile--unavailable rag-tile rag-tile--${tile.tone} rag-tile--attention-${tile.attentionTone ?? 'unknown'} rag-tile--disabled`}
 								aria-disabled="true"
-								aria-label={tile.ariaLabel ?? `${tile.title} unavailable, ${tile.statusLabel ?? 'Unknown state'}`}
+								aria-label={`${tile.ariaLabel ?? tile.title}, unavailable`}
+								title={`${tile.ariaLabel ?? tile.title}, unavailable`}
 								tabindex="0"
 								data-risk-icon-state={tile.destination === 'risks' ? tile.iconTone : undefined}
 								data-rag-tile-state={tile.attentionTone ?? 'unknown'}
+								data-dashboard-tile-signal={tile.attentionTone ?? 'unknown'}
 								data-feature-unavailable={tile.featureAccess?.state ?? 'route-unavailable'}
 							>
 								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
@@ -236,9 +257,11 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 							<a
 								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'} rag-tile rag-tile--${tile.tone} rag-tile--attention-${tile.attentionTone ?? 'neutral'}`}
 								href={tile.href}
-								aria-label={tile.ariaLabel ?? `Open ${tile.title}, ${tile.statusLabel ?? 'Neutral state'}`}
+								aria-label={`Open ${tile.title}, ${tile.statusLabel ?? 'Neutral state'}`}
+								title={`${tile.ariaLabel ?? tile.title}`}
 								data-risk-icon-state={tile.destination === 'risks' ? tile.iconTone : undefined}
 								data-rag-tile-state={tile.attentionTone ?? 'neutral'}
+								data-dashboard-tile-signal={tile.attentionTone ?? 'neutral'}
 							>
 								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
 								<strong>{tile.title}</strong>

@@ -98,6 +98,8 @@ There is deliberately no Type or separate Attention column. The internal `entry_
 
 The Ref pill displays both text and a colour treatment, including a quieter neutral state, so attention is not conveyed by colour alone. Details render title and body as escaped Astro template content. Creator display uses profile name/email where the existing profile RLS relationship makes it available and otherwise shows `Workspace member`; UUIDs are not exposed. Creation timestamps currently use a simple explicit UTC display. A shared effective-viewer-timezone DTS helper remains future work.
 
+WT-DASH-TILE-SIGNALS-001 reserves the Project Dashboard Narrative tile for user-specific unseen-entry status, but no narrative read-state or last-viewed model exists yet. The dashboard tile therefore reports Unknown until a later slice adds scoped read-state storage and safe mark-as-viewed behaviour.
+
 The detail modal displays the Narrative reference, title, attention level, details, links, source type, source reference when present, created by/at, and updated by/at when present. For manual entries the source type displays as `Manual`; an empty source reference row is not shown.
 
 For risk-generated entries, the same modal can show a concise read-only source-risk preview: risk reference, title, lifecycle status, derived concern, exposure, owner, actioner, review date, and mitigation/contingency summaries where available. The preview includes an Open full risk action that routes to the Risk module. It does not expose risk editing controls, so Owner/Admin/Member users still edit risks only in Risk Management and Viewer users remain read-only.

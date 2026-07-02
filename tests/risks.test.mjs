@@ -1275,7 +1275,8 @@ test('Project dashboard Risk tile routes to the Risk Register and loads only sco
 	assert.match(dashboard, /title: 'Risks'[\s\S]*destination: 'risks'[\s\S]*featureKey: 'riskManagement'/);
 	assert.match(dashboard, /buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(dashboard, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
-	assert.match(dashboard, /deriveProjectRiskDashboardAssuranceTone\(risks, new Date\(\)\)/);
+	assert.match(dashboard, /deriveRiskTileAttentionSignal\(risks, new Date\(\)\)/);
+	assert.doesNotMatch(dashboard, /deriveRiskConcernTone\(risks|deriveRiskExposureTone\(risks|deriveProjectRiskDashboardAssuranceTone\(risks/);
 	assert.doesNotMatch(dashboard, /risk_ref/);
 	assert.doesNotMatch(dashboard, /badge|count|attention_items|notification_events|healthScore|AI summar|AI analys/i);
 });

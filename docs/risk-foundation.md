@@ -97,7 +97,7 @@ The integration is intentionally narrow. It creates one entry when a risk is rai
 
 ## Dashboard and RAID future scope
 
-The project dashboard Risk tile routes to the project Risk Register when Risk Management is available. The dashboard remains simple and is not connected to live `project_risks` data, roll-ups, counts or summaries in WT-RISK-002B.
+The project dashboard Risk tile routes to the project Risk Register when Risk Management is available. WT-DASH-RISK-001 and WT-DASH-TILE-SIGNALS-001 make the tile a compact attention/assurance signal without turning it into a count, badge or notification surface. The tile uses active risk management gaps rather than raw exposure: a high-exposure risk does not automatically make the tile Red if owner, action responsibility, mitigation/response, contingency and review cadence are current. Risk exposure remains visible in the Risk Register and Risk Detail views.
 
 The following are also future scope and are not created by this foundation:
 

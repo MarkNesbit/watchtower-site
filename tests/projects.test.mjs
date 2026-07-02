@@ -2,10 +2,17 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+	dashboardTileSignalStatusLabel,
+	deriveProjectDetailsTileSignal,
+	deriveProjectNarrativeTileSignal,
+	deriveRiskTileAttentionSignal,
+} from '../src/lib/dashboardTileSignals.ts';
+import {
 	deriveProjectAttentionState,
 	deriveProjectAttentionStatesByProject,
 	projectAttentionLabel,
 } from '../src/lib/projectAttention.ts';
+import { deriveRiskExposureTone } from '../src/lib/projectRisks.ts';
 import { buildUniqueSlug, slugifyProjectName } from '../src/lib/projectSlugs.ts';
 import { can } from '../src/lib/permissions.ts';
 import {
@@ -48,6 +55,24 @@ const attentionRiskFacts = (overrides = {}) => ({
 	contingency_plan: 'Escalate through steering group.',
 	updated_at: '2026-06-20T10:00:00Z',
 	...overrides,
+});
+
+const dashboardProjectFacts = (overrides = {}) => ({
+	description: 'A project with enough context for delivery assurance.',
+	project_type: 'delivery',
+	delivery_method: 'hybrid',
+	priority: 'high',
+	criticality: 'high',
+	target_end_date: '2026-08-15',
+	next_review_date: '2026-07-15',
+	governance_route: 'Weekly steering group.',
+	escalation_route: 'Escalate via delivery board.',
+	...overrides,
+});
+
+const dashboardDateCard = (dateType, tone) => ({
+	dateType,
+	status: { tone, label: tone.charAt(0).toUpperCase() + tone.slice(1), text: `${tone} date signal` },
 });
 
 test('Project slug generation creates URL-safe slugs', () => {
@@ -114,6 +139,57 @@ test('Project list attention scope is risk-led and leaves dates for later integr
 	assert.match(source, /deriveRiskConcernTone/);
 	assert.match(source, /isDashboardActiveRiskStatus/);
 	assert.doesNotMatch(source, /projectDates|deriveProjectDateStatus|project_narrative|attention_items|health/i);
+});
+
+test('Dashboard tile signal helper derives Project Details setup and date readiness', () => {
+	assert.equal(deriveProjectDetailsTileSignal(
+		dashboardProjectFacts({ description: '' }),
+		[dashboardDateCard('start_date', 'green'), dashboardDateCard('target_end_date', 'green'), dashboardDateCard('review_date', 'green')],
+	), 'red');
+	assert.equal(deriveProjectDetailsTileSignal(
+		dashboardProjectFacts(),
+		[dashboardDateCard('start_date', 'green'), dashboardDateCard('target_end_date', 'red'), dashboardDateCard('review_date', 'green')],
+	), 'red');
+	assert.equal(deriveProjectDetailsTileSignal(
+		dashboardProjectFacts({ governance_route: '' }),
+		[dashboardDateCard('start_date', 'green'), dashboardDateCard('target_end_date', 'green'), dashboardDateCard('review_date', 'green')],
+	), 'amber');
+	assert.equal(deriveProjectDetailsTileSignal(
+		dashboardProjectFacts(),
+		[dashboardDateCard('start_date', 'green'), dashboardDateCard('target_end_date', 'green'), dashboardDateCard('review_date', 'amber')],
+	), 'amber');
+	assert.equal(deriveProjectDetailsTileSignal(
+		dashboardProjectFacts(),
+		[dashboardDateCard('start_date', 'red'), dashboardDateCard('target_end_date', 'green'), dashboardDateCard('review_date', 'green')],
+	), 'green');
+	assert.equal(deriveProjectDetailsTileSignal(
+		dashboardProjectFacts(),
+		[dashboardDateCard('start_date', 'green'), dashboardDateCard('target_end_date', 'green'), dashboardDateCard('review_date', 'green')],
+	), 'green');
+	assert.equal(deriveProjectDetailsTileSignal(dashboardProjectFacts(), null), 'unknown');
+});
+
+test('Dashboard tile signal helper handles Narrative read-state and Risk attention separately from exposure', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	assert.equal(deriveProjectNarrativeTileSignal(null), 'unknown');
+	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 0 }), 'green');
+	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 2 }), 'amber');
+	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 4 }), 'red');
+	assert.equal(dashboardTileSignalStatusLabel('amber'), 'Amber attention');
+
+	const managedHighExposureRisk = attentionRiskFacts({
+		probability: 'high',
+		impact: 'high',
+		mitigation_plan: 'Confirmed supplier alternate.',
+		contingency_plan: 'Escalate through steering group.',
+	});
+	assert.equal(deriveRiskExposureTone(managedHighExposureRisk.probability, managedHighExposureRisk.impact), 'red');
+	assert.equal(deriveRiskTileAttentionSignal([managedHighExposureRisk], now), 'green');
+	assert.equal(deriveRiskTileAttentionSignal([attentionRiskFacts({ owner_id: null })], now), 'red');
+	assert.equal(deriveRiskTileAttentionSignal([attentionRiskFacts({ due_date: null })], now), 'amber');
+	assert.equal(deriveRiskTileAttentionSignal([attentionRiskFacts({ status: 'closed', owner_id: null })], now), 'neutral');
+	assert.equal(deriveRiskTileAttentionSignal([], now), 'neutral');
+	assert.equal(deriveRiskTileAttentionSignal(null, now), 'unknown');
 });
 
 test('Safe unique slug handling appends the next available suffix', () => {
@@ -268,12 +344,16 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	const risksIndex = detailSource.indexOf("title: 'Risks'");
 
 	assert.notEqual(narrativeIndex, -1);
-	assert.match(detailSource, /title: 'Project Details'[\s\S]*?ariaLabel: 'Open Project Details, Informational state'[\s\S]*?destination: 'details'/);
+	assert.match(detailSource, /title: 'Project Details'[\s\S]*?destination: 'details'/);
 	assert.match(detailSource, /title: 'Project Narrative'[\s\S]*?destination: 'narrative',[\s\S]*?featureKey: 'projectDiary'/);
 	assert.ok(narrativeIndex < timelineIndex);
 	assert.ok(timelineIndex < risksIndex);
 	assert.match(detailSource, /title: 'Timeline'.*href: '#timeline'/);
 	assert.match(detailSource, /buildProjectNarrativePath\(workspaceSlug \?\? '', project\.slug\)/);
+	assert.match(detailSource, /deriveProjectDetailsTileSignal\(project, projectDateCards\)/);
+	assert.match(detailSource, /deriveProjectNarrativeTileSignal\(null\)/);
+	assert.match(detailSource, /listProjectDates\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
+	assert.match(detailSource, /buildProjectDateCards\(projectDates, project, new Date\(\)\)/);
 });
 
 test('Project dashboard areas tiles render icon and title only with equal square sizing and RAG state', async () => {
@@ -290,10 +370,12 @@ test('Project dashboard areas tiles render icon and title only with equal square
 
 	assert.match(areasSource, /<span class="dashboard-tile__icon" aria-hidden="true">\{tile\.icon\}<\/span>/);
 	assert.match(areasSource, /<strong>\{tile\.title\}<\/strong>/);
-	assert.match(areasSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'unknown'\} rag-tile--disabled[\s\S]*?aria-disabled="true"[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable, \$\{tile\.statusLabel \?\? 'Unknown state'\}`\}[\s\S]*?tabindex="0"/);
-	assert.match(areasSource, /<a[\s\S]*?class={`dashboard-tile[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'neutral'\}[\s\S]*?href=\{tile\.href\}[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `Open \$\{tile\.title\}, \$\{tile\.statusLabel \?\? 'Neutral state'\}`\}/);
+	assert.match(areasSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'unknown'\} rag-tile--disabled[\s\S]*?aria-disabled="true"[\s\S]*?aria-label=\{`\$\{tile\.ariaLabel \?\? tile\.title\}, unavailable`\}[\s\S]*?title=\{`\$\{tile\.ariaLabel \?\? tile\.title\}, unavailable`\}[\s\S]*?tabindex="0"/);
+	assert.match(areasSource, /<a[\s\S]*?class={`dashboard-tile[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'neutral'\}[\s\S]*?href=\{tile\.href\}[\s\S]*?aria-label=\{`Open \$\{tile\.title\}, \$\{tile\.statusLabel \?\? 'Neutral state'\}`\}[\s\S]*?title=\{`\$\{tile\.ariaLabel \?\? tile\.title\}`\}/);
 	assert.match(areasSource, /data-rag-tile-state=\{tile\.attentionTone \?\? 'unknown'\}/);
 	assert.match(areasSource, /data-rag-tile-state=\{tile\.attentionTone \?\? 'neutral'\}/);
+	assert.match(areasSource, /data-dashboard-tile-signal=\{tile\.attentionTone \?\? 'unknown'\}/);
+	assert.match(areasSource, /data-dashboard-tile-signal=\{tile\.attentionTone \?\? 'neutral'\}/);
 	assert.doesNotMatch(areasSource, /<small|tile\.line|aria-describedby=\{`dashboard-tile-help-/);
 	for (const copy of removedCopy) {
 		assert.doesNotMatch(areasSource, new RegExp(escapeRegExp(copy)));
@@ -312,21 +394,23 @@ test('Project dashboard areas tiles render icon and title only with equal square
 test('Project dashboard Risk tile uses shared RAG assurance state styling', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 
-	assert.match(detailSource, /import \{[\s\S]*deriveProjectRiskDashboardAssuranceTone,[\s\S]*listProjectRisks,[\s\S]*riskAssuranceToneLabel/);
-	assert.match(detailSource, /let riskDashboardIconTone: RiskDashboardAssuranceTone = 'neutral'/);
+	assert.match(detailSource, /import \{[\s\S]*deriveRiskTileAttentionSignal,[\s\S]*type DashboardTileSignalState/);
+	assert.match(detailSource, /let riskTileSignal: DashboardTileSignalState = 'neutral'/);
 	assert.match(detailSource, /riskFeatureAccess\.isAccessible && can\(workspace\.role, 'risk\.view'\)/);
 	assert.match(detailSource, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
-	assert.match(detailSource, /deriveProjectRiskDashboardAssuranceTone\(risks, new Date\(\)\)/);
-	assert.match(detailSource, /riskDashboardIconLabel\(riskDashboardIconTone\)/);
-	assert.match(detailSource, /attentionTone: riskDashboardIconTone/);
-	assert.match(detailSource, /statusLabel: riskDashboardIconTone === 'neutral' \? 'No active risks recorded' : `\$\{riskAssuranceToneLabel\(riskDashboardIconTone\)\} assurance state`/);
-	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable, \$\{tile\.statusLabel \?\? 'Unknown state'\}`\}/);
-	assert.match(detailSource, /aria-label=\{tile\.ariaLabel \?\? `Open \$\{tile\.title\}, \$\{tile\.statusLabel \?\? 'Neutral state'\}`\}/);
+	assert.match(detailSource, /riskTileSignal = deriveRiskTileAttentionSignal\(risks, new Date\(\)\)/);
+	assert.match(detailSource, /riskTileSignal = 'unknown'/);
+	assert.match(detailSource, /const tileSignal = tile\.destination === 'details'[\s\S]*?tile\.destination === 'risks'[\s\S]*?\? riskTileSignal/);
+	assert.match(detailSource, /statusLabel: dashboardTileSignalStatusLabel\(tileSignal\)/);
+	assert.match(detailSource, /ariaLabel: tileAriaLabel\(tile\.title, tileSignal\)/);
+	assert.match(detailSource, /aria-label=\{`Open \$\{tile\.title\}, \$\{tile\.statusLabel \?\? 'Neutral state'\}`\}/);
 	assert.match(detailSource, /data-risk-icon-state=\{tile\.destination === 'risks' \? tile\.iconTone : undefined\}/);
 	assert.match(detailSource, /data-rag-tile-state=\{tile\.attentionTone \?\? 'neutral'\}/);
+	assert.match(detailSource, /data-dashboard-tile-signal=\{tile\.attentionTone \?\? 'neutral'\}/);
 	assert.match(detailSource, /dashboard-tile--icon-\$\{tile\.iconTone \?\? 'default'\}/);
 	assert.match(detailSource, /rag-tile--attention-\$\{tile\.attentionTone \?\? 'neutral'\}/);
 	assert.match(detailSource, /\.dashboard-tile__icon \{[\s\S]*?color: var\(--rag-icon-tone, var\(--tile-icon-status, var\(--tile-status\)\)\)/);
+	assert.doesNotMatch(detailSource, /deriveProjectRiskDashboardAssuranceTone|riskAssuranceToneLabel|riskDashboardIconTone|deriveRiskConcernTone/);
 	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
 	const referenceTileIndex = ragStyles.indexOf('.rag-tile--blue');
 	const redAttentionIndex = ragStyles.indexOf('.rag-tile--attention-red');
