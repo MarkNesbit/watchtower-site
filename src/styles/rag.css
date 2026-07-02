@@ -35,8 +35,7 @@
 .rag-pill--red,
 .rag-card--red,
 .rag-panel--red,
-.rag-tile--red,
-.rag-tile--attention-red {
+.rag-tile--red {
 	--rag-tone: var(--rag-red-accent);
 	--rag-accent: var(--rag-red-accent);
 	--rag-border: var(--rag-red-border);
@@ -47,8 +46,7 @@
 .rag-pill--amber,
 .rag-card--amber,
 .rag-panel--amber,
-.rag-tile--amber,
-.rag-tile--attention-amber {
+.rag-tile--amber {
 	--rag-tone: var(--rag-amber-accent);
 	--rag-accent: var(--rag-amber-accent);
 	--rag-border: var(--rag-amber-border);
@@ -59,8 +57,7 @@
 .rag-pill--green,
 .rag-card--green,
 .rag-panel--green,
-.rag-tile--green,
-.rag-tile--attention-green {
+.rag-tile--green {
 	--rag-tone: var(--rag-green-accent);
 	--rag-accent: var(--rag-green-accent);
 	--rag-border: var(--rag-green-border);
@@ -71,8 +68,7 @@
 .rag-pill--neutral,
 .rag-card--neutral,
 .rag-panel--neutral,
-.rag-tile--neutral,
-.rag-tile--attention-neutral {
+.rag-tile--neutral {
 	--rag-tone: var(--rag-neutral-accent);
 	--rag-accent: var(--rag-neutral-accent);
 	--rag-border: var(--rag-neutral-border);
@@ -83,8 +79,7 @@
 .rag-pill--unknown,
 .rag-card--unknown,
 .rag-panel--unknown,
-.rag-tile--unknown,
-.rag-tile--attention-unknown {
+.rag-tile--unknown {
 	--rag-tone: var(--rag-unknown-accent);
 	--rag-accent: var(--rag-unknown-accent);
 	--rag-border: var(--rag-unknown-border);
@@ -100,6 +95,34 @@
 	--rag-accent: var(--rag-reference);
 	--rag-border: var(--rag-reference-border);
 	--rag-background: var(--rag-reference-background);
+}
+
+.rag-tile--attention-red {
+	--rag-tone: var(--rag-red-accent);
+	--rag-accent: var(--rag-red-accent);
+	--rag-border: var(--rag-red-border);
+	--rag-background: var(--rag-red-background);
+}
+
+.rag-tile--attention-amber {
+	--rag-tone: var(--rag-amber-accent);
+	--rag-accent: var(--rag-amber-accent);
+	--rag-border: var(--rag-amber-border);
+	--rag-background: var(--rag-amber-background);
+}
+
+.rag-tile--attention-green {
+	--rag-tone: var(--rag-green-accent);
+	--rag-accent: var(--rag-green-accent);
+	--rag-border: var(--rag-green-border);
+	--rag-background: var(--rag-green-background);
+}
+
+.rag-tile--disabled {
+	--rag-tone: var(--rag-unknown-accent);
+	--rag-accent: var(--rag-unknown-accent);
+	--rag-border: var(--rag-unknown-border);
+	--rag-background: var(--rag-unknown-background);
 }
 
 .rag-pill {
