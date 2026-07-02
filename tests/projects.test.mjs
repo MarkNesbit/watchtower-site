@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
+import {
+	deriveProjectAttentionState,
+	deriveProjectAttentionStatesByProject,
+	projectAttentionLabel,
+} from '../src/lib/projectAttention.ts';
 import { buildUniqueSlug, slugifyProjectName } from '../src/lib/projectSlugs.ts';
 import { can } from '../src/lib/permissions.ts';
 import {
@@ -30,6 +35,21 @@ function projectAreasSource(source) {
 	return source.slice(start, end);
 }
 
+const attentionRiskFacts = (overrides = {}) => ({
+	project_id: 'project-1',
+	status: 'open',
+	probability: 'low',
+	impact: 'low',
+	owner_id: 'owner-1',
+	actioner_id: 'actioner-1',
+	review_date: '2026-07-10',
+	due_date: '2026-08-01',
+	mitigation_plan: 'Confirmed route.',
+	contingency_plan: 'Escalate through steering group.',
+	updated_at: '2026-06-20T10:00:00Z',
+	...overrides,
+});
+
 test('Project slug generation creates URL-safe slugs', () => {
 	assert.equal(slugifyProjectName(' Watchtower Test Project '), 'watchtower-test-project');
 	assert.equal(slugifyProjectName('München / Delivery!'), 'munchen-delivery');
@@ -49,6 +69,51 @@ test('Project route helpers build workspace-safe risk paths', () => {
 		buildProjectRiskEditPath('alpha workspace', 'delivery hub', 'risk/id'),
 		'/app/workspaces/alpha%20workspace/projects/delivery%20hub/risks/risk%2Fid/edit',
 	);
+});
+
+test('Project list attention helper derives risk-led state without changing health', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const greenRisk = attentionRiskFacts();
+	const amberRisk = attentionRiskFacts({ due_date: null });
+	const redRisk = attentionRiskFacts({ owner_id: null });
+
+	assert.equal(deriveProjectAttentionState([greenRisk, amberRisk, redRisk], now), 'red');
+	assert.equal(deriveProjectAttentionState([greenRisk, amberRisk], now), 'amber');
+	assert.equal(deriveProjectAttentionState([greenRisk], now), 'green');
+	assert.equal(deriveProjectAttentionState([], now), 'green');
+	assert.equal(deriveProjectAttentionState(null, now), 'unknown');
+	assert.equal(projectAttentionLabel('red'), 'Red');
+
+	const closedAndDraftRedRisks = [
+		attentionRiskFacts({ status: 'closed', owner_id: null }),
+		attentionRiskFacts({ status: 'draft', contingency_plan: '' }),
+	];
+	assert.equal(deriveProjectAttentionState(closedAndDraftRedRisks, now), 'green');
+
+	const statesByProject = deriveProjectAttentionStatesByProject(
+		['project-1', 'project-2', 'project-3'],
+		[
+			attentionRiskFacts({ project_id: 'project-1', due_date: null }),
+			attentionRiskFacts({ project_id: 'project-2', owner_id: null }),
+		],
+		now,
+	);
+	assert.equal(statesByProject.get('project-1'), 'amber');
+	assert.equal(statesByProject.get('project-2'), 'red');
+	assert.equal(statesByProject.get('project-3'), 'green');
+});
+
+test('Project list attention helper returns unknown when risk data is unavailable', () => {
+	const statesByProject = deriveProjectAttentionStatesByProject(['project-1', 'project-2'], null);
+	assert.equal(statesByProject.get('project-1'), 'unknown');
+	assert.equal(statesByProject.get('project-2'), 'unknown');
+});
+
+test('Project list attention scope is risk-led and leaves dates for later integration', async () => {
+	const source = await readFile(new URL('../src/lib/projectAttention.ts', import.meta.url), 'utf8');
+	assert.match(source, /deriveRiskConcernTone/);
+	assert.match(source, /isDashboardActiveRiskStatus/);
+	assert.doesNotMatch(source, /projectDates|deriveProjectDateStatus|project_narrative|attention_items|health/i);
 });
 
 test('Safe unique slug handling appends the next available suffix', () => {
@@ -464,7 +529,9 @@ test('Project UI displays and protects project reference', async () => {
 	assert.match(listSource, /project_ref/);
 	assert.match(listSource, /<th scope="col">Reference<\/th>/);
 	assert.match(listSource, /<RagReferencePill[\s\S]*label=\{project\.project_ref \?\? 'Not assigned'\}/);
-	assert.match(listSource, /<RagReferencePill[\s\S]*tone="neutral"[\s\S]*label=\{project\.project_ref \?\? 'Not assigned'\}/);
+	assert.match(listSource, /<RagReferencePill[\s\S]*tone=\{projectAttentionStates\.get\(project\.id\) \?\? 'unknown'\}[\s\S]*label=\{project\.project_ref \?\? 'Not assigned'\}/);
+	assert.match(listSource, /statusLabel=\{projectAttentionLabel\(projectAttentionStates\.get\(project\.id\) \?\? 'unknown'\)\}/);
+	assert.match(listSource, /ariaLabel=\{`Project \$\{project\.project_ref \?\? 'not assigned'\} attention state: \$\{projectAttentionLabel\(projectAttentionStates\.get\(project\.id\) \?\? 'unknown'\)\}`\}/);
 	assert.match(detailSource, /projectRef=\{project\.project_ref\}/);
 	assert.match(editSource, /project\.project_ref/);
 	assert.match(editSource, /read-only and cannot be edited after creation in MVP/);
@@ -489,10 +556,16 @@ test('Project list uses shared authenticated page patterns without changing rout
 	assert.match(listSource, /<EmptyState title="Projects could not be loaded\." tone="error"/);
 	assert.match(listSource, /<EmptyState title="No projects yet\."/);
 	assert.match(listSource, /<table class="simple-table projects-table">/);
-	assert.match(listSource, /<th scope="col">Action<\/th>/);
-	assert.match(listSource, /Open project/);
+	assert.doesNotMatch(listSource, /<th scope="col">Action<\/th>/);
+	assert.doesNotMatch(listSource, /<td><a class="text-link" href=\{buildProjectPath\(workspaceSlug, project\.slug\)\}>Open project<\/a><\/td>/);
+	assert.match(listSource, /<td class="projects-table__name"><a href=\{buildProjectPath\(workspaceSlug, project\.slug\)\} aria-label=\{`Open \$\{project\.name\}`\}>\{project\.name\}<\/a><\/td>/);
 	assert.match(listSource, /buildProjectPath\(workspaceSlug, project\.slug\)/);
-	assert.match(listSource, /\.select\('name, project_ref, slug, status, health, updated_at'\)/);
+	assert.match(listSource, /\.select\('id, name, project_ref, slug, status, health, updated_at'\)/);
+	assert.match(listSource, /deriveProjectAttentionStatesByProject\(projectIds, risksError \? null : risks \?\? \[\], new Date\(\)\)/);
+	assert.match(listSource, /\.from\('project_risks'\)[\s\S]*\.in\('project_id', projectIds\)/);
+	assert.match(listSource, /\.projects-table__name a \{[\s\S]*?color: var\(--accent-strong\);/);
+	assert.match(listSource, /\.projects-table__name a:focus-visible \{[\s\S]*?outline: 3px solid var\(--accent-strong\);/);
+	assert.doesNotMatch(listSource, /healthTone\(projectAttention|projectAttentionStates.*health|health:.*attention/i);
 });
 
 test('Shared RAG visual tokens drive pills cards and tiles', async () => {
