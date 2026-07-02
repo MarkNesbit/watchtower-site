@@ -171,7 +171,7 @@ Risk-generated entries use `source_type = risk`, retain the source risk UUID in 
 
 Routine edits do not populate Project Narrative. Description, owner, actioner, review date, due date, mitigation, contingency, ordinary status changes, Green to Amber transitions, Red staying Red, Red moving down, and risk comments remain on the Risk record unless the derived overall concern crosses from non-Red to Red. Project Narrative is therefore a project story and overview layer, not a general audit log.
 
-The Project Narrative detail modal can show a read-only source risk preview and an Open full risk action. It does not allow risk editing. Owner, Admin and Member users still edit risks only through Risk Management; Viewer users can read available narrative entries and source-risk previews but cannot create or edit risks. No attention items, notifications, health scoring, AI summaries, issue creation, or full historical snapshot/replay are introduced by this slice.
+The Project Narrative detail modal can show read-only current source-risk detail for risk-linked entries. It includes separate exposure, attention/assurance and overall concern signals using the shared RAG visual system, plus an Open full risk in new tab action. It does not allow risk editing. Owner, Admin and Member users still edit risks only through Risk Management; Viewer users can read available narrative entries and source-risk detail but cannot create or edit risks. No attention items, notifications, health scoring, AI summaries, issue creation, or full historical snapshot/replay are introduced by this slice.
 
 ## WT-002B implementation guidance
 
