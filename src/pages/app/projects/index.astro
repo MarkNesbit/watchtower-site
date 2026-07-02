@@ -5,6 +5,7 @@ import EmptyState from '../../../components/app/EmptyState.astro';
 import ProjectContentPanel from '../../../components/app/ProjectContentPanel.astro';
 import RagReferencePill from '../../../components/app/RagReferencePill.astro';
 import { can } from '../../../lib/permissions';
+import { deriveProjectAttentionStatesByProject, projectAttentionLabel } from '../../../lib/projectAttention';
 import { buildProjectPath, getCurrentWorkspace } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
@@ -16,6 +17,7 @@ let workspaceSlug = '';
 let workspaceName = '';
 let canCreateProject = false;
 let createProjectRestriction = 'Select an active workspace before creating a project.';
+let projectAttentionStates = new Map<string, 'red' | 'amber' | 'green' | 'unknown' | 'neutral'>();
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -39,13 +41,26 @@ try {
 		}
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('name, project_ref, slug, status, health, updated_at')
+			.select('id, name, project_ref, slug, status, health, updated_at')
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
 			.is('archived_at', null)
 			.order('updated_at', { ascending: false });
 		if (error) throw error;
 		projects = data ?? [];
+		const projectIds = projects.map((project) => project.id).filter(Boolean);
+		if (projectIds.length > 0 && can(workspace.role, 'risk.view')) {
+			const { data: risks, error: risksError } = await serverSupabase
+				.from('project_risks')
+				.select('project_id, status, owner_id, actioner_id, review_date, due_date, mitigation_plan, contingency_plan, probability, impact, updated_at')
+				.eq('organisation_id', organisation.id)
+				.in('project_id', projectIds)
+				.is('deleted_at', null)
+				.is('archived_at', null);
+			projectAttentionStates = deriveProjectAttentionStatesByProject(projectIds, risksError ? null : risks ?? [], new Date());
+		} else {
+			projectAttentionStates = deriveProjectAttentionStatesByProject(projectIds, null);
+		}
 	}
 } catch (error) {
 	loadError = error instanceof Error ? error.message : 'Unable to load projects.';
@@ -109,18 +124,20 @@ const healthTone = (value) => {
 				<div class="projects-table-scroll">
 					<table class="simple-table projects-table">
 						<thead>
-							<tr><th scope="col">Reference</th><th scope="col">Project</th><th scope="col">Status</th><th scope="col">Health</th><th scope="col">Last updated</th><th scope="col">Action</th></tr>
+							<tr><th scope="col">Reference</th><th scope="col">Project</th><th scope="col">Status</th><th scope="col">Health</th><th scope="col">Last updated</th></tr>
 						</thead>
 						<tbody>
 							{projects.map((project) => (
 								<tr>
 									<td>
 										<RagReferencePill
-											tone="neutral"
+											tone={projectAttentionStates.get(project.id) ?? 'unknown'}
 											label={project.project_ref ?? 'Not assigned'}
+											statusLabel={projectAttentionLabel(projectAttentionStates.get(project.id) ?? 'unknown')}
+											ariaLabel={`Project ${project.project_ref ?? 'not assigned'} attention state: ${projectAttentionLabel(projectAttentionStates.get(project.id) ?? 'unknown')}`}
 										/>
 									</td>
-									<td class="projects-table__name"><a href={buildProjectPath(workspaceSlug, project.slug)}>{project.name}</a></td>
+									<td class="projects-table__name"><a href={buildProjectPath(workspaceSlug, project.slug)} aria-label={`Open ${project.name}`}>{project.name}</a></td>
 									<td><span class="projects-table__status">{formatLabel(project.status, 'Unknown')}</span></td>
 									<td>
 										<RagReferencePill
@@ -129,7 +146,6 @@ const healthTone = (value) => {
 										/>
 									</td>
 									<td><time datetime={project.updated_at}>{formatDate(project.updated_at)}</time></td>
-									<td><a class="text-link" href={buildProjectPath(workspaceSlug, project.slug)}>Open project</a></td>
 								</tr>
 							))}
 						</tbody>
@@ -187,7 +203,7 @@ const healthTone = (value) => {
 	}
 
 	.projects-table {
-		min-width: 54rem;
+		min-width: 45rem;
 	}
 
 	.projects-table th:first-child {
@@ -201,10 +217,6 @@ const healthTone = (value) => {
 
 	.projects-table th:nth-child(5) {
 		width: 13rem;
-	}
-
-	.projects-table th:last-child {
-		width: 9rem;
 	}
 
 	.projects-table th {
@@ -224,15 +236,22 @@ const healthTone = (value) => {
 	}
 
 	.projects-table__name a {
-		color: var(--text);
-		text-decoration: none;
+		color: var(--accent-strong);
+		text-decoration: underline;
+		text-decoration-color: color-mix(in srgb, var(--accent) 48%, transparent);
+		text-underline-offset: 0.18em;
 	}
 
 	.projects-table__name a:hover,
-	.projects-table__name a:focus-visible,
-	.projects-table .text-link:hover,
-	.projects-table .text-link:focus-visible {
+	.projects-table__name a:focus-visible {
 		color: var(--accent-strong);
+		text-decoration-color: var(--accent-strong);
+	}
+
+	.projects-table__name a:focus-visible {
+		border-radius: 0.2rem;
+		outline: 3px solid var(--accent-strong);
+		outline-offset: 3px;
 	}
 
 	.projects-table__status {
