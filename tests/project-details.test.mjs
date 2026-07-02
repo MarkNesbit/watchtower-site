@@ -303,8 +303,17 @@ test('Project Details route displays full available details read-first with moda
 		'project_roles_responsibilities',
 		'system_metadata',
 	]) {
-		assert.match(source, new RegExp(`data-project-section-signal="${section}"`));
+		assert.match(source, new RegExp(`data-project-section-marker="${section}"`));
 	}
+	assert.match(source, /data-section-state=\{identitySignal\.state\}/);
+	assert.match(source, /data-section-state=\{datesSignal\.state\}/);
+	assert.match(source, /statusLabel="Section"/);
+	assert.match(source, /project-content-panel:has\(\[data-section-state="green"\]\)/);
+	assert.match(source, /project-content-panel:has\(\[data-section-state="amber"\]\)/);
+	assert.match(source, /project-content-panel:has\(\[data-section-state="red"\]\)/);
+	assert.doesNotMatch(source, /project-section-signal/);
+	assert.doesNotMatch(source, /data-project-section-signal/);
+	assert.doesNotMatch(source, /Expected identity fields are present/);
 	assert.match(signalSource, /Project Identity/);
 	assert.match(signalSource, /Project Description/);
 	assert.match(signalSource, /Project Context/);
@@ -312,8 +321,6 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(signalSource, /Governance and Escalation/);
 	assert.match(signalSource, /Project Roles and Responsibilities/);
 	assert.match(signalSource, /System Metadata/);
-	assert.match(source, /rag-card rag-card--\$\{identitySignal\.state\}/);
-	assert.match(source, /rag-card rag-card--\$\{contextSignal\.state\}/);
 	assert.match(signalSource, /Expected identity fields are present/);
 	assert.match(signalSource, /#project-description-heading/);
 	assert.match(signalSource, /#project-context-heading/);
