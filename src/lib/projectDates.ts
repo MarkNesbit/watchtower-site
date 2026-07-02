@@ -5,6 +5,15 @@ export const PROJECT_DATE_TYPES = ['start_date', 'target_end_date', 'review_date
 export type ProjectDateType = (typeof PROJECT_DATE_TYPES)[number];
 export const DEFAULT_PROJECT_DATE_TYPES: ProjectDateType[] = ['start_date', 'target_end_date', 'review_date'];
 export const PROJECT_DATE_WARNING_DAYS = 14;
+export const PROJECT_DATE_TYPE_WARNING_DAYS: Record<ProjectDateType, number> = {
+	start_date: 0,
+	target_end_date: 14,
+	review_date: 2,
+	uat: 7,
+	stage_gate: 14,
+	load_test: 7,
+	other: 14,
+};
 export const PROJECT_DATE_EDIT_ASSIGNMENT_ROLES = ['project_manager', 'delivery_lead', 'product_owner'] as const;
 
 export type ProjectDateStatusTone = 'green' | 'amber' | 'red';
@@ -105,6 +114,10 @@ export function isProjectDateType(value: unknown): value is ProjectDateType {
 	return typeof value === 'string' && PROJECT_DATE_TYPES.includes(value as ProjectDateType);
 }
 
+export function projectDateWarningDays(dateType: unknown): number {
+	return isProjectDateType(dateType) ? PROJECT_DATE_TYPE_WARNING_DAYS[dateType] : PROJECT_DATE_WARNING_DAYS;
+}
+
 export function projectDateTypeLabel(value: unknown, customLabel?: string | null): string {
 	if (value === 'other' && customLabel?.trim()) return customLabel.trim();
 	if (value === 'uat') return 'UAT';
@@ -116,7 +129,12 @@ export function projectDateTypeLabel(value: unknown, customLabel?: string | null
 	return 'Project date';
 }
 
-export function deriveProjectDateStatus(targetDate?: string | null, warningDays = PROJECT_DATE_WARNING_DAYS, now = new Date()) {
+export function deriveProjectDateStatus(
+	targetDate?: string | null,
+	warningDays = PROJECT_DATE_WARNING_DAYS,
+	now = new Date(),
+	dateType: ProjectDateType | string = 'other',
+) {
 	if (!targetDate) {
 		return { tone: 'amber' as const, label: 'Amber', text: 'Amber - date not set' };
 	}
@@ -128,7 +146,16 @@ export function deriveProjectDateStatus(targetDate?: string | null, warningDays 
 	}
 
 	const daysUntil = Math.floor((target - today) / 86400000);
-	if (daysUntil < 0) return { tone: 'red' as const, label: 'Red', text: 'Red - overdue' };
+	if (dateType === 'start_date') {
+		if (daysUntil < 0) return { tone: 'green' as const, label: 'Green', text: 'Green - started' };
+		if (daysUntil === 0) return { tone: 'green' as const, label: 'Green', text: 'Green - starting today' };
+		if (daysUntil <= warningDays) return { tone: 'amber' as const, label: 'Amber', text: 'Amber - start approaching' };
+		return { tone: 'green' as const, label: 'Green', text: 'Green - scheduled' };
+	}
+	if (daysUntil < 0) {
+		const overdueText = dateType === 'review_date' ? 'Red - review overdue' : 'Red - overdue';
+		return { tone: 'red' as const, label: 'Red', text: overdueText };
+	}
 	if (daysUntil <= warningDays) return { tone: 'amber' as const, label: 'Amber', text: `Amber - within ${warningDays} days` };
 	return { tone: 'green' as const, label: 'Green', text: 'Green - scheduled' };
 }
@@ -154,7 +181,7 @@ export function buildProjectDateCards(
 				? legacyProject?.target_end_date
 				: legacyProject?.next_review_date;
 		const targetDate = record?.target_date ?? legacyDate ?? null;
-		const warningDays = record?.warning_days ?? PROJECT_DATE_WARNING_DAYS;
+		const warningDays = projectDateWarningDays(dateType);
 		const comments = record?.comments ?? [];
 		return {
 			id: record?.id ?? null,
@@ -165,7 +192,7 @@ export function buildProjectDateCards(
 			warningDays,
 			isDefault: true,
 			isKeyDate: record?.is_key_date ?? true,
-			status: deriveProjectDateStatus(targetDate, warningDays, now),
+			status: deriveProjectDateStatus(targetDate, warningDays, now, dateType),
 			comments,
 			commentCount: comments.length,
 		};
@@ -183,10 +210,10 @@ export function buildProjectDateCards(
 				customLabel: date.custom_label ?? null,
 				label: projectDateTypeLabel(dateType, date.custom_label),
 				targetDate: date.target_date ?? null,
-				warningDays: date.warning_days ?? PROJECT_DATE_WARNING_DAYS,
+				warningDays: projectDateWarningDays(dateType),
 				isDefault: false,
 				isKeyDate: date.is_key_date,
-				status: deriveProjectDateStatus(date.target_date, date.warning_days, now),
+				status: deriveProjectDateStatus(date.target_date, projectDateWarningDays(dateType), now, dateType),
 				comments,
 				commentCount: comments.length,
 			};
@@ -443,7 +470,7 @@ export async function saveProjectDate(
 				date_type: cleaned.dateType,
 				custom_label: cleaned.customLabel,
 				target_date: cleaned.targetDate,
-				warning_days: existing.warning_days ?? PROJECT_DATE_WARNING_DAYS,
+				warning_days: projectDateWarningDays(cleaned.dateType),
 				is_key_date: existing.is_key_date ?? true,
 			})
 			.eq('organisation_id', organisation.id)
@@ -463,7 +490,7 @@ export async function saveProjectDate(
 				date_type: cleaned.dateType,
 				custom_label: cleaned.customLabel,
 				target_date: cleaned.targetDate,
-				warning_days: PROJECT_DATE_WARNING_DAYS,
+				warning_days: projectDateWarningDays(cleaned.dateType),
 				is_key_date: true,
 			})
 			.select(DATE_SELECT)
