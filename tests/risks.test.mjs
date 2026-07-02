@@ -1272,11 +1272,12 @@ test('Risk activity assurance and temporary handover remain documented future-re
 
 test('Project dashboard Risk tile routes to the Risk Register and loads only scoped assurance state', async () => {
 	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+	const riskTileDefinition = dashboard.slice(dashboard.indexOf("title: 'Risks'"), dashboard.indexOf("title: 'Issues'"));
 	assert.match(dashboard, /title: 'Risks'[\s\S]*destination: 'risks'[\s\S]*featureKey: 'riskManagement'/);
 	assert.match(dashboard, /buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(dashboard, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
 	assert.match(dashboard, /deriveRiskTileAttentionSignal\(risks, new Date\(\)\)/);
 	assert.doesNotMatch(dashboard, /deriveRiskConcernTone\(risks|deriveRiskExposureTone\(risks|deriveProjectRiskDashboardAssuranceTone\(risks/);
-	assert.doesNotMatch(dashboard, /risk_ref/);
-	assert.doesNotMatch(dashboard, /badge|count|attention_items|notification_events|healthScore|AI summar|AI analys/i);
+	assert.doesNotMatch(riskTileDefinition, /risk_ref/);
+	assert.doesNotMatch(riskTileDefinition, /badge|count|attention_items|notification_events|healthScore|AI summar|AI analys/i);
 });

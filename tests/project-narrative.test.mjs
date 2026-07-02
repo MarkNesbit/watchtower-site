@@ -5,9 +5,11 @@ import test from 'node:test';
 import {
 	createProjectNarrativeEntry,
 	getNarrativeDisplayRef,
+	getUnseenProjectNarrativeCount,
 	isNarrativeAttentionLevel,
 	isNarrativeSourceType,
 	listProjectNarrativeEntries,
+	markProjectNarrativeViewed,
 	normaliseProjectNarrativeLinks,
 	normaliseProjectNarrativeLinkUrl,
 	NARRATIVE_ATTENTION_LEVELS,
@@ -25,6 +27,11 @@ const linksMigrationPath = new URL(
 	import.meta.url,
 );
 const linksMigrationSql = async () => readFile(linksMigrationPath, 'utf8');
+const readStateMigrationPath = new URL(
+	'../supabase/migrations/20260702000100_project_narrative_read_states.sql',
+	import.meta.url,
+);
+const readStateMigrationSql = async () => readFile(readStateMigrationPath, 'utf8');
 
 test('Project Narrative migration creates the structured project-scoped record', async () => {
 	const sql = await migrationSql();
@@ -154,6 +161,38 @@ test('Project Narrative link migration creates scoped structured hyperlinks with
 	assert.match(sql, /has_active_organisation_role\(\s*project_narrative_entry_links\.organisation_id,\s*array\['owner', 'admin', 'member'\]/);
 	assert.doesNotMatch(sql, /array\['owner', 'admin', 'member', 'viewer'\]/);
 	assert.doesNotMatch(sql, /for update|for delete/i);
+});
+
+test('Project Narrative read-state migration creates per-user scoped state with own-row RLS', async () => {
+	const sql = await readStateMigrationSql();
+	assert.match(sql, /create table public\.project_narrative_read_states \(/);
+	for (const field of [
+		'id uuid primary key default gen_random_uuid()',
+		'organisation_id uuid not null references public.organisations(id) on delete cascade',
+		'project_id uuid not null references public.projects(id) on delete cascade',
+		'user_id uuid not null references auth.users(id) on delete cascade',
+		'last_viewed_at timestamptz not null',
+		'created_at timestamptz not null default now()',
+		'updated_at timestamptz not null default now()',
+	]) {
+		assert.ok(sql.includes(field), `Expected read-state migration to contain ${field}`);
+	}
+	assert.match(sql, /foreign key \(project_id, organisation_id\)[\s\S]*references public\.projects\(id, organisation_id\)/);
+	assert.match(sql, /unique \(organisation_id, project_id, user_id\)/);
+	assert.match(sql, /set_project_narrative_read_states_updated_at/);
+	assert.match(sql, /prevent_project_narrative_read_state_identity_update/);
+	for (const identity of ['organisation_id', 'project_id', 'user_id', 'created_at']) {
+		assert.match(sql, new RegExp(`old\\.${identity} is distinct from new\\.${identity}`));
+	}
+	assert.match(sql, /alter table public\.project_narrative_read_states enable row level security/);
+	assert.match(sql, /Active members can read their own project narrative read states/);
+	assert.match(sql, /Active members can create their own project narrative read states/);
+	assert.match(sql, /Active members can update their own project narrative read states/);
+	assert.match(sql, /user_id = auth\.uid\(\)/);
+	assert.match(sql, /is_active_organisation_member\(project_narrative_read_states\.organisation_id\)/);
+	assert.match(sql, /grant update \(\s*last_viewed_at\s*\) on public\.project_narrative_read_states to authenticated/);
+	assert.doesNotMatch(sql, /grant update \([\s\S]*?(?:organisation_id|project_id|user_id|created_at)[\s\S]*?\) on public\.project_narrative_read_states/);
+	assert.doesNotMatch(sql, /notification|digest|badge|health|risk scoring|project list attention/i);
 });
 
 test('data access defaults manual entries to neutral and leaves source metadata optional', async () => {
@@ -457,6 +496,175 @@ test('base narrative list query errors are surfaced', async () => {
 	);
 });
 
+test('unseen Project Narrative count uses current user read-state and counts all entries when no state exists', async () => {
+	const calls = [];
+	const makeClient = ({ lastViewedAt = null, count = 0 } = {}) => ({
+		auth: {
+			getUser(token) {
+				calls.push(['auth.getUser', token]);
+				return Promise.resolve({ data: { user: { id: 'user-1' } }, error: null });
+			},
+		},
+		from(table) {
+			calls.push(['from', table]);
+			if (table === 'project_narrative_read_states') {
+				return {
+					select(columns) {
+						calls.push(['select', table, columns]);
+						return this;
+					},
+					eq(column, value) {
+						calls.push(['eq', table, column, value]);
+						return this;
+					},
+					maybeSingle() {
+						calls.push(['maybeSingle', table]);
+						return Promise.resolve({ data: lastViewedAt ? { last_viewed_at: lastViewedAt } : null, error: null });
+					},
+				};
+			}
+			if (table === 'project_narrative_entries') {
+				return {
+					select(columns, options) {
+						calls.push(['select', table, columns, options]);
+						return this;
+					},
+					eq(column, value) {
+						calls.push(['eq', table, column, value]);
+						return this;
+					},
+					gt(column, value) {
+						calls.push(['gt', table, column, value]);
+						return this;
+					},
+					then(resolve) {
+						return Promise.resolve({ count, error: null }).then(resolve);
+					},
+				};
+			}
+			assert.fail(`Unexpected table ${table}`);
+		},
+	});
+
+	assert.equal(
+		await getUnseenProjectNarrativeCount('workspace-id', 'project-id', 'viewer', makeClient({ count: 3 }), 'token'),
+		3,
+	);
+	assert.equal(calls.some((call) => call[0] === 'gt'), false);
+
+	calls.length = 0;
+	assert.equal(
+		await getUnseenProjectNarrativeCount(
+			'workspace-id',
+			'project-id',
+			'viewer',
+			makeClient({ lastViewedAt: '2026-07-01T10:00:00.000Z', count: 2 }),
+			'token',
+		),
+		2,
+	);
+	assert.deepEqual(calls.filter((call) => call[0] === 'gt'), [
+		['gt', 'project_narrative_entries', 'created_at', '2026-07-01T10:00:00.000Z'],
+	]);
+	assert.deepEqual(calls.filter((call) => call[0] === 'eq' && call[1] === 'project_narrative_read_states'), [
+		['eq', 'project_narrative_read_states', 'organisation_id', 'workspace-id'],
+		['eq', 'project_narrative_read_states', 'project_id', 'project-id'],
+		['eq', 'project_narrative_read_states', 'user_id', 'user-1'],
+	]);
+});
+
+test('unseen Project Narrative count returns zero when no entries match and rejects unauthenticated users', async () => {
+	const countClient = {
+		auth: { getUser: async () => ({ data: { user: { id: 'user-1' } }, error: null }) },
+		from(table) {
+			if (table === 'project_narrative_read_states') {
+				return {
+					select: () => ({
+						eq: () => ({
+							eq: () => ({
+								eq: () => ({ maybeSingle: async () => ({ data: { last_viewed_at: '2026-07-01T10:00:00.000Z' }, error: null }) }),
+							}),
+						}),
+					}),
+				};
+			}
+			if (table === 'project_narrative_entries') {
+				return {
+					select: () => ({
+						eq: () => ({
+							eq: () => ({
+								gt: async () => ({ count: 0, error: null }),
+							}),
+						}),
+					}),
+				};
+			}
+			assert.fail(`Unexpected table ${table}`);
+		},
+	};
+	assert.equal(await getUnseenProjectNarrativeCount('workspace-id', 'project-id', 'viewer', countClient), 0);
+
+	const anonymousClient = {
+		auth: { getUser: async () => ({ data: { user: null }, error: null }) },
+		from: () => assert.fail('Client table access should not happen without a user'),
+	};
+	await assert.rejects(
+		getUnseenProjectNarrativeCount('workspace-id', 'project-id', 'viewer', anonymousClient),
+		/Authenticated user is required/,
+	);
+});
+
+test('marking Project Narrative viewed upserts current user read-state without changing entries', async () => {
+	const calls = [];
+	const viewedAt = new Date('2026-07-02T09:30:00.000Z');
+	const expectedState = {
+		id: 'state-id',
+		organisation_id: 'workspace-id',
+		project_id: 'project-id',
+		user_id: 'user-1',
+		last_viewed_at: viewedAt.toISOString(),
+		created_at: '2026-07-02T09:30:00.000Z',
+		updated_at: '2026-07-02T09:30:00.000Z',
+	};
+	const client = {
+		auth: {
+			getUser(token) {
+				calls.push(['auth.getUser', token]);
+				return Promise.resolve({ data: { user: { id: 'user-1' } }, error: null });
+			},
+		},
+		from(table) {
+			calls.push(['from', table]);
+			assert.equal(table, 'project_narrative_read_states');
+			return {
+				upsert(payload, options) {
+					calls.push(['upsert', table, payload, options]);
+					return {
+						select(columns) {
+							calls.push(['select', table, columns]);
+							return {
+								single: async () => ({ data: expectedState, error: null }),
+							};
+						},
+					};
+				},
+			};
+		},
+	};
+
+	const state = await markProjectNarrativeViewed('workspace-id', 'project-id', 'viewer', client, 'token', viewedAt);
+	assert.deepEqual(state, expectedState);
+	assert.deepEqual(calls.filter((call) => call[0] === 'upsert'), [
+		['upsert', 'project_narrative_read_states', {
+			organisation_id: 'workspace-id',
+			project_id: 'project-id',
+			user_id: 'user-1',
+			last_viewed_at: viewedAt.toISOString(),
+		}, { onConflict: 'organisation_id,project_id,user_id' }],
+	]);
+	assert.equal(calls.some((call) => call[1] === 'project_narrative_entries'), false);
+});
+
 test('display reference prefers a source reference and otherwise uses the Narrative reference', () => {
 	assert.equal(getNarrativeDisplayRef({ source_ref: 'Risk-HHH-003', narrative_ref: 'NAR-HHH-007' }), 'Risk-HHH-003');
 	assert.equal(getNarrativeDisplayRef({ source_ref: null, narrative_ref: 'NAR-HHH-007' }), 'NAR-HHH-007');
@@ -543,6 +751,9 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /Link label is required when adding a link/);
 	assert.match(page, /normaliseProjectNarrativeLinkUrl\(link\.url\)/);
 	assert.match(page, /createProjectNarrativeEntry\(/);
+	assert.match(page, /import [\s\S]*markProjectNarrativeViewed[\s\S]*from/);
+	assert.match(page, /markProjectNarrativeViewed\(organisation\.id, data\.id, workspace\.role, serverSupabase, accessToken\)/);
+	assert.ok(page.indexOf('entries = await listProjectNarrativeEntries') < page.indexOf('await markProjectNarrativeViewed'));
 	assert.match(page, /data-detail-modal/);
 	assert.match(page, /data-entry-id=\{entry\.id\}/);
 	assert.match(page, /data-detail-narrative-ref/);
@@ -597,6 +808,7 @@ test('Project Narrative page provides manual creation and read-only detail modal
 
 test('Project Narrative foundation does not add RAID integration, export, notifications or AI', async () => {
 	const sql = await migrationSql();
+	const readStateSql = await readStateMigrationSql();
 	for (const excludedTable of [
 		'project_issues',
 		'project_dependencies',
@@ -607,6 +819,7 @@ test('Project Narrative foundation does not add RAID integration, export, notifi
 		'ai_narrative_summaries',
 	]) {
 		assert.doesNotMatch(sql, new RegExp(`create\\s+table\\s+(public\\.)?${excludedTable}\\b`, 'i'));
+		assert.doesNotMatch(readStateSql, new RegExp(`create\\s+table\\s+(public\\.)?${excludedTable}\\b`, 'i'));
 	}
 	const page = await readFile(
 		new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/narrative.astro', import.meta.url),

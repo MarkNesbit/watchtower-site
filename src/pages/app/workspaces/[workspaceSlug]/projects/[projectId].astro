@@ -15,6 +15,7 @@ import { getFeatureAccess, loadFeatureAccess } from '../../../../../lib/featureF
 import type { FeatureAccess, FeatureKey } from '../../../../../lib/featureFlags';
 import { can } from '../../../../../lib/permissions';
 import { buildProjectDateCards, listProjectDates, type ProjectDateCard } from '../../../../../lib/projectDates';
+import { getUnseenProjectNarrativeCount } from '../../../../../lib/projectNarrative';
 import { buildProjectDetailsPath, buildProjectNarrativePath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
 import { listProjectRisks } from '../../../../../lib/projectRisks';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../lib/supabaseServer';
@@ -30,6 +31,7 @@ let creatorDisplayName = '';
 let projectDateCards: ProjectDateCard[] | null = null;
 let projectDetailsTileSignal: DashboardTileSignalState = 'unknown';
 let projectNarrativeTileSignal: DashboardTileSignalState = 'unknown';
+let unseenProjectNarrativeEntries: number | null = null;
 let riskTileSignal: DashboardTileSignalState = 'neutral';
 
 const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not available';
@@ -43,6 +45,12 @@ const healthTone = (value) => {
 	return 'unknown';
 };
 const tileAriaLabel = (title: string, state: DashboardTileSignalState) => `${title}: ${dashboardTileSignalStatusLabel(state)}`;
+const projectNarrativeStatusLabel = (state: DashboardTileSignalState, unseenEntries: number | null) => {
+	if (!Number.isInteger(unseenEntries) || unseenEntries < 0) return dashboardTileSignalStatusLabel(state);
+	if (unseenEntries === 0) return 'Green attention, no unseen entries';
+	const entryLabel = unseenEntries === 1 ? 'entry' : 'entries';
+	return `${formatStatusLabel(state)} attention, ${unseenEntries} unseen ${entryLabel}`;
+};
 
 type ProjectTile = {
 	title: string;
@@ -141,7 +149,22 @@ try {
 				projectDateCards = null;
 			}
 			projectDetailsTileSignal = deriveProjectDetailsTileSignal(project, projectDateCards);
-			projectNarrativeTileSignal = deriveProjectNarrativeTileSignal(null);
+			const narrativeFeatureAccess = featureAccessByKey.projectDiary ?? getFeatureAccess('projectDiary');
+			if (narrativeFeatureAccess.isAccessible && can(workspace.role, 'narrative.view')) {
+				try {
+					unseenProjectNarrativeEntries = await getUnseenProjectNarrativeCount(
+						organisation.id,
+						project.id,
+						workspace.role,
+						serverSupabase,
+						accessToken,
+					);
+					projectNarrativeTileSignal = deriveProjectNarrativeTileSignal({ unseenEntries: unseenProjectNarrativeEntries });
+				} catch {
+					unseenProjectNarrativeEntries = null;
+					projectNarrativeTileSignal = 'unknown';
+				}
+			}
 			const riskFeatureAccess = featureAccessByKey.riskManagement ?? getFeatureAccess('riskManagement');
 			if (riskFeatureAccess.isAccessible && can(workspace.role, 'risk.view')) {
 				try {
@@ -193,8 +216,12 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => {
 		...tile,
 		iconTone: tileSignal,
 		attentionTone: tileSignal,
-		statusLabel: dashboardTileSignalStatusLabel(tileSignal),
-		ariaLabel: tileAriaLabel(tile.title, tileSignal),
+		statusLabel: tile.destination === 'narrative'
+			? projectNarrativeStatusLabel(tileSignal, unseenProjectNarrativeEntries)
+			: dashboardTileSignalStatusLabel(tileSignal),
+		ariaLabel: tile.destination === 'narrative'
+			? `${tile.title}: ${projectNarrativeStatusLabel(tileSignal, unseenProjectNarrativeEntries)}`
+			: tileAriaLabel(tile.title, tileSignal),
 	};
 });
 ---

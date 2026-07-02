@@ -173,7 +173,9 @@ test('Dashboard tile signal helper handles Narrative read-state and Risk attenti
 	const now = new Date('2026-06-28T12:00:00Z');
 	assert.equal(deriveProjectNarrativeTileSignal(null), 'unknown');
 	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 0 }), 'green');
+	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 1 }), 'amber');
 	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 2 }), 'amber');
+	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 3 }), 'amber');
 	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 4 }), 'red');
 	assert.equal(dashboardTileSignalStatusLabel('amber'), 'Amber attention');
 
@@ -351,7 +353,10 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	assert.match(detailSource, /title: 'Timeline'.*href: '#timeline'/);
 	assert.match(detailSource, /buildProjectNarrativePath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(detailSource, /deriveProjectDetailsTileSignal\(project, projectDateCards\)/);
-	assert.match(detailSource, /deriveProjectNarrativeTileSignal\(null\)/);
+	assert.match(detailSource, /getUnseenProjectNarrativeCount\(/);
+	assert.match(detailSource, /projectNarrativeTileSignal = deriveProjectNarrativeTileSignal\(\{ unseenEntries: unseenProjectNarrativeEntries \}\)/);
+	assert.match(detailSource, /narrativeFeatureAccess\.isAccessible && can\(workspace\.role, 'narrative\.view'\)/);
+	assert.doesNotMatch(detailSource, /markProjectNarrativeViewed\(/);
 	assert.match(detailSource, /listProjectDates\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
 	assert.match(detailSource, /buildProjectDateCards\(projectDates, project, new Date\(\)\)/);
 });
@@ -393,6 +398,7 @@ test('Project dashboard areas tiles render icon and title only with equal square
 
 test('Project dashboard Risk tile uses shared RAG assurance state styling', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+	const areasSource = projectAreasSource(detailSource);
 
 	assert.match(detailSource, /import \{[\s\S]*deriveRiskTileAttentionSignal,[\s\S]*type DashboardTileSignalState/);
 	assert.match(detailSource, /let riskTileSignal: DashboardTileSignalState = 'neutral'/);
@@ -401,8 +407,8 @@ test('Project dashboard Risk tile uses shared RAG assurance state styling', asyn
 	assert.match(detailSource, /riskTileSignal = deriveRiskTileAttentionSignal\(risks, new Date\(\)\)/);
 	assert.match(detailSource, /riskTileSignal = 'unknown'/);
 	assert.match(detailSource, /const tileSignal = tile\.destination === 'details'[\s\S]*?tile\.destination === 'risks'[\s\S]*?\? riskTileSignal/);
-	assert.match(detailSource, /statusLabel: dashboardTileSignalStatusLabel\(tileSignal\)/);
-	assert.match(detailSource, /ariaLabel: tileAriaLabel\(tile\.title, tileSignal\)/);
+	assert.match(detailSource, /statusLabel: tile\.destination === 'narrative'[\s\S]*?: dashboardTileSignalStatusLabel\(tileSignal\)/);
+	assert.match(detailSource, /ariaLabel: tile\.destination === 'narrative'[\s\S]*?: tileAriaLabel\(tile\.title, tileSignal\)/);
 	assert.match(detailSource, /aria-label=\{`Open \$\{tile\.title\}, \$\{tile\.statusLabel \?\? 'Neutral state'\}`\}/);
 	assert.match(detailSource, /data-risk-icon-state=\{tile\.destination === 'risks' \? tile\.iconTone : undefined\}/);
 	assert.match(detailSource, /data-rag-tile-state=\{tile\.attentionTone \?\? 'neutral'\}/);
@@ -411,6 +417,9 @@ test('Project dashboard Risk tile uses shared RAG assurance state styling', asyn
 	assert.match(detailSource, /rag-tile--attention-\$\{tile\.attentionTone \?\? 'neutral'\}/);
 	assert.match(detailSource, /\.dashboard-tile__icon \{[\s\S]*?color: var\(--rag-icon-tone, var\(--tile-icon-status, var\(--tile-status\)\)\)/);
 	assert.doesNotMatch(detailSource, /deriveProjectRiskDashboardAssuranceTone|riskAssuranceToneLabel|riskDashboardIconTone|deriveRiskConcernTone/);
+	assert.match(detailSource, /projectNarrativeStatusLabel\(tileSignal, unseenProjectNarrativeEntries\)/);
+	assert.match(detailSource, /Green attention, no unseen entries/);
+	assert.match(detailSource, /\$\{unseenEntries\} unseen \$\{entryLabel\}/);
 	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
 	const referenceTileIndex = ragStyles.indexOf('.rag-tile--blue');
 	const redAttentionIndex = ragStyles.indexOf('.rag-tile--attention-red');
@@ -423,7 +432,7 @@ test('Project dashboard Risk tile uses shared RAG assurance state styling', asyn
 	for (const tone of ['green', 'amber', 'red', 'neutral']) {
 		assert.match(detailSource, new RegExp(`dashboard-tile--icon-${tone}`));
 	}
-	assert.doesNotMatch(detailSource, /badge|count|dot|notification|attention-item|attentionItems|healthScore/i);
+	assert.doesNotMatch(areasSource, /badge|count|dot|notification|attention-item|attentionItems|healthScore/i);
 });
 
 test('Project dashboard links to Project Details as the controlled detail surface', async () => {

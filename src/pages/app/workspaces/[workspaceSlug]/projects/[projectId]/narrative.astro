@@ -11,6 +11,7 @@ import {
 	getNarrativeDisplayRef,
 	isNarrativeAttentionLevel,
 	listProjectNarrativeEntries,
+	markProjectNarrativeViewed,
 	normaliseProjectNarrativeLinkUrl,
 } from '../../../../../../lib/projectNarrative';
 import {
@@ -148,6 +149,11 @@ try {
 				}
 				try {
 					entries = await listProjectNarrativeEntries(organisation.id, data.id, workspace.role, serverSupabase);
+					try {
+						await markProjectNarrativeViewed(organisation.id, data.id, workspace.role, serverSupabase, accessToken);
+					} catch {
+						// Read-state is personal view metadata; a transient failure must not block Narrative access.
+					}
 					const riskSourceIds = entries
 						.filter((entry) => entry.source_type === 'risk' && entry.source_record_id)
 						.map((entry) => entry.source_record_id);
