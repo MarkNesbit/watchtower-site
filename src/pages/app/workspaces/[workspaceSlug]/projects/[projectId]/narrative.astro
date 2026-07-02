@@ -415,7 +415,7 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 						<div>
 							<p class="eyebrow" data-detail-ref></p>
 							<h2 id="narrative-detail-title" data-detail-title></h2>
-							<span class="attention-badge" data-detail-attention></span>
+							<span class="attention-badge rag-pill rag-pill--neutral" data-detail-attention></span>
 						</div>
 						<section>
 							<h3>Details</h3>
@@ -436,7 +436,7 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							<dl class="narrative-risk-preview__grid">
 								<div><dt>Reference</dt><dd data-detail-risk-reference></dd></div>
 								<div><dt>Lifecycle status</dt><dd data-detail-risk-status></dd></div>
-								<div><dt>Derived concern</dt><dd><span class="attention-badge" data-detail-risk-concern></span></dd></div>
+								<div><dt>Derived concern</dt><dd><span class="attention-badge rag-pill rag-pill--neutral" data-detail-risk-concern></span></dd></div>
 								<div><dt>Exposure</dt><dd data-detail-risk-exposure></dd></div>
 								<div><dt>Owner</dt><dd data-detail-risk-owner></dd></div>
 								<div><dt>Actioner</dt><dd data-detail-risk-actioner></dd></div>
@@ -564,7 +564,7 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 						setText('[data-detail-title]', entry.title);
 						const attention = detailModal.querySelector('[data-detail-attention]');
 						if (attention instanceof HTMLElement) {
-							attention.className = `attention-badge attention-badge--${entry.attentionLevel}`;
+							attention.className = `attention-badge rag-pill rag-pill--${entry.attentionLevel}`;
 							attention.textContent = entry.attentionLabel;
 						}
 						setText('[data-detail-body]', entry.details);
@@ -592,7 +592,7 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							setText('[data-detail-risk-contingency]', entry.sourceRisk.contingency);
 							const concern = detailModal.querySelector('[data-detail-risk-concern]');
 							if (concern instanceof HTMLElement) {
-								concern.className = `attention-badge attention-badge--${entry.sourceRisk.concernTone || 'neutral'}`;
+								concern.className = `attention-badge rag-pill rag-pill--${entry.sourceRisk.concernTone || 'neutral'}`;
 								concern.textContent = entry.sourceRisk.concern || 'Not available';
 							}
 							const openRisk = detailModal.querySelector('[data-detail-risk-open]');
@@ -659,12 +659,6 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-ref { display: inline-flex; border: 0; border-radius: 999px; padding: 0; background: transparent; font: inherit; cursor: pointer; }
 	.narrative-ref:hover :global(.rag-reference-pill) { transform: translateY(-1px); background: color-mix(in srgb, var(--rag-pill-tone) 22%, transparent); }
 	.narrative-ref:focus-visible { outline: 3px solid var(--accent-strong); outline-offset: 3px; }
-	.attention-badge { display: inline-flex; align-items: center; gap: 0.45rem; border: 1px solid color-mix(in srgb, var(--attention-tone) 65%, transparent); border-radius: 999px; padding: 0.25rem 0.55rem; color: var(--text); font-size: 0.82rem; font-weight: 850; }
-	.attention-badge__dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--attention-tone); }
-	.attention-badge--neutral { --attention-tone: #7c8b98; color: var(--muted-strong); }
-	.attention-badge--green { --attention-tone: #21d36b; }
-	.attention-badge--amber { --attention-tone: #f6a400; }
-	.attention-badge--red { --attention-tone: #ff453a; }
 	.narrative-details { max-width: 36rem; overflow-wrap: anywhere; }
 	.narrative-details strong, .narrative-details span { display: block; }
 	.narrative-details span { color: var(--muted-strong); }

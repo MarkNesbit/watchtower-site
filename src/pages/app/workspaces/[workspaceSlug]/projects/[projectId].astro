@@ -34,7 +34,7 @@ const healthTone = (value) => {
 	if (health === 'green') return 'green';
 	if (health === 'amber') return 'amber';
 	if (health === 'red') return 'red';
-	return 'blue';
+	return 'unknown';
 };
 const riskDashboardIconLabel = (tone: RiskDashboardAssuranceTone) => tone === 'neutral'
 	? 'Risks: no active risks recorded'
@@ -45,6 +45,8 @@ type ProjectTile = {
 	icon: string;
 	tone: string;
 	iconTone?: RiskDashboardAssuranceTone;
+	attentionTone?: RiskDashboardAssuranceTone | 'unknown';
+	statusLabel?: string;
 	ariaLabel?: string;
 	href: string | null;
 	destination?: 'details' | 'narrative' | 'risks';
@@ -56,7 +58,9 @@ const projectTiles: ProjectTile[] = [
 		title: 'Project Details',
 		icon: 'i',
 		tone: 'blue',
-		ariaLabel: 'Open Project Details',
+		attentionTone: 'neutral',
+		statusLabel: 'Informational',
+		ariaLabel: 'Open Project Details, Informational state',
 		href: null,
 		destination: 'details',
 	},
@@ -64,18 +68,20 @@ const projectTiles: ProjectTile[] = [
 		title: 'Project Narrative',
 		icon: '≡',
 		tone: 'blue',
-		ariaLabel: 'Open Project Narrative',
+		attentionTone: 'neutral',
+		statusLabel: 'Informational',
+		ariaLabel: 'Open Project Narrative, Informational state',
 		href: null,
 		destination: 'narrative',
 		featureKey: 'projectDiary',
 	},
-	{ title: 'Timeline', icon: '▦', tone: 'blue', ariaLabel: 'Open Timeline', href: '#timeline' },
-	{ title: 'Risks', icon: '⚠', tone: 'blue', href: null, destination: 'risks', featureKey: 'riskManagement' },
-	{ title: 'Issues', icon: '!', tone: 'blue', ariaLabel: 'Open Issues', href: '#issues' },
-	{ title: 'Dependencies', icon: '↔', tone: 'blue', ariaLabel: 'Open Dependencies', href: '#dependencies' },
-	{ title: 'Assumptions', icon: '?', tone: 'blue', ariaLabel: 'Open Assumptions', href: '#assumptions' },
-	{ title: 'Decisions', icon: '⚖', tone: 'blue', ariaLabel: 'Open Decisions', href: '#decisions' },
-	{ title: 'Actions', icon: '☑', tone: 'blue', ariaLabel: 'Open Actions', href: '#actions' },
+	{ title: 'Timeline', icon: '▦', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Timeline, Unknown state', href: '#timeline' },
+	{ title: 'Risks', icon: '⚠', tone: 'blue', attentionTone: 'neutral', statusLabel: 'No active risks recorded', href: null, destination: 'risks', featureKey: 'riskManagement' },
+	{ title: 'Issues', icon: '!', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Issues, Unknown state', href: '#issues' },
+	{ title: 'Dependencies', icon: '↔', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Dependencies, Unknown state', href: '#dependencies' },
+	{ title: 'Assumptions', icon: '?', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Assumptions, Unknown state', href: '#assumptions' },
+	{ title: 'Decisions', icon: '⚖', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Decisions, Unknown state', href: '#decisions' },
+	{ title: 'Actions', icon: '☑', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Actions, Unknown state', href: '#actions' },
 ];
 
 const gatedFeatureKeys = [...new Set(projectTiles.flatMap((tile) => tile.featureKey ? [tile.featureKey] : []))];
@@ -167,6 +173,8 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 	? {
 		...tile,
 		iconTone: riskDashboardIconTone,
+		attentionTone: riskDashboardIconTone,
+		statusLabel: riskDashboardIconTone === 'neutral' ? 'No active risks recorded' : `${riskAssuranceToneLabel(riskDashboardIconTone)} assurance state`,
 		ariaLabel: riskDashboardIconLabel(riskDashboardIconTone),
 	}
 	: tile);
@@ -213,11 +221,12 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 					<div class="dashboard-tile-grid" aria-label="Project dashboard areas">
 						{resolvedProjectTiles.map((tile) => !tile.isAccessible ? (
 							<article
-								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'} dashboard-tile--unavailable`}
+								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'} dashboard-tile--unavailable rag-tile rag-tile--${tile.tone} rag-tile--attention-${tile.attentionTone ?? 'unknown'}`}
 								aria-disabled="true"
-								aria-label={tile.ariaLabel ?? `${tile.title} unavailable`}
+								aria-label={tile.ariaLabel ?? `${tile.title} unavailable, ${tile.statusLabel ?? 'Unknown state'}`}
 								tabindex="0"
 								data-risk-icon-state={tile.destination === 'risks' ? tile.iconTone : undefined}
+								data-rag-tile-state={tile.attentionTone ?? 'unknown'}
 								data-feature-unavailable={tile.featureAccess?.state ?? 'route-unavailable'}
 							>
 								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
@@ -225,10 +234,11 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 							</article>
 						) : (
 							<a
-								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'}`}
+								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'} rag-tile rag-tile--${tile.tone} rag-tile--attention-${tile.attentionTone ?? 'neutral'}`}
 								href={tile.href}
-								aria-label={tile.ariaLabel ?? `Open ${tile.title}`}
+								aria-label={tile.ariaLabel ?? `Open ${tile.title}, ${tile.statusLabel ?? 'Neutral state'}`}
 								data-risk-icon-state={tile.destination === 'risks' ? tile.iconTone : undefined}
+								data-rag-tile-state={tile.attentionTone ?? 'neutral'}
 							>
 								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
 								<strong>{tile.title}</strong>
@@ -316,12 +326,8 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 		place-items: center;
 		align-content: center;
 		gap: 0.45rem;
-		border: 1px solid color-mix(in srgb, var(--tile-status) 72%, transparent);
 		border-radius: 1rem;
 		padding: 1rem;
-		background:
-			radial-gradient(circle at 50% 12%, color-mix(in srgb, var(--tile-status) 32%, transparent), transparent 58%),
-			linear-gradient(145deg, color-mix(in srgb, var(--tile-status) 28%, rgba(4, 12, 24, 0.92)), rgba(4, 12, 24, 0.72));
 		color: var(--text);
 		text-align: center;
 		text-decoration: none;
@@ -330,8 +336,8 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 
 	.dashboard-tile:hover,
 	.dashboard-tile:focus-visible {
-		border-color: var(--tile-status);
-		box-shadow: 0 14px 36px color-mix(in srgb, var(--tile-status) 24%, transparent);
+		border-color: var(--rag-tone);
+		box-shadow: 0 14px 36px color-mix(in srgb, var(--rag-tone) 24%, transparent);
 		transform: translateY(-2px);
 		outline: none;
 	}
@@ -344,7 +350,7 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 		font-size: 2.8rem;
 		font-weight: 900;
 		line-height: 1;
-		color: var(--tile-icon-status, var(--tile-status));
+		color: var(--rag-icon-tone, var(--tile-icon-status, var(--tile-status)));
 	}
 
 	.dashboard-tile strong {
