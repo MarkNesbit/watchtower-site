@@ -75,16 +75,19 @@
 .rag-pill {
 	--rag-tone: var(--rag-neutral);
 	--rag-pill-tone: var(--rag-tone);
+	--rag-pill-background-strength: 22%;
+	--rag-pill-border-strength: 78%;
+	--rag-pill-text: color-mix(in srgb, var(--rag-tone) 86%, var(--text));
 	display: inline-flex;
 	align-items: center;
 	gap: 0.5rem;
 	width: fit-content;
 	max-width: 100%;
-	border: 1px solid color-mix(in srgb, var(--rag-tone) 65%, transparent);
+	border: 1px solid color-mix(in srgb, var(--rag-tone) var(--rag-pill-border-strength), transparent);
 	border-radius: 999px;
 	padding: 0.25rem 0.65rem;
-	background: color-mix(in srgb, var(--rag-tone) 14%, rgba(4, 12, 24, 0.36));
-	color: var(--text);
+	background: color-mix(in srgb, var(--rag-tone) var(--rag-pill-background-strength), rgba(4, 12, 24, 0.46));
+	color: var(--rag-pill-text);
 	font-size: 0.82rem;
 	font-weight: 850;
 	line-height: 1.25;
@@ -92,22 +95,35 @@
 	white-space: nowrap;
 }
 
+.rag-pill--red {
+	--rag-pill-text: #ffb4ae;
+}
+
+.rag-pill--amber {
+	--rag-pill-text: #ffd37a;
+}
+
+.rag-pill--green {
+	--rag-pill-text: #8ff0bb;
+}
+
 .rag-pill--neutral,
 .rag-pill--unknown {
-	color: var(--muted-strong);
+	--rag-pill-background-strength: 16%;
+	--rag-pill-border-strength: 58%;
+	--rag-pill-text: var(--muted-strong);
 }
 
 .rag-pill__status {
 	border-left: 1px solid color-mix(in srgb, var(--rag-tone) 45%, transparent);
 	padding-left: 0.5rem;
-	color: color-mix(in srgb, var(--rag-tone) 78%, var(--text));
+	color: var(--rag-pill-text);
 	font-size: 0.72rem;
 	text-transform: uppercase;
 }
 
-.rag-pill--neutral .rag-pill__status,
-.rag-pill--unknown .rag-pill__status {
-	color: var(--muted-strong);
+.rag-pill--unknown {
+	--rag-pill-text: #c4d3df;
 }
 
 .rag-card,

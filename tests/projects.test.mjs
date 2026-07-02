@@ -454,6 +454,7 @@ test('Project UI displays and protects project reference', async () => {
 	assert.match(listSource, /project_ref/);
 	assert.match(listSource, /<th scope="col">Reference<\/th>/);
 	assert.match(listSource, /<RagReferencePill[\s\S]*label=\{project\.project_ref \?\? 'Not assigned'\}/);
+	assert.match(listSource, /<RagReferencePill[\s\S]*tone="neutral"[\s\S]*label=\{project\.project_ref \?\? 'Not assigned'\}/);
 	assert.match(detailSource, /projectRef=\{project\.project_ref\}/);
 	assert.match(editSource, /project\.project_ref/);
 	assert.match(editSource, /read-only and cannot be edited after creation in MVP/);
@@ -482,4 +483,19 @@ test('Project list uses shared authenticated page patterns without changing rout
 	assert.match(listSource, /Open project/);
 	assert.match(listSource, /buildProjectPath\(workspaceSlug, project\.slug\)/);
 	assert.match(listSource, /\.select\('name, project_ref, slug, status, health, updated_at'\)/);
+});
+
+test('Shared RAG pill styling keeps active states scannable on dark surfaces', async () => {
+	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
+
+	assert.match(ragStyles, /--rag-pill-background-strength: 22%/);
+	assert.match(ragStyles, /--rag-pill-border-strength: 78%/);
+	assert.match(ragStyles, /border: 1px solid color-mix\(in srgb, var\(--rag-tone\) var\(--rag-pill-border-strength\), transparent\)/);
+	assert.match(ragStyles, /background: color-mix\(in srgb, var\(--rag-tone\) var\(--rag-pill-background-strength\), rgba\(4, 12, 24, 0\.46\)\)/);
+	assert.match(ragStyles, /\.rag-pill--red \{[\s\S]*?--rag-pill-text: #ffb4ae;/);
+	assert.match(ragStyles, /\.rag-pill--amber \{[\s\S]*?--rag-pill-text: #ffd37a;/);
+	assert.match(ragStyles, /\.rag-pill--green \{[\s\S]*?--rag-pill-text: #8ff0bb;/);
+	assert.match(ragStyles, /\.rag-pill--neutral,[\s\S]*?\.rag-pill--unknown \{[\s\S]*?--rag-pill-background-strength: 16%;[\s\S]*?--rag-pill-border-strength: 58%;/);
+	assert.match(ragStyles, /\.rag-pill--unknown \{[\s\S]*?--rag-pill-text: #c4d3df;/);
+	assert.match(ragStyles, /\.rag-pill__status \{[\s\S]*?color: var\(--rag-pill-text\);/);
 });
