@@ -145,17 +145,20 @@ Cards should be reserved for individual repeated items, modals, and genuinely fr
 
 Use `RagReferencePill` for project references, RAG states, attention states, and future compound record references where a small pill improves scanning. Shared RAG styling lives in `src/styles/rag.css` and supports `red`, `amber`, `green`, `neutral`, and `unknown` states. The older blue treatment is reserved for non-RAG reference accents, not health or attention meaning.
 
+RAG colours are shared design tokens. Future Issues, Dependencies, Assumptions, Actions and Decisions screens should reuse the token classes rather than inventing page-local Red, Amber or Green values. The default active tokens are `#ff5f5f` for Red, `#f6c453` for Amber and `#6ee7a8` for Green, each with matching border and subdued background tokens. Neutral and Unknown use slate/blue-grey token sets.
+
 Pills should:
 
 - Preserve the human-readable reference or status text.
 - Use colour as a supplement, not the only signal.
 - Avoid replacing canonical labels or accessible text.
+- Use the shared state text, border and background tokens for the pill state.
 
 RAG cards and panels should:
 
 - Use the shared `rag-card` or `rag-panel` classes with a state class such as `rag-card--amber`.
 - Keep the surface subdued rather than flooding the card with bright colour.
-- Use a left accent border for scannability.
+- Use the shared state token for a clear left accent border.
 - Include or support an explicit RAG pill for the state label.
 
 Dashboard capability tiles should:

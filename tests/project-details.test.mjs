@@ -335,6 +335,9 @@ test('Project Details loads project dates as status cards and keeps governance s
 	assert.match(source, /rag-card rag-card--\$\{card\.status\.tone\}/);
 	assert.match(source, /card\.status\.text/);
 	assert.match(source, /<RagReferencePill tone=\{card\.status\.tone\} label=\{card\.status\.text\} \/>/);
+	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
+	assert.match(ragStyles, /\.rag-card,[\s\S]*?border-left: 0\.35rem solid var\(--rag-accent, var\(--rag-neutral-accent\)\);/);
+	assert.doesNotMatch(ragStyles, /\.rag-card,[\s\S]*?--rag-tone: var\(--rag-neutral/);
 	assert.match(source, /Add new date/);
 	assert.match(source, /PROJECT_DATE_TYPES\.map/);
 	assert.match(source, /name="date_type"/);
