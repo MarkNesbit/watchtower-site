@@ -8,12 +8,23 @@ import {
 export type DashboardTileSignalState = 'red' | 'amber' | 'green' | 'unknown' | 'neutral';
 export type ProjectAreaSignalState = DashboardTileSignalState | 'disabled';
 export type ProjectAreaKey = 'project_details' | 'project_narrative' | 'risks' | 'timeline' | 'issues' | 'dependencies' | 'assumptions' | 'decisions' | 'actions';
+export type ProjectDetailsSectionKey =
+	| 'project_identity'
+	| 'project_description'
+	| 'project_context'
+	| 'project_dates'
+	| 'governance_escalation'
+	| 'project_roles_responsibilities'
+	| 'system_metadata';
 
 export type ProjectAreaSignalReason = {
 	state: Exclude<ProjectAreaSignalState, 'disabled'>;
 	message: string;
 	target?: string;
+	anchor?: string;
 	actionLabel?: string;
+	section?: ProjectDetailsSectionKey;
+	sectionLabel?: string;
 };
 
 export type ProjectAreaSignal = {
@@ -23,7 +34,20 @@ export type ProjectAreaSignal = {
 	reasons: ProjectAreaSignalReason[];
 };
 
+export type ProjectDetailsSectionSignal = {
+	section: ProjectDetailsSectionKey;
+	state: DashboardTileSignalState;
+	label: string;
+	anchor: string;
+	reasons: ProjectAreaSignalReason[];
+};
+
 type ProjectDetailsSignalProject = {
+	id?: string | null;
+	name?: string | null;
+	project_ref?: string | null;
+	slug?: string | null;
+	status?: string | null;
 	description?: string | null;
 	project_type?: string | null;
 	delivery_method?: string | null;
@@ -31,6 +55,7 @@ type ProjectDetailsSignalProject = {
 	criticality?: string | null;
 	target_end_date?: string | null;
 	next_review_date?: string | null;
+	review_cadence?: string | null;
 	governance_route?: string | null;
 	escalation_route?: string | null;
 };
@@ -69,24 +94,36 @@ export function dashboardTileSignalStatusLabel(state: DashboardTileSignalState):
 }
 
 const PROJECT_DETAILS_CRITICAL_FIELDS = [
-	{ key: 'description', label: 'Project description', target: '#project-description-heading', actionLabel: 'Review description' },
-	{ key: 'target_end_date', label: 'Target end date', target: '#project-dates-heading', actionLabel: 'Review dates' },
-	{ key: 'next_review_date', label: 'Review date', target: '#project-dates-heading', actionLabel: 'Review dates' },
+	{ key: 'description', label: 'Project description', section: 'project_description', target: '#project-description-heading', actionLabel: 'Review description' },
 ] as const;
 
 const PROJECT_DETAILS_IMPORTANT_FIELDS = [
-	{ key: 'project_type', label: 'Project type', target: '#project-context-heading', actionLabel: 'Review context' },
-	{ key: 'delivery_method', label: 'Delivery method', target: '#project-context-heading', actionLabel: 'Review context' },
-	{ key: 'priority', label: 'Priority', target: '#project-context-heading', actionLabel: 'Review context' },
-	{ key: 'criticality', label: 'Criticality', target: '#project-context-heading', actionLabel: 'Review context' },
-	{ key: 'governance_route', label: 'Governance route', target: '#project-governance-heading', actionLabel: 'Review governance' },
-	{ key: 'escalation_route', label: 'Escalation route', target: '#project-governance-heading', actionLabel: 'Review governance' },
+	{ key: 'project_type', label: 'Project type', section: 'project_context', target: '#project-context-heading', actionLabel: 'Review context' },
+	{ key: 'delivery_method', label: 'Delivery method', section: 'project_context', target: '#project-context-heading', actionLabel: 'Review context' },
+	{ key: 'priority', label: 'Priority', section: 'project_context', target: '#project-context-heading', actionLabel: 'Review context' },
+	{ key: 'criticality', label: 'Criticality', section: 'project_context', target: '#project-context-heading', actionLabel: 'Review context' },
+	{ key: 'review_cadence', label: 'Review cadence', section: 'governance_escalation', target: '#project-governance-heading', actionLabel: 'Review governance' },
+	{ key: 'governance_route', label: 'Governance route', section: 'governance_escalation', target: '#project-governance-heading', actionLabel: 'Review governance' },
+	{ key: 'escalation_route', label: 'Escalation route', section: 'governance_escalation', target: '#project-governance-heading', actionLabel: 'Review governance' },
 ] as const;
 
 const PROJECT_DETAILS_IMPORTANT_ASSIGNMENTS = [
 	{ role: 'product_owner', label: 'Product Owner' },
 	{ role: 'default_risk_owner', label: 'Default Risk Owner' },
 ] as const;
+
+const PROJECT_DETAILS_SECTION_META: Record<ProjectDetailsSectionKey, { label: string; anchor: string }> = {
+	project_identity: { label: 'Project Identity', anchor: '#project-identity-heading' },
+	project_description: { label: 'Project Description', anchor: '#project-description-heading' },
+	project_context: { label: 'Project Context', anchor: '#project-context-heading' },
+	project_dates: { label: 'Project Dates', anchor: '#project-dates-heading' },
+	governance_escalation: { label: 'Governance and Escalation', anchor: '#project-governance-heading' },
+	project_roles_responsibilities: { label: 'Project Roles and Responsibilities', anchor: '#project-people-heading' },
+	system_metadata: { label: 'System Metadata', anchor: '#project-system-metadata-heading' },
+};
+
+const ACTIVE_PROJECT_STATUSES = new Set(['active']);
+const INACTIVE_PROJECT_STATUSES = new Set(['completed', 'cancelled', 'closed', 'removed', 'archived']);
 
 function hasActiveAssignment(assignments: ProjectDetailsSignalAssignment[], role: string): boolean {
 	return assignments.some((assignment) => (
@@ -96,95 +133,167 @@ function hasActiveAssignment(assignments: ProjectDetailsSignalAssignment[], role
 	));
 }
 
+function reason(
+	section: ProjectDetailsSectionKey,
+	state: ProjectAreaSignalReason['state'],
+	message: string,
+	actionLabel?: string,
+): ProjectAreaSignalReason {
+	const meta = PROJECT_DETAILS_SECTION_META[section];
+	return {
+		state,
+		message,
+		target: meta.anchor,
+		anchor: meta.anchor,
+		actionLabel,
+		section,
+		sectionLabel: meta.label,
+	};
+}
+
+function sectionState(reasons: ProjectAreaSignalReason[]): DashboardTileSignalState {
+	if (reasons.some((item) => item.state === 'red')) return 'red';
+	if (reasons.some((item) => item.state === 'amber')) return 'amber';
+	if (reasons.some((item) => item.state === 'unknown')) return 'unknown';
+	if (reasons.some((item) => item.state === 'neutral')) return 'neutral';
+	return 'green';
+}
+
+function buildSectionSignal(
+	section: ProjectDetailsSectionKey,
+	reasons: ProjectAreaSignalReason[],
+	greenMessage: string,
+	neutralMessage?: string,
+): ProjectDetailsSectionSignal {
+	const meta = PROJECT_DETAILS_SECTION_META[section];
+	const state = sectionState(reasons);
+	const resolvedReasons = reasons.length > 0
+		? reasons
+		: [reason(section, neutralMessage ? 'neutral' : 'green', neutralMessage ?? greenMessage)];
+	return {
+		section,
+		state: reasons.length > 0 ? state : (neutralMessage ? 'neutral' : 'green'),
+		label: meta.label,
+		anchor: meta.anchor,
+		reasons: resolvedReasons,
+	};
+}
+
+function projectStatusLabel(status: string | null | undefined): string {
+	if (!hasText(status)) return 'this project status';
+	return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+}
+
+function missingDateReason(card: ProjectDateCard, projectStatus: string | null | undefined): ProjectAreaSignalReason | null {
+	const status = typeof projectStatus === 'string' ? projectStatus.toLowerCase() : '';
+	if (INACTIVE_PROJECT_STATUSES.has(status)) return null;
+	const label = card.label;
+	if (card.dateType === 'target_end_date') {
+		if (ACTIVE_PROJECT_STATUSES.has(status)) {
+			return reason('project_dates', 'red', 'Target end date is not set for an Active project. Active projects need a target end date for delivery control.', 'Review dates');
+		}
+		if (status === 'proposed') {
+			return reason('project_dates', 'amber', 'Target end date is not set while the project is Proposed. Planning information is incomplete.', 'Review dates');
+		}
+		return reason('project_dates', 'amber', `Target end date is not set while the project is ${projectStatusLabel(status)}.`, 'Review dates');
+	}
+	if (card.dateType === 'review_date') {
+		if (ACTIVE_PROJECT_STATUSES.has(status)) {
+			return reason('project_dates', 'red', 'Review date is not set for an Active project.', 'Review dates');
+		}
+		return reason('project_dates', 'amber', `Review date is not set while the project is ${projectStatusLabel(status)}.`, 'Review dates');
+	}
+	if (card.dateType === 'start_date') {
+		return reason('project_dates', 'amber', 'Start date is not set.', 'Review dates');
+	}
+	return reason('project_dates', 'amber', `${label}: date not set.`, 'Review dates');
+}
+
+export function deriveProjectDetailsSectionSignals(
+	project: ProjectDetailsSignalProject | null | undefined,
+	dateCards: ProjectDateCard[] | null | undefined,
+	assignments?: ProjectDetailsSignalAssignment[] | null,
+): ProjectDetailsSectionSignal[] {
+	if (!project) {
+		return (Object.keys(PROJECT_DETAILS_SECTION_META) as ProjectDetailsSectionKey[]).map((section) => (
+			buildSectionSignal(section, [
+				reason(section, 'unknown', `${PROJECT_DETAILS_SECTION_META[section].label} cannot be calculated safely.`),
+			], '')
+		));
+	}
+
+	const identityReasons: ProjectAreaSignalReason[] = [];
+	for (const field of [
+		{ key: 'name', label: 'Project name' },
+		{ key: 'project_ref', label: 'Project reference' },
+		{ key: 'slug', label: 'Project slug' },
+		{ key: 'status', label: 'Project status' },
+		{ key: 'id', label: 'Internal project ID' },
+	] as const) {
+		if (Object.prototype.hasOwnProperty.call(project, field.key) && !hasText(project[field.key])) {
+			identityReasons.push(reason('project_identity', 'red', `${field.label} is not set.`, 'Review identity'));
+		}
+	}
+
+	const descriptionReasons = PROJECT_DETAILS_CRITICAL_FIELDS
+		.filter((field) => field.section === 'project_description' && !hasText(project[field.key]))
+		.map((field) => reason('project_description', 'red', `${field.label} is not set.`, field.actionLabel));
+
+	const contextReasons = PROJECT_DETAILS_IMPORTANT_FIELDS
+		.filter((field) => field.section === 'project_context' && !hasText(project[field.key]))
+		.map((field) => reason('project_context', 'amber', `${field.label} is not set.`, field.actionLabel));
+
+	const governanceReasons = PROJECT_DETAILS_IMPORTANT_FIELDS
+		.filter((field) => field.section === 'governance_escalation' && !hasText(project[field.key]))
+		.map((field) => reason('governance_escalation', 'amber', `${field.label} is not set.`, field.actionLabel));
+
+	const dateReasons: ProjectAreaSignalReason[] = [];
+	if (!dateCards) {
+		dateReasons.push(reason('project_dates', 'unknown', 'Project date readiness could not be checked.', 'Review dates'));
+	} else {
+		for (const card of dateCards) {
+			if (!hasText(card.targetDate)) {
+				const missingReason = missingDateReason(card, project.status);
+				if (missingReason) dateReasons.push(missingReason);
+				continue;
+			}
+			if (card.dateType !== 'start_date' && card.status.tone === 'red') {
+				dateReasons.push(reason('project_dates', 'red', `${card.label}: ${card.status.text}.`, 'Review dates'));
+			} else if (card.status.tone === 'amber') {
+				dateReasons.push(reason('project_dates', 'amber', `${card.label}: ${card.status.text}.`, 'Review dates'));
+			}
+		}
+	}
+
+	const roleReasons: ProjectAreaSignalReason[] = [];
+	if (Array.isArray(assignments)) {
+		for (const assignment of PROJECT_DETAILS_IMPORTANT_ASSIGNMENTS) {
+			if (!hasActiveAssignment(assignments, assignment.role)) {
+				roleReasons.push(reason('project_roles_responsibilities', 'amber', `${assignment.label} is not assigned.`, 'Review responsibilities'));
+			}
+		}
+	} else if (assignments === null) {
+		roleReasons.push(reason('project_roles_responsibilities', 'unknown', 'Project responsibility assignments could not be checked.', 'Review responsibilities'));
+	}
+
+	return [
+		buildSectionSignal('project_identity', identityReasons, 'Expected identity fields are present.'),
+		buildSectionSignal('project_description', descriptionReasons, 'A usable project description is present.'),
+		buildSectionSignal('project_context', contextReasons, 'Expected project context fields are present.'),
+		buildSectionSignal('project_dates', dateReasons, 'Project dates have no current readiness concerns.'),
+		buildSectionSignal('governance_escalation', governanceReasons, 'Review cadence, governance route and escalation route are present.'),
+		buildSectionSignal('project_roles_responsibilities', roleReasons, 'Required project responsibilities are assigned.'),
+		buildSectionSignal('system_metadata', [], '', 'System metadata is informational.'),
+	];
+}
+
 export function deriveProjectDetailsAreaSignal(
 	project: ProjectDetailsSignalProject | null | undefined,
 	dateCards: ProjectDateCard[] | null | undefined,
 	assignments?: ProjectDetailsSignalAssignment[] | null,
 ): ProjectAreaSignal {
-	if (!project) {
-		return {
-			area: 'project_details',
-			state: 'unknown',
-			label: 'Project Details',
-			reasons: [{ state: 'unknown', message: 'Project Details attention cannot be calculated safely.' }],
-		};
-	}
-
-	const reasons: ProjectAreaSignalReason[] = [];
-	const resolvedDateCards = dateCards ?? [];
-
-	if (!dateCards) {
-		reasons.push({
-			state: 'unknown',
-			message: 'Project date readiness could not be checked.',
-			target: '#project-dates-heading',
-			actionLabel: 'Review dates',
-		});
-	}
-
-	for (const field of PROJECT_DETAILS_CRITICAL_FIELDS) {
-		if (!hasText(project[field.key])) {
-			reasons.push({
-				state: 'red',
-				message: `${field.label} is not set.`,
-				target: field.target,
-				actionLabel: field.actionLabel,
-			});
-		}
-	}
-
-	for (const card of resolvedDateCards) {
-		if (card.dateType !== 'start_date' && card.status.tone === 'red') {
-			reasons.push({
-				state: 'red',
-				message: `${card.label}: ${card.status.text}.`,
-				target: '#project-dates-heading',
-				actionLabel: 'Review dates',
-			});
-		}
-	}
-
-	for (const field of PROJECT_DETAILS_IMPORTANT_FIELDS) {
-		if (!hasText(project[field.key])) {
-			reasons.push({
-				state: 'amber',
-				message: `${field.label} is not set.`,
-				target: field.target,
-				actionLabel: field.actionLabel,
-			});
-		}
-	}
-
-	if (Array.isArray(assignments)) {
-		for (const assignment of PROJECT_DETAILS_IMPORTANT_ASSIGNMENTS) {
-			if (!hasActiveAssignment(assignments, assignment.role)) {
-				reasons.push({
-					state: 'amber',
-					message: `${assignment.label} is not assigned.`,
-					target: '#project-people-heading',
-					actionLabel: 'Review responsibilities',
-				});
-			}
-		}
-	} else if (assignments === null) {
-		reasons.push({
-			state: 'unknown',
-			message: 'Project responsibility assignments could not be checked.',
-			target: '#project-people-heading',
-			actionLabel: 'Review responsibilities',
-		});
-	}
-
-	for (const card of resolvedDateCards) {
-		if (card.status.tone === 'amber') {
-			reasons.push({
-				state: 'amber',
-				message: `${card.label}: ${card.status.text}.`,
-				target: '#project-dates-heading',
-				actionLabel: 'Review dates',
-			});
-		}
-	}
+	const sectionSignals = deriveProjectDetailsSectionSignals(project, dateCards, assignments);
+	const reasons = sectionSignals.flatMap((section) => section.reasons);
 
 	const state = reasons.some((reason) => reason.state === 'red')
 		? 'red'

@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
 	deriveProjectDetailsAreaSignal,
+	deriveProjectDetailsSectionSignals,
 	dashboardTileSignalStatusLabel,
 	deriveProjectDetailsTileSignal,
 	deriveProjectNarrativeTileSignal,
@@ -59,6 +60,11 @@ const attentionRiskFacts = (overrides = {}) => ({
 });
 
 const dashboardProjectFacts = (overrides = {}) => ({
+	id: 'project-1',
+	name: 'Watchtower Test Project',
+	project_ref: 'WAT',
+	slug: 'watchtower-test-project',
+	status: 'active',
 	description: 'A project with enough context for delivery assurance.',
 	project_type: 'delivery',
 	delivery_method: 'hybrid',
@@ -66,15 +72,18 @@ const dashboardProjectFacts = (overrides = {}) => ({
 	criticality: 'high',
 	target_end_date: '2026-08-15',
 	next_review_date: '2026-07-15',
+	review_cadence: 'weekly',
 	governance_route: 'Weekly steering group.',
 	escalation_route: 'Escalate via delivery board.',
 	...overrides,
 });
 
-const dashboardDateCard = (dateType, tone) => ({
+const dashboardDateCard = (dateType, tone, overrides = {}) => ({
 	dateType,
 	label: dateType === 'target_end_date' ? 'Target end date' : dateType === 'review_date' ? 'Review date' : 'Start date',
+	targetDate: '2026-07-10',
 	status: { tone, label: tone.charAt(0).toUpperCase() + tone.slice(1), text: `${tone} date signal` },
+	...overrides,
 });
 
 const dashboardAssignments = (overrides = []) => [
@@ -207,6 +216,19 @@ test('Project list attention scope uses area signals and defers user-specific Na
 });
 
 test('Dashboard tile signal helper derives Project Details setup and date readiness', () => {
+	const completeSectionSignals = deriveProjectDetailsSectionSignals(
+		dashboardProjectFacts(),
+		greenProjectDates,
+		dashboardAssignments(),
+	);
+	assert.equal(completeSectionSignals.find((signal) => signal.section === 'project_identity')?.state, 'green');
+	assert.equal(completeSectionSignals.find((signal) => signal.section === 'project_description')?.state, 'green');
+	assert.equal(completeSectionSignals.find((signal) => signal.section === 'project_context')?.state, 'green');
+	assert.equal(completeSectionSignals.find((signal) => signal.section === 'project_dates')?.state, 'green');
+	assert.equal(completeSectionSignals.find((signal) => signal.section === 'governance_escalation')?.state, 'green');
+	assert.equal(completeSectionSignals.find((signal) => signal.section === 'project_roles_responsibilities')?.state, 'green');
+	assert.equal(completeSectionSignals.find((signal) => signal.section === 'system_metadata')?.state, 'neutral');
+
 	const missingDescription = deriveProjectDetailsAreaSignal(
 		dashboardProjectFacts({ description: '' }),
 		greenProjectDates,
@@ -215,6 +237,11 @@ test('Dashboard tile signal helper derives Project Details setup and date readin
 	assert.equal(missingDescription.state, 'red');
 	assert.match(missingDescription.reasons.map((reason) => reason.message).join('\n'), /Project description is not set\./);
 	assert.match(missingDescription.reasons.map((reason) => reason.target).join('\n'), /#project-description-heading/);
+	assert.equal(deriveProjectDetailsSectionSignals(
+		dashboardProjectFacts({ description: '' }),
+		greenProjectDates,
+		dashboardAssignments(),
+	).find((signal) => signal.section === 'project_description')?.state, 'red');
 
 	const amberDateSignal = deriveProjectDetailsAreaSignal(
 		dashboardProjectFacts(),
@@ -224,6 +251,30 @@ test('Dashboard tile signal helper derives Project Details setup and date readin
 	assert.equal(amberDateSignal.state, 'amber');
 	assert.match(amberDateSignal.reasons.map((reason) => reason.message).join('\n'), /Review date: amber date signal\./);
 
+	const proposedMissingTargetDate = deriveProjectDetailsAreaSignal(
+		dashboardProjectFacts({ status: 'proposed', target_end_date: null }),
+		[
+			dashboardDateCard('start_date', 'green'),
+			dashboardDateCard('target_end_date', 'amber', { targetDate: null, status: { tone: 'amber', label: 'Amber', text: 'Amber - date not set' } }),
+			dashboardDateCard('review_date', 'green'),
+		],
+		dashboardAssignments(),
+	);
+	assert.equal(proposedMissingTargetDate.state, 'amber');
+	assert.match(proposedMissingTargetDate.reasons.map((reason) => reason.message).join('\n'), /Target end date is not set while the project is Proposed/);
+
+	const activeMissingTargetDate = deriveProjectDetailsAreaSignal(
+		dashboardProjectFacts({ status: 'active', target_end_date: null }),
+		[
+			dashboardDateCard('start_date', 'green'),
+			dashboardDateCard('target_end_date', 'amber', { targetDate: null, status: { tone: 'amber', label: 'Amber', text: 'Amber - date not set' } }),
+			dashboardDateCard('review_date', 'green'),
+		],
+		dashboardAssignments(),
+	);
+	assert.equal(activeMissingTargetDate.state, 'red');
+	assert.match(activeMissingTargetDate.reasons.map((reason) => reason.message).join('\n'), /Target end date is not set for an Active project/);
+
 	const missingResponsibilities = deriveProjectDetailsAreaSignal(
 		dashboardProjectFacts(),
 		greenProjectDates,
@@ -232,6 +283,11 @@ test('Dashboard tile signal helper derives Project Details setup and date readin
 	assert.equal(missingResponsibilities.state, 'amber');
 	assert.match(missingResponsibilities.reasons.map((reason) => reason.message).join('\n'), /Product Owner is not assigned\./);
 	assert.match(missingResponsibilities.reasons.map((reason) => reason.message).join('\n'), /Default Risk Owner is not assigned\./);
+	assert.equal(deriveProjectDetailsSectionSignals(
+		dashboardProjectFacts({ governance_route: '' }),
+		greenProjectDates,
+		dashboardAssignments(),
+	).find((signal) => signal.section === 'governance_escalation')?.state, 'amber');
 
 	assert.equal(deriveProjectDetailsTileSignal(
 		dashboardProjectFacts({ description: '' }),
