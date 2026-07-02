@@ -15,6 +15,7 @@ import {
 	normaliseProjectNarrativeLinkUrl,
 } from '../../../../../../lib/projectNarrative';
 import {
+	deriveRiskAssuranceTone,
 	deriveRiskConcernTone,
 	deriveRiskExposureTone,
 	listProjectRisksByIds,
@@ -205,22 +206,36 @@ const riskPreviewFor = (entry) => {
 	if (entry.source_type !== 'risk' || !entry.source_record_id) return null;
 	const risk = sourceRisksById.get(entry.source_record_id);
 	if (!risk) return {
+		available: false,
+		reference: entry.source_ref,
+		title: 'Risk detail unavailable',
+		unavailableReason: 'The linked risk could not be loaded for this project. It may have been archived, deleted, or unavailable to your current workspace access.',
 		openHref: buildProjectRiskPath(workspaceSlug ?? '', project?.slug ?? projectSlug ?? '', entry.source_record_id),
 	};
 	const concern = deriveRiskConcernTone(risk, new Date());
 	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
+	const assurance = deriveRiskAssuranceTone(risk, new Date());
 	return {
+		available: true,
 		reference: risk.risk_ref,
 		title: risk.title,
+		description: risk.description || 'No description recorded.',
 		status: riskDisplayLabel(risk.status),
+		assurance: riskDisplayLabel(assurance),
+		assuranceTone: assurance,
 		concern: riskDisplayLabel(concern),
 		concernTone: concern,
-		exposure: `${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact (${riskDisplayLabel(exposure)})`,
+		exposure: riskDisplayLabel(exposure),
+		exposureTone: exposure,
+		probability: riskDisplayLabel(risk.probability),
+		impact: riskDisplayLabel(risk.impact),
 		owner: riskProfileName(risk.owner, 'Unassigned'),
 		actioner: riskProfileName(risk.actioner, 'Unassigned'),
 		reviewDate: formatDate(risk.review_date),
+		dueDate: formatDate(risk.due_date),
 		mitigation: risk.mitigation_plan || 'No mitigation plan recorded.',
 		contingency: risk.contingency_plan || 'No contingency plan recorded.',
+		updatedAt: formatCreatedAt(risk.updated_at),
 		openHref: buildProjectRiskPath(workspaceSlug ?? '', project?.slug ?? projectSlug ?? '', risk.risk_id),
 	};
 };
@@ -313,7 +328,19 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 														/>
 													</button>
 												</td>
-												<td class="narrative-details">{entry.title && <strong>{entry.title}</strong>}{entry.details && <span>{entry.details}</span>}</td>
+												<td class="narrative-details">
+													{entry.title && <strong>{entry.title}</strong>}
+													{entry.details && <span>{entry.details}</span>}
+													{entry.source_type === 'risk' && entry.source_record_id && (
+														<button
+															class="button button--secondary narrative-risk-action"
+															type="button"
+															data-entry-id={entry.id}
+															data-risk-detail-trigger
+															aria-label={`View current risk detail for ${getNarrativeDisplayRef(entry)}`}
+														>View risk detail</button>
+													)}
+												</td>
 												<td>{creatorName(entry)}</td>
 												<td><time datetime={entry.created_at}>{formatCreatedAt(entry.created_at)}</time></td>
 											</tr>
@@ -431,24 +458,53 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							<h3>Links</h3>
 							<ul data-detail-links></ul>
 						</section>
-						<section class="narrative-risk-preview" data-detail-risk-section hidden>
+						<section class="narrative-risk-preview rag-panel rag-panel--neutral" data-detail-risk-section hidden>
 							<div class="narrative-risk-preview__header">
 								<div>
-									<h3>Source risk</h3>
+									<p class="eyebrow">Current source risk</p>
+									<h3>Risk detail</h3>
 									<p data-detail-risk-title></p>
 								</div>
-								<a class="button button--secondary" href="#" data-detail-risk-open>Open full risk</a>
+								<a
+									class="button button--secondary"
+									href="#"
+									target="_blank"
+									rel="noopener noreferrer"
+									aria-label="Open full risk in new tab"
+									data-detail-risk-open
+								>Open full risk in new tab</a>
 							</div>
-							<dl class="narrative-risk-preview__grid">
+							<p class="narrative-risk-preview__fallback" data-detail-risk-fallback hidden></p>
+							<div class="narrative-risk-preview__signals" data-detail-risk-signals>
+								<article class="narrative-risk-signal rag-card rag-card--neutral" data-detail-risk-concern-card>
+									<span>Overall concern</span>
+									<strong data-detail-risk-concern-value>Not available</strong>
+									<span class="attention-badge rag-pill rag-pill--neutral" data-detail-risk-concern></span>
+								</article>
+								<article class="narrative-risk-signal rag-card rag-card--neutral" data-detail-risk-exposure-card>
+									<span>Exposure</span>
+									<strong data-detail-risk-exposure-value>Not available</strong>
+									<span class="attention-badge rag-pill rag-pill--neutral" data-detail-risk-exposure></span>
+								</article>
+								<article class="narrative-risk-signal rag-card rag-card--neutral" data-detail-risk-assurance-card>
+									<span>Attention / assurance</span>
+									<strong data-detail-risk-assurance-value>Not available</strong>
+									<span class="attention-badge rag-pill rag-pill--neutral" data-detail-risk-assurance></span>
+								</article>
+							</div>
+							<dl class="narrative-risk-preview__grid" data-detail-risk-grid>
 								<div><dt>Reference</dt><dd data-detail-risk-reference></dd></div>
 								<div><dt>Lifecycle status</dt><dd data-detail-risk-status></dd></div>
-								<div><dt>Derived concern</dt><dd><span class="attention-badge rag-pill rag-pill--neutral" data-detail-risk-concern></span></dd></div>
-								<div><dt>Exposure</dt><dd data-detail-risk-exposure></dd></div>
+								<div><dt>Probability</dt><dd data-detail-risk-probability></dd></div>
+								<div><dt>Impact</dt><dd data-detail-risk-impact></dd></div>
 								<div><dt>Owner</dt><dd data-detail-risk-owner></dd></div>
 								<div><dt>Actioner</dt><dd data-detail-risk-actioner></dd></div>
 								<div><dt>Review date</dt><dd data-detail-risk-review-date></dd></div>
-								<div><dt>Mitigation</dt><dd data-detail-risk-mitigation></dd></div>
-								<div><dt>Contingency</dt><dd data-detail-risk-contingency></dd></div>
+								<div><dt>Due date</dt><dd data-detail-risk-due-date></dd></div>
+								<div><dt>Last updated</dt><dd data-detail-risk-updated-at></dd></div>
+								<div class="narrative-risk-preview__wide"><dt>Description</dt><dd data-detail-risk-description></dd></div>
+								<div class="narrative-risk-preview__wide"><dt>Mitigation / response</dt><dd data-detail-risk-mitigation></dd></div>
+								<div class="narrative-risk-preview__wide"><dt>Contingency</dt><dd data-detail-risk-contingency></dd></div>
 							</dl>
 						</section>
 						<dl class="narrative-detail__meta">
@@ -556,6 +612,19 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 						if (target) target.textContent = value || 'Not available';
 					};
 
+					const setRagClass = (element, baseClasses, tone) => {
+						if (!(element instanceof HTMLElement)) return;
+						element.className = `${baseClasses} rag-card--${tone || 'neutral'}`;
+					};
+
+					const setPill = (selector, value, tone) => {
+						const target = detailModal?.querySelector(selector);
+						if (target instanceof HTMLElement) {
+							target.className = `attention-badge rag-pill rag-pill--${tone || 'neutral'}`;
+							target.textContent = value || 'Not available';
+						}
+					};
+
 					const setOptionalRow = (rowSelector, valueSelector, value) => {
 						const row = detailModal?.querySelector(rowSelector);
 						const target = detailModal?.querySelector(valueSelector);
@@ -587,20 +656,40 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							riskSection.hidden = !entry.sourceRisk;
 						}
 						if (entry.sourceRisk) {
+							if (riskSection instanceof HTMLElement) {
+								riskSection.className = `narrative-risk-preview rag-panel rag-panel--${entry.sourceRisk.assuranceTone || 'neutral'}`;
+							}
+							const riskFallback = detailModal.querySelector('[data-detail-risk-fallback]');
+							const riskSignals = detailModal.querySelector('[data-detail-risk-signals]');
+							const riskGrid = detailModal.querySelector('[data-detail-risk-grid]');
+							if (riskFallback instanceof HTMLElement) {
+								riskFallback.hidden = entry.sourceRisk.available !== false;
+								riskFallback.textContent = entry.sourceRisk.unavailableReason || '';
+							}
+							if (riskSignals instanceof HTMLElement) riskSignals.hidden = entry.sourceRisk.available === false;
+							if (riskGrid instanceof HTMLElement) riskGrid.hidden = entry.sourceRisk.available === false;
 							setText('[data-detail-risk-title]', entry.sourceRisk.title);
 							setText('[data-detail-risk-reference]', entry.sourceRisk.reference || entry.sourceRef);
 							setText('[data-detail-risk-status]', entry.sourceRisk.status);
-							setText('[data-detail-risk-exposure]', entry.sourceRisk.exposure);
+							setText('[data-detail-risk-probability]', entry.sourceRisk.probability);
+							setText('[data-detail-risk-impact]', entry.sourceRisk.impact);
 							setText('[data-detail-risk-owner]', entry.sourceRisk.owner);
 							setText('[data-detail-risk-actioner]', entry.sourceRisk.actioner);
 							setText('[data-detail-risk-review-date]', entry.sourceRisk.reviewDate);
+							setText('[data-detail-risk-due-date]', entry.sourceRisk.dueDate);
+							setText('[data-detail-risk-updated-at]', entry.sourceRisk.updatedAt);
+							setText('[data-detail-risk-description]', entry.sourceRisk.description);
 							setText('[data-detail-risk-mitigation]', entry.sourceRisk.mitigation);
 							setText('[data-detail-risk-contingency]', entry.sourceRisk.contingency);
-							const concern = detailModal.querySelector('[data-detail-risk-concern]');
-							if (concern instanceof HTMLElement) {
-								concern.className = `attention-badge rag-pill rag-pill--${entry.sourceRisk.concernTone || 'neutral'}`;
-								concern.textContent = entry.sourceRisk.concern || 'Not available';
-							}
+							setText('[data-detail-risk-concern-value]', entry.sourceRisk.concern);
+							setText('[data-detail-risk-exposure-value]', entry.sourceRisk.exposure);
+							setText('[data-detail-risk-assurance-value]', entry.sourceRisk.assurance);
+							setPill('[data-detail-risk-concern]', entry.sourceRisk.concern, entry.sourceRisk.concernTone);
+							setPill('[data-detail-risk-exposure]', entry.sourceRisk.exposure, entry.sourceRisk.exposureTone);
+							setPill('[data-detail-risk-assurance]', entry.sourceRisk.assurance, entry.sourceRisk.assuranceTone);
+							setRagClass(detailModal.querySelector('[data-detail-risk-concern-card]'), 'narrative-risk-signal rag-card', entry.sourceRisk.concernTone);
+							setRagClass(detailModal.querySelector('[data-detail-risk-exposure-card]'), 'narrative-risk-signal rag-card', entry.sourceRisk.exposureTone);
+							setRagClass(detailModal.querySelector('[data-detail-risk-assurance-card]'), 'narrative-risk-signal rag-card', entry.sourceRisk.assuranceTone);
 							const openRisk = detailModal.querySelector('[data-detail-risk-open]');
 							if (openRisk instanceof HTMLAnchorElement) {
 								openRisk.href = entry.sourceRisk.openHref;
@@ -669,8 +758,9 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-details strong, .narrative-details span { display: block; }
 	.narrative-details span { color: var(--muted-strong); }
 	.narrative-details strong + span { margin-top: 0.25rem; }
+	.narrative-risk-action { margin-top: 0.55rem; padding: 0.42rem 0.7rem; font-size: 0.82rem; }
 	.narrative-back-link { justify-self: start; }
-	.narrative-modal { width: min(92vw, 44rem); max-height: 88vh; overflow: auto; border: 1px solid var(--border); border-radius: 1rem; padding: 0; background: #0b1724; color: var(--text); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.46); }
+	.narrative-modal { width: min(92vw, 48rem); max-height: 88vh; overflow: auto; border: 1px solid var(--border); border-radius: 1rem; padding: 0; background: #0b1724; color: var(--text); box-shadow: 0 28px 80px rgba(0, 0, 0, 0.46); }
 	.narrative-modal::backdrop { background: rgba(0, 0, 0, 0.68); }
 	.narrative-modal__close-form { position: sticky; top: 0; z-index: 2; display: flex; justify-content: flex-end; padding: 0.65rem 0.75rem 0; background: linear-gradient(180deg, #0b1724 72%, rgba(11, 23, 36, 0)); }
 	.narrative-modal__close { border: 1px solid var(--border); border-radius: 999px; padding: 0.35rem 0.7rem; background: rgba(255, 255, 255, 0.06); color: var(--muted-strong); font: inherit; font-size: 0.82rem; font-weight: 850; cursor: pointer; }
@@ -700,11 +790,18 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-detail h3 { margin: 0; font-size: 1rem; }
 	.narrative-detail ul { display: grid; gap: 0.4rem; margin: 0; padding-left: 1.1rem; }
 	.narrative-detail a { color: var(--accent-strong); font-weight: 850; }
-	.narrative-risk-preview { border: 1px solid var(--border); border-radius: 0.85rem; padding: 0.85rem; background: rgba(255, 255, 255, 0.035); }
+	.narrative-risk-preview { padding: 0.85rem; }
 	.narrative-risk-preview__header { display: flex; align-items: start; justify-content: space-between; gap: 0.8rem; }
-	.narrative-risk-preview__header p { margin: 0.25rem 0 0; }
+	.narrative-risk-preview__header h3 { margin-top: 0.1rem; }
+	.narrative-risk-preview__header p:not(.eyebrow) { margin: 0.25rem 0 0; }
+	.narrative-risk-preview__fallback { margin: 0.7rem 0 0; }
+	.narrative-risk-preview__signals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; margin-top: 0.8rem; }
+	.narrative-risk-signal { display: grid; align-content: start; gap: 0.45rem; min-width: 0; padding: 0.75rem; }
+	.narrative-risk-signal > span:first-child { color: var(--muted-strong); font-size: 0.75rem; font-weight: 850; text-transform: uppercase; }
+	.narrative-risk-signal strong { color: var(--text); overflow-wrap: anywhere; }
 	.narrative-risk-preview__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem; margin: 0.7rem 0 0; }
 	.narrative-risk-preview__grid div { display: grid; gap: 0.2rem; min-width: 0; }
+	.narrative-risk-preview__grid .narrative-risk-preview__wide { grid-column: 1 / -1; }
 	.narrative-risk-preview__grid dt { color: var(--text); font-size: 0.82rem; font-weight: 850; }
 	.narrative-risk-preview__grid dd { margin: 0; overflow-wrap: anywhere; }
 	.narrative-detail__meta { display: grid; gap: 0.65rem; margin: 0; padding-top: 0.85rem; border-top: 1px solid var(--border); }
@@ -712,7 +809,7 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-detail__meta dt { color: var(--text); font-weight: 850; }
 	.narrative-detail__meta dd { margin: 0; overflow-wrap: anywhere; }
 	@media (max-width: 760px) {
-		.narrative-attention, .narrative-link-row, .narrative-risk-preview__grid, .narrative-detail__meta div { grid-template-columns: 1fr; }
+		.narrative-attention, .narrative-link-row, .narrative-risk-preview__signals, .narrative-risk-preview__grid, .narrative-detail__meta div { grid-template-columns: 1fr; }
 		.narrative-risk-preview__header { display: grid; }
 		.narrative-link-row label:nth-of-type(2), .narrative-link-row input:nth-of-type(2), .narrative-link-row .button { grid-column: 1; grid-row: auto; }
 		.narrative-form__actions { display: grid; }
