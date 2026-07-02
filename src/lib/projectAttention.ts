@@ -1,8 +1,11 @@
 import {
-	deriveRiskConcernTone,
-	isDashboardActiveRiskStatus,
-	type ProjectRisk,
-} from './projectRisks.ts';
+	aggregateProjectAreaSignalState,
+	deriveProjectDetailsAreaSignal,
+	deriveRiskAreaSignal,
+	type ProjectAreaSignal,
+} from './dashboardTileSignals.ts';
+import type { ProjectDateCard } from './projectDates.ts';
+import type { ProjectRisk } from './projectRisks.ts';
 
 export type ProjectAttentionState = 'red' | 'amber' | 'green' | 'unknown' | 'neutral';
 
@@ -18,7 +21,35 @@ export type ProjectAttentionRisk = Pick<ProjectRisk,
 	| 'probability'
 	| 'impact'
 	| 'updated_at'
->;
+> & Partial<Pick<ProjectRisk, 'risk_ref' | 'title'>>;
+
+export type ProjectAttentionProject = {
+	id?: string | null;
+	description?: string | null;
+	project_type?: string | null;
+	delivery_method?: string | null;
+	priority?: string | null;
+	criticality?: string | null;
+	target_end_date?: string | null;
+	next_review_date?: string | null;
+	governance_route?: string | null;
+	escalation_route?: string | null;
+};
+
+export type ProjectAttentionAssignment = {
+	project_id?: string | null;
+	project_role?: string | null;
+	status?: string | null;
+	user_id?: string | null;
+	demo_person_id?: string | null;
+};
+
+export type ProjectAttentionFacts = {
+	project?: ProjectAttentionProject | null;
+	projectDateCards?: ProjectDateCard[] | null;
+	projectPeople?: ProjectAttentionAssignment[] | null;
+	risks?: ProjectAttentionRisk[] | null;
+};
 
 export function projectAttentionLabel(state: ProjectAttentionState): string {
 	if (state === 'red') return 'Red';
@@ -28,43 +59,63 @@ export function projectAttentionLabel(state: ProjectAttentionState): string {
 	return 'Unknown';
 }
 
-export function deriveProjectAttentionState(
+function deriveRiskOnlyAttentionState(
 	risks: ProjectAttentionRisk[] | null | undefined,
+	now: Date,
+): ProjectAttentionState {
+	return aggregateProjectAreaSignalState([deriveRiskAreaSignal(risks, now)]);
+}
+
+export function deriveProjectAreaSignals(
+	facts: ProjectAttentionFacts | null | undefined,
+	now = new Date(),
+): ProjectAreaSignal[] | null {
+	if (!facts) return null;
+	return [
+		deriveProjectDetailsAreaSignal(facts.project, facts.projectDateCards, facts.projectPeople),
+		deriveRiskAreaSignal(facts.risks, now),
+	];
+}
+
+export function deriveProjectAttentionState(
+	factsOrRisks: ProjectAttentionFacts | ProjectAttentionRisk[] | null | undefined,
 	now = new Date(),
 ): ProjectAttentionState {
-	if (!risks) return 'unknown';
-
-	const activeRiskConcerns = risks
-		.filter((risk) => isDashboardActiveRiskStatus(risk.status))
-		.map((risk) => deriveRiskConcernTone(risk, now));
-
-	if (activeRiskConcerns.includes('red')) return 'red';
-	if (activeRiskConcerns.includes('amber')) return 'amber';
-	return 'green';
+	if (Array.isArray(factsOrRisks) || !factsOrRisks) return deriveRiskOnlyAttentionState(factsOrRisks, now);
+	return aggregateProjectAreaSignalState(deriveProjectAreaSignals(factsOrRisks, now));
 }
 
 export function deriveProjectAttentionStatesByProject(
 	projectIds: string[],
-	risks: ProjectAttentionRisk[] | null | undefined,
+	factsByProjectIdOrRisks: Map<string, ProjectAttentionFacts> | ProjectAttentionRisk[] | null | undefined,
 	now = new Date(),
 ): Map<string, ProjectAttentionState> {
 	const stateByProjectId = new Map<string, ProjectAttentionState>();
-	if (!risks) {
+	if (!factsByProjectIdOrRisks) {
 		for (const projectId of projectIds) stateByProjectId.set(projectId, 'unknown');
 		return stateByProjectId;
 	}
 
-	const risksByProjectId = new Map<string, ProjectAttentionRisk[]>();
-	for (const risk of risks) {
-		const bucket = risksByProjectId.get(risk.project_id) ?? [];
-		bucket.push(risk);
-		risksByProjectId.set(risk.project_id, bucket);
+	if (Array.isArray(factsByProjectIdOrRisks)) {
+		const risksByProjectId = new Map<string, ProjectAttentionRisk[]>();
+		for (const risk of factsByProjectIdOrRisks) {
+			const bucket = risksByProjectId.get(risk.project_id) ?? [];
+			bucket.push(risk);
+			risksByProjectId.set(risk.project_id, bucket);
+		}
+		for (const projectId of projectIds) {
+			stateByProjectId.set(
+				projectId,
+				deriveRiskOnlyAttentionState(risksByProjectId.get(projectId) ?? [], now),
+			);
+		}
+		return stateByProjectId;
 	}
 
 	for (const projectId of projectIds) {
 		stateByProjectId.set(
 			projectId,
-			deriveProjectAttentionState(risksByProjectId.get(projectId) ?? [], now),
+			deriveProjectAttentionState(factsByProjectIdOrRisks.get(projectId), now),
 		);
 	}
 	return stateByProjectId;

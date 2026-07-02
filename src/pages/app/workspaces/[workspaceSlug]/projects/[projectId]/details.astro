@@ -5,6 +5,7 @@ import ProjectContentPanel from '../../../../../../components/app/ProjectContent
 import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
+import { deriveProjectDetailsAreaSignal } from '../../../../../../lib/dashboardTileSignals';
 import {
 	PROJECT_DATE_TYPES,
 	buildProjectDateCards,
@@ -253,6 +254,10 @@ try {
 
 const canEditProject = can(workspaceRole, 'project.editDetails');
 const assignmentsByRole = new Map(assignments.map((assignment) => [assignment.project_role, assignment]));
+const projectDetailsSignal = deriveProjectDetailsAreaSignal(project, projectDateCards, peopleLoadError ? null : assignments);
+const projectDetailsAttentionReasons = projectDetailsSignal.reasons.filter((reason) => reason.state === 'red' || reason.state === 'amber');
+const projectDetailsRedReasons = projectDetailsAttentionReasons.filter((reason) => reason.state === 'red');
+const projectDetailsAmberReasons = projectDetailsAttentionReasons.filter((reason) => reason.state === 'amber');
 const projectRoleCards = [
 	...DEFAULT_PROJECT_PEOPLE_ROLES,
 	...PROJECT_PEOPLE_ROLES.filter((role) => !DEFAULT_PROJECT_PEOPLE_ROLES.includes(role) && assignmentsByRole.has(role)),
@@ -296,6 +301,50 @@ const governanceFields = [
 					</p>
 					{saveMessage && <p class="form-message" data-project-details-save-message>{saveMessage}</p>}
 				</ProjectControlPanel>
+
+				{projectDetailsAttentionReasons.length > 0 && (
+					<section
+						class={`project-details-attention rag-panel rag-panel--${projectDetailsSignal.state}`}
+						aria-labelledby="project-details-attention-heading"
+						data-project-details-attention
+					>
+						<div class="project-details-attention__header">
+							<div>
+								<p class="eyebrow">Attention</p>
+								<h2 id="project-details-attention-heading">Project setup attention</h2>
+							</div>
+							<RagReferencePill tone={projectDetailsSignal.state} label={formatStatusLabel(projectDetailsSignal.state)} statusLabel="Project Details" />
+						</div>
+						<div class="project-details-attention__groups">
+							{projectDetailsRedReasons.length > 0 && (
+								<div class="project-details-attention__group">
+									<h3>Red attention</h3>
+									<ul>
+										{projectDetailsRedReasons.map((reason) => (
+											<li>
+												<span>{reason.message}</span>
+												{reason.target && <a href={reason.target}>{reason.actionLabel ?? 'Review'}</a>}
+											</li>
+										))}
+									</ul>
+								</div>
+							)}
+							{projectDetailsAmberReasons.length > 0 && (
+								<div class="project-details-attention__group">
+									<h3>Amber attention</h3>
+									<ul>
+										{projectDetailsAmberReasons.map((reason) => (
+											<li>
+												<span>{reason.message}</span>
+												{reason.target && <a href={reason.target}>{reason.actionLabel ?? 'Review'}</a>}
+											</li>
+										))}
+									</ul>
+								</div>
+							)}
+						</div>
+					</section>
+				)}
 
 				<ProjectContentPanel
 					title="Project identity"
@@ -968,6 +1017,60 @@ const governanceFields = [
 		color: var(--muted-strong);
 	}
 
+	.project-details-attention {
+		display: grid;
+		gap: 0.85rem;
+		padding: 1rem;
+	}
+
+	.project-details-attention__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.9rem;
+	}
+
+	.project-details-attention__header h2 {
+		margin: 0.1rem 0 0;
+		font-size: clamp(1.2rem, 2vw, 1.55rem);
+	}
+
+	.project-details-attention__groups {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.85rem;
+	}
+
+	.project-details-attention__group {
+		display: grid;
+		gap: 0.55rem;
+		min-width: 0;
+	}
+
+	.project-details-attention__group h3 {
+		margin: 0;
+		font-size: 0.96rem;
+	}
+
+	.project-details-attention__group ul {
+		display: grid;
+		gap: 0.45rem;
+		margin: 0;
+		padding-left: 1.15rem;
+		color: var(--muted-strong);
+	}
+
+	.project-details-attention__group li {
+		padding-left: 0.1rem;
+	}
+
+	.project-details-attention__group a {
+		display: inline-flex;
+		margin-left: 0.35rem;
+		color: var(--accent-strong);
+		font-weight: 850;
+	}
+
 	.project-details-page :global(.project-content-panel h2) {
 		font-size: clamp(1.35rem, 2.2vw, 1.85rem);
 		letter-spacing: 0;
@@ -1240,6 +1343,7 @@ const governanceFields = [
 	@media (max-width: 850px) {
 		.details-grid,
 		.governance-grid,
+		.project-details-attention__groups,
 		.project-details-modal-readonly {
 			grid-template-columns: 1fr;
 		}

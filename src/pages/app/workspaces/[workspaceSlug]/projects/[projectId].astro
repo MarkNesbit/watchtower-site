@@ -29,6 +29,7 @@ let canEditProject = false;
 let message = '';
 let creatorDisplayName = '';
 let projectDateCards: ProjectDateCard[] | null = null;
+let projectDetailAssignments = null;
 let projectDetailsTileSignal: DashboardTileSignalState = 'unknown';
 let projectNarrativeTileSignal: DashboardTileSignalState = 'unknown';
 let unseenProjectNarrativeEntries: number | null = null;
@@ -148,7 +149,19 @@ try {
 			} catch {
 				projectDateCards = null;
 			}
-			projectDetailsTileSignal = deriveProjectDetailsTileSignal(project, projectDateCards);
+			try {
+				const { data: assignments, error: assignmentsError } = await serverSupabase
+					.from('project_people')
+					.select('project_role, user_id, demo_person_id, status')
+					.eq('organisation_id', organisation.id)
+					.eq('project_id', project.id)
+					.eq('status', 'active');
+				if (assignmentsError) throw assignmentsError;
+				projectDetailAssignments = assignments ?? [];
+			} catch {
+				projectDetailAssignments = null;
+			}
+			projectDetailsTileSignal = deriveProjectDetailsTileSignal(project, projectDateCards, projectDetailAssignments);
 			const narrativeFeatureAccess = featureAccessByKey.projectDiary ?? getFeatureAccess('projectDiary');
 			if (narrativeFeatureAccess.isAccessible && can(workspace.role, 'narrative.view')) {
 				try {

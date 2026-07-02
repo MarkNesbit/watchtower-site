@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+	deriveProjectDetailsAreaSignal,
 	dashboardTileSignalStatusLabel,
 	deriveProjectDetailsTileSignal,
 	deriveProjectNarrativeTileSignal,
@@ -72,8 +73,21 @@ const dashboardProjectFacts = (overrides = {}) => ({
 
 const dashboardDateCard = (dateType, tone) => ({
 	dateType,
+	label: dateType === 'target_end_date' ? 'Target end date' : dateType === 'review_date' ? 'Review date' : 'Start date',
 	status: { tone, label: tone.charAt(0).toUpperCase() + tone.slice(1), text: `${tone} date signal` },
 });
+
+const dashboardAssignments = (overrides = []) => [
+	{ project_role: 'product_owner', user_id: 'product-owner-1', status: 'active' },
+	{ project_role: 'default_risk_owner', user_id: 'risk-owner-1', status: 'active' },
+	...overrides,
+];
+
+const greenProjectDates = [
+	dashboardDateCard('start_date', 'green'),
+	dashboardDateCard('target_end_date', 'green'),
+	dashboardDateCard('review_date', 'green'),
+];
 
 test('Project slug generation creates URL-safe slugs', () => {
 	assert.equal(slugifyProjectName(' Watchtower Test Project '), 'watchtower-test-project');
@@ -96,7 +110,7 @@ test('Project route helpers build workspace-safe risk paths', () => {
 	);
 });
 
-test('Project list attention helper derives risk-led state without changing health', () => {
+test('Project list attention helper aggregates project-area signals without changing health', () => {
 	const now = new Date('2026-06-28T12:00:00Z');
 	const greenRisk = attentionRiskFacts();
 	const amberRisk = attentionRiskFacts({ due_date: null });
@@ -115,17 +129,61 @@ test('Project list attention helper derives risk-led state without changing heal
 	];
 	assert.equal(deriveProjectAttentionState(closedAndDraftRedRisks, now), 'green');
 
+	const managedHighExposureRisk = attentionRiskFacts({
+		probability: 'high',
+		impact: 'high',
+		mitigation_plan: 'Confirmed supplier alternate.',
+		contingency_plan: 'Escalate through steering group.',
+	});
+	assert.equal(deriveRiskExposureTone(managedHighExposureRisk.probability, managedHighExposureRisk.impact), 'red');
+	assert.equal(deriveProjectAttentionState({
+		project: dashboardProjectFacts(),
+		projectDateCards: greenProjectDates,
+		projectPeople: dashboardAssignments(),
+		risks: [managedHighExposureRisk],
+	}, now), 'green');
+
+	assert.equal(deriveProjectAttentionState({
+		project: dashboardProjectFacts({ governance_route: '' }),
+		projectDateCards: greenProjectDates,
+		projectPeople: dashboardAssignments(),
+		risks: [greenRisk],
+	}, now), 'amber');
+
+	assert.equal(deriveProjectAttentionState({
+		project: dashboardProjectFacts({ description: '' }),
+		projectDateCards: greenProjectDates,
+		projectPeople: dashboardAssignments(),
+		risks: [greenRisk],
+	}, now), 'red');
+
 	const statesByProject = deriveProjectAttentionStatesByProject(
-		['project-1', 'project-2', 'project-3'],
-		[
-			attentionRiskFacts({ project_id: 'project-1', due_date: null }),
-			attentionRiskFacts({ project_id: 'project-2', owner_id: null }),
-		],
+		['hir-project', 'wat-project', 'clear-project'],
+		new Map([
+			['hir-project', {
+				project: dashboardProjectFacts({ governance_route: '' }),
+				projectDateCards: greenProjectDates,
+				projectPeople: dashboardAssignments(),
+				risks: [greenRisk],
+			}],
+			['wat-project', {
+				project: dashboardProjectFacts({ description: '' }),
+				projectDateCards: greenProjectDates,
+				projectPeople: dashboardAssignments(),
+				risks: [greenRisk],
+			}],
+			['clear-project', {
+				project: dashboardProjectFacts(),
+				projectDateCards: greenProjectDates,
+				projectPeople: dashboardAssignments(),
+				risks: [greenRisk],
+			}],
+		]),
 		now,
 	);
-	assert.equal(statesByProject.get('project-1'), 'amber');
-	assert.equal(statesByProject.get('project-2'), 'red');
-	assert.equal(statesByProject.get('project-3'), 'green');
+	assert.equal(statesByProject.get('hir-project'), 'amber');
+	assert.equal(statesByProject.get('wat-project'), 'red');
+	assert.equal(statesByProject.get('clear-project'), 'green');
 });
 
 test('Project list attention helper returns unknown when risk data is unavailable', () => {
@@ -134,14 +192,47 @@ test('Project list attention helper returns unknown when risk data is unavailabl
 	assert.equal(statesByProject.get('project-2'), 'unknown');
 });
 
-test('Project list attention scope is risk-led and leaves dates for later integration', async () => {
+test('Project list attention scope uses area signals and defers user-specific Narrative read-state', async () => {
 	const source = await readFile(new URL('../src/lib/projectAttention.ts', import.meta.url), 'utf8');
-	assert.match(source, /deriveRiskConcernTone/);
-	assert.match(source, /isDashboardActiveRiskStatus/);
-	assert.doesNotMatch(source, /projectDates|deriveProjectDateStatus|project_narrative|attention_items|health/i);
+	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
+	assert.match(source, /deriveProjectDetailsAreaSignal/);
+	assert.match(source, /deriveRiskAreaSignal/);
+	assert.match(source, /aggregateProjectAreaSignalState/);
+	assert.doesNotMatch(source, /deriveRiskConcernTone|deriveRiskExposureTone|project_narrative|attention_items|health/i);
+	assert.match(listSource, /\.from\('project_dates'\)/);
+	assert.match(listSource, /\.from\('project_people'\)/);
+	assert.match(listSource, /\.from\('project_risks'\)/);
+	assert.match(listSource, /buildProjectDateCards\(projectDatesByProjectId\.get\(project\.id\) \?\? \[\], project, new Date\(\)\)/);
+	assert.doesNotMatch(listSource, /getUnseenProjectNarrativeCount|markProjectNarrativeViewed|project_narrative_read_states/);
 });
 
 test('Dashboard tile signal helper derives Project Details setup and date readiness', () => {
+	const missingDescription = deriveProjectDetailsAreaSignal(
+		dashboardProjectFacts({ description: '' }),
+		greenProjectDates,
+		dashboardAssignments(),
+	);
+	assert.equal(missingDescription.state, 'red');
+	assert.match(missingDescription.reasons.map((reason) => reason.message).join('\n'), /Project description is not set\./);
+	assert.match(missingDescription.reasons.map((reason) => reason.target).join('\n'), /#project-description-heading/);
+
+	const amberDateSignal = deriveProjectDetailsAreaSignal(
+		dashboardProjectFacts(),
+		[dashboardDateCard('start_date', 'green'), dashboardDateCard('target_end_date', 'green'), dashboardDateCard('review_date', 'amber')],
+		dashboardAssignments(),
+	);
+	assert.equal(amberDateSignal.state, 'amber');
+	assert.match(amberDateSignal.reasons.map((reason) => reason.message).join('\n'), /Review date: amber date signal\./);
+
+	const missingResponsibilities = deriveProjectDetailsAreaSignal(
+		dashboardProjectFacts(),
+		greenProjectDates,
+		[],
+	);
+	assert.equal(missingResponsibilities.state, 'amber');
+	assert.match(missingResponsibilities.reasons.map((reason) => reason.message).join('\n'), /Product Owner is not assigned\./);
+	assert.match(missingResponsibilities.reasons.map((reason) => reason.message).join('\n'), /Default Risk Owner is not assigned\./);
+
 	assert.equal(deriveProjectDetailsTileSignal(
 		dashboardProjectFacts({ description: '' }),
 		[dashboardDateCard('start_date', 'green'), dashboardDateCard('target_end_date', 'green'), dashboardDateCard('review_date', 'green')],
@@ -352,7 +443,8 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	assert.ok(timelineIndex < risksIndex);
 	assert.match(detailSource, /title: 'Timeline'.*href: '#timeline'/);
 	assert.match(detailSource, /buildProjectNarrativePath\(workspaceSlug \?\? '', project\.slug\)/);
-	assert.match(detailSource, /deriveProjectDetailsTileSignal\(project, projectDateCards\)/);
+	assert.match(detailSource, /\.from\('project_people'\)[\s\S]*\.select\('project_role, user_id, demo_person_id, status'\)/);
+	assert.match(detailSource, /projectDetailsTileSignal = deriveProjectDetailsTileSignal\(project, projectDateCards, projectDetailAssignments\)/);
 	assert.match(detailSource, /getUnseenProjectNarrativeCount\(/);
 	assert.match(detailSource, /projectNarrativeTileSignal = deriveProjectNarrativeTileSignal\(\{ unseenEntries: unseenProjectNarrativeEntries \}\)/);
 	assert.match(detailSource, /narrativeFeatureAccess\.isAccessible && can\(workspace\.role, 'narrative\.view'\)/);
@@ -653,8 +745,13 @@ test('Project list uses shared authenticated page patterns without changing rout
 	assert.doesNotMatch(listSource, /<td><a class="text-link" href=\{buildProjectPath\(workspaceSlug, project\.slug\)\}>Open project<\/a><\/td>/);
 	assert.match(listSource, /<td class="projects-table__name"><a href=\{buildProjectPath\(workspaceSlug, project\.slug\)\} aria-label=\{`Open \$\{project\.name\}`\}>\{project\.name\}<\/a><\/td>/);
 	assert.match(listSource, /buildProjectPath\(workspaceSlug, project\.slug\)/);
-	assert.match(listSource, /\.select\('id, name, project_ref, slug, status, health, updated_at'\)/);
-	assert.match(listSource, /deriveProjectAttentionStatesByProject\(projectIds, risksError \? null : risks \?\? \[\], new Date\(\)\)/);
+	assert.match(listSource, /\.select\('id, name, project_ref, slug, status, health, description, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, governance_route, escalation_route, updated_at'\)/);
+	assert.match(listSource, /projectDateCards: projectDatesError \? null : buildProjectDateCards\(projectDatesByProjectId\.get\(project\.id\) \?\? \[\], project, new Date\(\)\)/);
+	assert.match(listSource, /projectPeople: projectPeopleError \? null : projectPeopleByProjectId\.get\(project\.id\) \?\? \[\]/);
+	assert.match(listSource, /risks: risksResult\.error \? null : risksByProjectId\.get\(project\.id\) \?\? \[\]/);
+	assert.match(listSource, /deriveProjectAttentionStatesByProject\(projectIds, factsByProjectId, new Date\(\)\)/);
+	assert.match(listSource, /\.from\('project_dates'\)[\s\S]*\.in\('project_id', projectIds\)/);
+	assert.match(listSource, /\.from\('project_people'\)[\s\S]*\.in\('project_id', projectIds\)/);
 	assert.match(listSource, /\.from\('project_risks'\)[\s\S]*\.in\('project_id', projectIds\)/);
 	assert.match(listSource, /\.projects-table__name a \{[\s\S]*?color: var\(--accent-strong\);/);
 	assert.match(listSource, /\.projects-table__name a:focus-visible \{[\s\S]*?outline: 3px solid var\(--accent-strong\);/);

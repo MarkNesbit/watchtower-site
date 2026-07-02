@@ -259,6 +259,7 @@ test('Project date helper validates authority scope comments and legacy compatib
 
 test('Project Details route displays full available details read-first with modal editing', async () => {
 	const source = await readFile(detailsPageUrl, 'utf8');
+	const signalSource = await readFile(new URL('../src/lib/dashboardTileSignals.ts', import.meta.url), 'utf8');
 	assert.match(source, /data-project-details/);
 	assert.match(source, /ProjectPageHero/);
 	assert.match(source, /title="Project Details"/);
@@ -281,6 +282,21 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(source, /listProjectDates\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
 	assert.match(source, /listProjectPersonOptions\(organisation\.id, workspace\.role, serverSupabase\)/);
 	assert.match(source, /You can view these project details, but you do not have permission to edit them\./);
+	assert.match(source, /import \{ deriveProjectDetailsAreaSignal \}/);
+	assert.match(source, /projectDetailsSignal = deriveProjectDetailsAreaSignal\(project, projectDateCards, peopleLoadError \? null : assignments\)/);
+	assert.match(source, /projectDetailsAttentionReasons = projectDetailsSignal\.reasons\.filter/);
+	assert.match(source, /data-project-details-attention/);
+	assert.match(source, /Project setup attention/);
+	assert.match(source, /Red attention/);
+	assert.match(source, /Amber attention/);
+	assert.match(source, /rag-panel rag-panel--\$\{projectDetailsSignal\.state\}/);
+	assert.match(source, /<RagReferencePill tone=\{projectDetailsSignal\.state\} label=\{formatStatusLabel\(projectDetailsSignal\.state\)\} statusLabel="Project Details" \/>/);
+	assert.match(source, /href=\{reason\.target\}/);
+	assert.match(signalSource, /#project-description-heading/);
+	assert.match(signalSource, /#project-context-heading/);
+	assert.match(signalSource, /#project-dates-heading/);
+	assert.match(signalSource, /#project-governance-heading/);
+	assert.match(signalSource, /#project-people-heading/);
 	assert.match(source, /data-project-dialog-open="project-identity-dialog"/);
 	assert.match(source, /id="project-identity-dialog"/);
 	assert.match(source, /data-project-identity-modal/);

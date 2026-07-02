@@ -99,6 +99,8 @@ The integration is intentionally narrow. It creates one entry when a risk is rai
 
 The project dashboard Risk tile routes to the project Risk Register when Risk Management is available. WT-DASH-RISK-001 and WT-DASH-TILE-SIGNALS-001 make the tile a compact attention/assurance signal without turning it into a count, badge or notification surface. The tile uses active risk management gaps rather than raw exposure: a high-exposure risk does not automatically make the tile Red if owner, action responsibility, mitigation/response, contingency and review cadence are current. Risk exposure remains visible in the Risk Register and Risk Detail views.
 
+WT-SIGNAL-CONSISTENCY-001 reuses that same Risk attention/assurance signal for project-list attention aggregation. Risks can contribute Amber or Red project attention when active risks have unresolved assurance gaps, but raw exposure alone still does not drive project attention or Project Health.
+
 The following are also future scope and are not created by this foundation:
 
 - Assumptions tables;
