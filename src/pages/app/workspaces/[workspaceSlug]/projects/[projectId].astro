@@ -336,8 +336,8 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 
 	.dashboard-tile:hover,
 	.dashboard-tile:focus-visible {
-		border-color: var(--rag-tone);
-		box-shadow: 0 14px 36px color-mix(in srgb, var(--rag-tone) 24%, transparent);
+		border-color: var(--rag-border, var(--rag-reference-border));
+		box-shadow: 0 14px 36px var(--rag-background, var(--rag-reference-background));
 		transform: translateY(-2px);
 		outline: none;
 	}
@@ -361,13 +361,13 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 		line-height: 1.18;
 	}
 
-	.dashboard-tile--blue { --tile-status: #00a0ff; }
-	.dashboard-tile--green { --tile-status: #21d36b; }
-	.dashboard-tile--amber { --tile-status: #f6a400; }
-	.dashboard-tile--red { --tile-status: #ff453a; }
-	.dashboard-tile--icon-green { --tile-icon-status: #21d36b; }
-	.dashboard-tile--icon-amber { --tile-icon-status: #f6a400; }
-	.dashboard-tile--icon-red { --tile-icon-status: #ff453a; }
+	.dashboard-tile--blue { --tile-status: var(--rag-reference); }
+	.dashboard-tile--green { --tile-status: var(--rag-green-accent); }
+	.dashboard-tile--amber { --tile-status: var(--rag-amber-accent); }
+	.dashboard-tile--red { --tile-status: var(--rag-red-accent); }
+	.dashboard-tile--icon-green { --tile-icon-status: var(--rag-green-accent); }
+	.dashboard-tile--icon-amber { --tile-icon-status: var(--rag-amber-accent); }
+	.dashboard-tile--icon-red { --tile-icon-status: var(--rag-red-accent); }
 	.dashboard-tile--icon-neutral,
 	.dashboard-tile--icon-default { --tile-icon-status: var(--tile-status); }
 

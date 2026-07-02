@@ -485,17 +485,33 @@ test('Project list uses shared authenticated page patterns without changing rout
 	assert.match(listSource, /\.select\('name, project_ref, slug, status, health, updated_at'\)/);
 });
 
-test('Shared RAG pill styling keeps active states scannable on dark surfaces', async () => {
+test('Shared RAG visual tokens drive pills cards and tiles', async () => {
 	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
 
-	assert.match(ragStyles, /--rag-pill-background-strength: 22%/);
-	assert.match(ragStyles, /--rag-pill-border-strength: 78%/);
-	assert.match(ragStyles, /border: 1px solid color-mix\(in srgb, var\(--rag-tone\) var\(--rag-pill-border-strength\), transparent\)/);
-	assert.match(ragStyles, /background: color-mix\(in srgb, var\(--rag-tone\) var\(--rag-pill-background-strength\), rgba\(4, 12, 24, 0\.46\)\)/);
-	assert.match(ragStyles, /\.rag-pill--red \{[\s\S]*?--rag-pill-text: #ffb4ae;/);
-	assert.match(ragStyles, /\.rag-pill--amber \{[\s\S]*?--rag-pill-text: #ffd37a;/);
-	assert.match(ragStyles, /\.rag-pill--green \{[\s\S]*?--rag-pill-text: #8ff0bb;/);
-	assert.match(ragStyles, /\.rag-pill--neutral,[\s\S]*?\.rag-pill--unknown \{[\s\S]*?--rag-pill-background-strength: 16%;[\s\S]*?--rag-pill-border-strength: 58%;/);
-	assert.match(ragStyles, /\.rag-pill--unknown \{[\s\S]*?--rag-pill-text: #c4d3df;/);
+	for (const token of [
+		'--rag-red-accent: #ff5f5f',
+		'--rag-red-border: rgba(255, 95, 95, 0.78)',
+		'--rag-red-background: rgba(255, 95, 95, 0.12)',
+		'--rag-amber-accent: #f6c453',
+		'--rag-amber-border: rgba(246, 196, 83, 0.78)',
+		'--rag-amber-background: rgba(246, 196, 83, 0.12)',
+		'--rag-green-accent: #6ee7a8',
+		'--rag-green-border: rgba(110, 231, 168, 0.78)',
+		'--rag-green-background: rgba(110, 231, 168, 0.12)',
+		'--rag-neutral-accent: #cbd5e1',
+		'--rag-neutral-border: rgba(203, 213, 225, 0.55)',
+		'--rag-neutral-background: rgba(148, 163, 184, 0.12)',
+		'--rag-unknown-accent: #a8b3c2',
+		'--rag-unknown-border: rgba(168, 179, 194, 0.55)',
+		'--rag-unknown-background: rgba(148, 163, 184, 0.10)',
+	]) {
+		assert.match(ragStyles, new RegExp(escapeRegExp(token)));
+	}
+	assert.match(ragStyles, /\.rag-pill--red,[\s\S]*?--rag-accent: var\(--rag-red-accent\);[\s\S]*?--rag-border: var\(--rag-red-border\);[\s\S]*?--rag-background: var\(--rag-red-background\);/);
+	assert.match(ragStyles, /\.rag-pill \{[\s\S]*?border: 1px solid var\(--rag-border, var\(--rag-neutral-border\)\);[\s\S]*?background: var\(--rag-background, var\(--rag-neutral-background\)\);[\s\S]*?color: var\(--rag-pill-text\);/);
 	assert.match(ragStyles, /\.rag-pill__status \{[\s\S]*?color: var\(--rag-pill-text\);/);
+	assert.match(ragStyles, /\.rag-card,[\s\S]*?\.rag-panel \{[\s\S]*?border-left: 0\.35rem solid var\(--rag-accent, var\(--rag-neutral-accent\)\);[\s\S]*?linear-gradient\(135deg, var\(--rag-background, var\(--rag-neutral-background\)\)/);
+	assert.match(ragStyles, /\.rag-tile \{[\s\S]*?--rag-icon-tone: var\(--rag-accent, var\(--rag-reference\)\);[\s\S]*?border: 1px solid var\(--rag-border, var\(--rag-reference-border\)\);/);
+	assert.doesNotMatch(ragStyles, /\.rag-pill \{[\s\S]*?--rag-tone: var\(--rag-neutral/);
+	assert.doesNotMatch(ragStyles, /\.rag-card,[\s\S]*?\.rag-panel \{[\s\S]*?--rag-tone: var\(--rag-neutral/);
 });
