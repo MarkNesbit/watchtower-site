@@ -761,9 +761,13 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /data-detail-links/);
 	assert.match(page, /listProjectRisksByIds\(organisation\.id, data\.id, riskSourceIds, workspace\.role, serverSupabase\)/);
 	assert.match(page, /data-detail-risk-section/);
-	assert.match(page, /View risk detail/);
-	assert.match(page, /data-risk-detail-trigger/);
+	assert.match(page, /data-risk-detail-trigger=\{entry\.source_type === 'risk' && entry\.source_record_id \? '' : undefined\}/);
+	assert.match(page, /View risk detail for \$\{getNarrativeDisplayRef\(entry\)\}/);
+	assert.doesNotMatch(page, /narrative-risk-action/);
+	assert.doesNotMatch(page, />View risk detail<\/button>/);
 	assert.match(page, /entry\.source_type === 'risk' && entry\.source_record_id/);
+	assert.match(page, /\{entry\.title && <strong>\{entry\.title\}<\/strong>\}/);
+	assert.match(page, /\{entry\.details && <span>\{entry\.details\}<\/span>\}/);
 	assert.match(page, /Current source risk/);
 	assert.match(page, /Risk detail/);
 	assert.match(page, /data-detail-risk-reference/);
@@ -816,7 +820,7 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /import RagReferencePill/);
 	assert.match(page, /getNarrativeDisplayRef\(entry\)/);
 	assert.match(page, /<RagReferencePill[\s\S]*tone=\{getAttentionPillTone\(entry\.attention_level\)\}[\s\S]*label=\{getNarrativeDisplayRef\(entry\)\}[\s\S]*statusLabel=\{formatAttention\(entry\.attention_level\)\}/);
-	assert.match(page, /aria-label=\{`Open \$\{getNarrativeDisplayRef\(entry\)\}, \$\{formatAttention\(entry\.attention_level\)\} attention`\}/);
+	assert.match(page, /aria-label=\{entry\.source_type === 'risk' && entry\.source_record_id[\s\S]*\? `View risk detail for \$\{getNarrativeDisplayRef\(entry\)\}`[\s\S]*: `Open \$\{getNarrativeDisplayRef\(entry\)\}, \$\{formatAttention\(entry\.attention_level\)\} attention`/);
 	assert.match(ragReferencePill, /statusLabel/);
 	assert.match(ragReferencePill, /rag-reference-pill__status/);
 	assert.doesNotMatch(page, /<td><span class=\{`attention-badge attention-badge--\$\{entry\.attention_level\}`\}/);
