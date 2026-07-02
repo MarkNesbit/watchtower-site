@@ -42,6 +42,24 @@ type NarrativeLink = {
 	created_at?: string | null;
 };
 
+export type ProjectNarrativeReadState = {
+	id: string;
+	organisation_id: string;
+	project_id: string;
+	user_id: string;
+	last_viewed_at: string;
+	created_at?: string | null;
+	updated_at?: string | null;
+};
+
+async function getAuthenticatedUserId(client, accessToken?: string): Promise<string | null> {
+	const { data, error } = accessToken
+		? await client.auth.getUser(accessToken)
+		: await client.auth.getUser();
+	if (error) throw error;
+	return data?.user?.id ?? null;
+}
+
 export function isNarrativeSourceType(value: unknown): value is NarrativeSourceType {
 	return typeof value === 'string' && NARRATIVE_SOURCE_TYPES.includes(value as NarrativeSourceType);
 }
@@ -157,6 +175,69 @@ export async function listProjectNarrativeEntries(
 		updater: entry.updated_by ? profileById.get(entry.updated_by) ?? null : null,
 		links: linksByEntryId.get(entry.id) ?? [],
 	}));
+}
+
+export async function getUnseenProjectNarrativeCount(
+	organisationId: string,
+	projectId: string,
+	workspaceRole: WorkspaceRole,
+	client,
+	accessToken?: string,
+): Promise<number> {
+	assertCan(workspaceRole, 'narrative.view', 'Your workspace role does not permit Project Narrative access.');
+	const userId = await getAuthenticatedUserId(client, accessToken);
+	if (!userId) throw new Error('Authenticated user is required to calculate Project Narrative read-state.');
+
+	const { data: readState, error: readStateError } = await client
+		.from('project_narrative_read_states')
+		.select('last_viewed_at')
+		.eq('organisation_id', organisationId)
+		.eq('project_id', projectId)
+		.eq('user_id', userId)
+		.maybeSingle();
+	if (readStateError) throw readStateError;
+
+	let query = client
+		.from('project_narrative_entries')
+		.select('id', { count: 'exact', head: true })
+		.eq('organisation_id', organisationId)
+		.eq('project_id', projectId);
+	if (readState?.last_viewed_at) {
+		query = query.gt('created_at', readState.last_viewed_at);
+	}
+
+	const { count, error: countError } = await query;
+	if (countError) throw countError;
+	return count ?? 0;
+}
+
+export async function markProjectNarrativeViewed(
+	organisationId: string,
+	projectId: string,
+	workspaceRole: WorkspaceRole,
+	client,
+	accessToken?: string,
+	viewedAt = new Date(),
+): Promise<ProjectNarrativeReadState> {
+	assertCan(workspaceRole, 'narrative.view', 'Your workspace role does not permit Project Narrative access.');
+	const userId = await getAuthenticatedUserId(client, accessToken);
+	if (!userId) throw new Error('Authenticated user is required to update Project Narrative read-state.');
+
+	const { data, error } = await client
+		.from('project_narrative_read_states')
+		.upsert(
+			{
+				organisation_id: organisationId,
+				project_id: projectId,
+				user_id: userId,
+				last_viewed_at: viewedAt.toISOString(),
+			},
+			{ onConflict: 'organisation_id,project_id,user_id' },
+		)
+		.select('id, organisation_id, project_id, user_id, last_viewed_at, created_at, updated_at')
+		.single();
+	if (error) throw error;
+	return data;
 }
 
 export async function createProjectNarrativeEntry(

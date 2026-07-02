@@ -1,10 +1,10 @@
 # Watchtower Project Model
 
-**Status:** Product working reference through WT-PROJ-DATES-001
+**Status:** Product working reference through WT-NARRATIVE-READSTATE-001
 
-**Last updated:** 1 July 2026
+**Last updated:** 2 July 2026
 
-**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/ui-page-design-standard.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`, `supabase/migrations/20260625000100_project_narrative_entry_links.sql`
+**Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/ui-page-design-standard.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`, `supabase/migrations/20260625000100_project_narrative_entry_links.sql`, `supabase/migrations/20260702000100_project_narrative_read_states.sql`
 
 ## Purpose of a project in Watchtower
 
@@ -251,7 +251,7 @@ Future risk references will use the authoritative project reference in the compo
 
 The authenticated project list displays `project_ref` with the shared reference-pill treatment as a project attention indicator. This attention state is separate from the Health column: Red/Amber/Green on the project reference means unresolved attention signals, not overall delivery health. WT-PROJ-LIST-ATTN-001 starts with a safe risk-led calculation over active project risks and excludes Draft and Closed risks; project dates, details completeness, Narrative unseen entries, Issues, Dependencies, Assumptions, Actions and Decisions are future attention sources. Project names are the primary workspace-scoped dashboard links, and the former Action column is removed. Create-project affordances remain governed by workspace role and `organisation_settings.allow_member_project_creation`; read-only users see an unavailable action with explanatory copy rather than a working create link.
 
-WT-DASH-TILE-SIGNALS-001 introduces reusable project dashboard tile signals without changing Project Health. Project Details uses existing setup, governance/escalation and project-date fields, including structured project-date status cards plus legacy fallback date values. Project Narrative is expected to become user-specific through unseen-entry/read-state data, but no read-state table exists yet, so the tile remains Unknown. The Risks tile uses attention/assurance gaps such as missing owner/actioner, overdue review, missing response evidence or stale updates; it does not use raw exposure alone, and managed high-exposure risks can produce a Green tile. Timeline, Issues, Dependencies, Assumptions, Decisions and Actions remain neutral/unknown/disabled until their own status models exist.
+WT-DASH-TILE-SIGNALS-001 introduces reusable project dashboard tile signals without changing Project Health. Project Details uses existing setup, governance/escalation and project-date fields, including structured project-date status cards plus legacy fallback date values. Project Narrative is user-specific through unseen-entry/read-state data: Green means no unseen entries, Amber means 1-3 unseen entries, Red means 4 or more unseen entries, and Unknown means read-state cannot be calculated safely. If no read-state exists for the current user/project, all existing Narrative entries count as unseen. Opening the Project Narrative page updates the current user's read-state; dashboard rendering does not. The Risks tile uses attention/assurance gaps such as missing owner/actioner, overdue review, missing response evidence or stale updates; it does not use raw exposure alone, and managed high-exposure risks can produce a Green tile. Timeline, Issues, Dependencies, Assumptions, Decisions and Actions remain neutral/unknown/disabled until their own status models exist.
 
 ## WT-US-0205 workspace-safe project routing
 

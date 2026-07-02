@@ -1,10 +1,10 @@
 # Project Narrative
 
-**Status:** WT-RISK-NARRATIVE-001 limited Risk-to-Narrative event integration
+**Status:** WT-NARRATIVE-READSTATE-001 user read-state
 
-**Migrations:** `20260624000400_project_narrative_schema_foundation.sql`, `20260625000100_project_narrative_entry_links.sql`
+**Migrations:** `20260624000400_project_narrative_schema_foundation.sql`, `20260625000100_project_narrative_entry_links.sql`, `20260702000100_project_narrative_read_states.sql`
 
-**Scope:** Workspace-isolated records, data access, permissions, manual entry creation, structured links, limited risk-generated entries, and the project-level assurance table/detail modal
+**Scope:** Workspace-isolated records, data access, permissions, manual entry creation, structured links, limited risk-generated entries, per-user read-state, and the project-level assurance table/detail modal
 
 ## Purpose and source-of-truth boundary
 
@@ -41,6 +41,15 @@ The database requires at least one of `title` or `details` to contain non-whites
 
 Composite foreign keys require the link, parent Narrative entry, and project to belong to the same workspace. Link URLs are validated by the application and constrained in the database to `http://` or `https://` schemes. Unsafe schemes such as `javascript:` are rejected. Links are deleted with their parent entry. WT-NARRATIVE-003 does not add link editing or deletion UI.
 
+`project_narrative_read_states` stores one personal read-state row per workspace, project and authenticated user. Each row includes:
+
+- an internal UUID `id`;
+- workspace and project ownership through `organisation_id` and `project_id`;
+- `user_id` for the signed-in user whose state is being tracked;
+- `last_viewed_at`, plus created/updated timestamps.
+
+The unique key is `(organisation_id, project_id, user_id)`. Composite foreign keys require the read-state project to belong to the same workspace. The identity fields cannot be changed after creation; only `last_viewed_at` is granted for authenticated updates.
+
 ## Entry numbering and references
 
 Entry identity is assigned in the database, not accepted from application clients. Each project has its own increasing sequence:
@@ -71,8 +80,10 @@ RLS and the application permission map enforce:
 
 - owners, admins, members, and viewers can read entries and links in an active workspace they belong to;
 - owners, admins, and members can create entries and links in that workspace;
+- owners, admins, members, and viewers can read, create, and update only their own read-state rows for projects in an active workspace they belong to;
 - existing database policies still permit entry update/delete for readiness, but WT-NARRATIVE-003 exposes no edit or delete UI;
 - viewers cannot create, update, or delete entries;
+- ordinary workspace members cannot read or mutate another user's Narrative read-state;
 - users cannot read or mutate entries in another workspace;
 - client inserts cannot supply workspace ownership, entry numbers, Narrative references, or creator identity;
 - client updates cannot change immutable identity or scope fields.
@@ -98,7 +109,9 @@ There is deliberately no Type or separate Attention column. The internal `entry_
 
 The Ref pill displays both text and a colour treatment, including a quieter neutral state, so attention is not conveyed by colour alone. Details render title and body as escaped Astro template content. Creator display uses profile name/email where the existing profile RLS relationship makes it available and otherwise shows `Workspace member`; UUIDs are not exposed. Creation timestamps currently use a simple explicit UTC display. A shared effective-viewer-timezone DTS helper remains future work.
 
-WT-DASH-TILE-SIGNALS-001 reserves the Project Dashboard Narrative tile for user-specific unseen-entry status, but no narrative read-state or last-viewed model exists yet. The dashboard tile therefore reports Unknown until a later slice adds scoped read-state storage and safe mark-as-viewed behaviour.
+The Project Dashboard Narrative tile is a user-specific awareness signal, not project health. It counts `project_narrative_entries.created_at > last_viewed_at` for the current user/project. If no read-state exists, all existing entries count as unseen so a first-time viewer does not receive a false Green. The tile maps unseen count to RAG state as follows: Green for 0 unseen entries, Amber for 1-3, Red for 4 or more, and Unknown only when the read-state cannot be calculated safely.
+
+Rendering the project dashboard does not mark entries as read. Opening the Project Narrative page loads the entries and then upserts the current user's `project_narrative_read_states.last_viewed_at` for that workspace/project. The dashboard tile remains visually simple with only icon and title; unseen counts are exposed through accessible status labels rather than visible badges.
 
 The detail modal displays the Narrative reference, title, attention level, details, links, source type, source reference when present, created by/at, and updated by/at when present. For manual entries the source type displays as `Manual`; an empty source reference row is not shown.
 
@@ -108,7 +121,7 @@ The empty state explains that future manual updates and RAID-linked activity wil
 
 ## Data-access foundation
 
-`src/lib/projectNarrative.ts` centralises the allowed source and attention values and provides scoped list/create helpers. The page uses the list helper, which always filters by both workspace and project and sorts by `created_at` descending then `entry_number` descending. The create helper applies role checks, requires manual Title and Details, defaults source fields to manual/null, validates link rows, rejects unsafe URL protocols, inserts the entry, and then attaches any structured links to the created entry scope. The database remains the final validation and security boundary.
+`src/lib/projectNarrative.ts` centralises the allowed source and attention values and provides scoped list/create/read-state helpers. The page uses the list helper, which always filters by both workspace and project and sorts by `created_at` descending then `entry_number` descending. The create helper applies role checks, requires manual Title and Details, defaults source fields to manual/null, validates link rows, rejects unsafe URL protocols, inserts the entry, and then attaches any structured links to the created entry scope. The read-state helpers resolve the authenticated user, count unseen entries for the dashboard without mutating state, and upsert `last_viewed_at` only from the Narrative page. The database remains the final validation and security boundary.
 
 ## WT-RISK-NARRATIVE-001 risk entries
 
@@ -125,7 +138,7 @@ Risk remains the source of truth. Project Narrative stores only concise event co
 
 ## Validation
 
-Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, source metadata, structured link schema/RLS, link validation, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, scoped newest-first listing, Ref/detail modal behaviour, risk source preview/open-full-risk behaviour, route/table structure, dashboard routing, risk raised and non-Red-to-Red triggers, duplicate prevention, non-trigger routine edits/comments, and absence of attention item, notification, health scoring and AI behaviour.
+Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, source metadata, structured link schema/RLS, read-state schema/RLS, no-read-state unseen-count behaviour, last-viewed filtering, read-state upsert behaviour, link validation, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, scoped newest-first listing, Ref/detail modal behaviour, risk source preview/open-full-risk behaviour, route/table structure, dashboard routing, dashboard read-only behaviour, risk raised and non-Red-to-Red triggers, duplicate prevention, non-trigger routine edits/comments, and absence of attention item, notification, health scoring and AI behaviour.
 
 For an environment with the Supabase CLI and local Docker runtime, validate the complete migration chain with:
 
