@@ -225,7 +225,7 @@ test('Project dashboard areas tiles render icon and title only with equal square
 
 	assert.match(areasSource, /<span class="dashboard-tile__icon" aria-hidden="true">\{tile\.icon\}<\/span>/);
 	assert.match(areasSource, /<strong>\{tile\.title\}<\/strong>/);
-	assert.match(areasSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'unknown'\}[\s\S]*?aria-disabled="true"[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable, \$\{tile\.statusLabel \?\? 'Unknown state'\}`\}[\s\S]*?tabindex="0"/);
+	assert.match(areasSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'unknown'\} rag-tile--disabled[\s\S]*?aria-disabled="true"[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `\$\{tile\.title\} unavailable, \$\{tile\.statusLabel \?\? 'Unknown state'\}`\}[\s\S]*?tabindex="0"/);
 	assert.match(areasSource, /<a[\s\S]*?class={`dashboard-tile[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'neutral'\}[\s\S]*?href=\{tile\.href\}[\s\S]*?aria-label=\{tile\.ariaLabel \?\? `Open \$\{tile\.title\}, \$\{tile\.statusLabel \?\? 'Neutral state'\}`\}/);
 	assert.match(areasSource, /data-rag-tile-state=\{tile\.attentionTone \?\? 'unknown'\}/);
 	assert.match(areasSource, /data-rag-tile-state=\{tile\.attentionTone \?\? 'neutral'\}/);
@@ -235,6 +235,7 @@ test('Project dashboard areas tiles render icon and title only with equal square
 	}
 	assert.match(ragStyles, /\.rag-tile/);
 	assert.match(ragStyles, /\.rag-tile--attention-red/);
+	assert.match(ragStyles, /\.rag-tile--disabled \{[\s\S]*?--rag-accent: var\(--rag-unknown-accent\);[\s\S]*?--rag-border: var\(--rag-unknown-border\);[\s\S]*?--rag-background: var\(--rag-unknown-background\);/);
 	assert.match(ragStyles, /\.visually-hidden/);
 	assert.match(detailSource, /\.dashboard-tile-grid \{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(9\.5rem, 10\.75rem\)\);[\s\S]*?justify-content: center;/);
 	assert.match(detailSource, /\.dashboard-tile \{[\s\S]*?aspect-ratio: 1;/);
@@ -261,6 +262,15 @@ test('Project dashboard Risk tile uses shared RAG assurance state styling', asyn
 	assert.match(detailSource, /dashboard-tile--icon-\$\{tile\.iconTone \?\? 'default'\}/);
 	assert.match(detailSource, /rag-tile--attention-\$\{tile\.attentionTone \?\? 'neutral'\}/);
 	assert.match(detailSource, /\.dashboard-tile__icon \{[\s\S]*?color: var\(--rag-icon-tone, var\(--tile-icon-status, var\(--tile-status\)\)\)/);
+	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
+	const referenceTileIndex = ragStyles.indexOf('.rag-tile--blue');
+	const redAttentionIndex = ragStyles.indexOf('.rag-tile--attention-red');
+	assert.ok(referenceTileIndex !== -1 && redAttentionIndex > referenceTileIndex);
+	assert.match(ragStyles, /\.rag-tile--attention-red \{[\s\S]*?--rag-accent: var\(--rag-red-accent\);[\s\S]*?--rag-border: var\(--rag-red-border\);[\s\S]*?--rag-background: var\(--rag-red-background\);/);
+	assert.match(ragStyles, /\.rag-tile--attention-amber \{[\s\S]*?--rag-accent: var\(--rag-amber-accent\);[\s\S]*?--rag-border: var\(--rag-amber-border\);[\s\S]*?--rag-background: var\(--rag-amber-background\);/);
+	assert.match(ragStyles, /\.rag-tile--attention-green \{[\s\S]*?--rag-accent: var\(--rag-green-accent\);[\s\S]*?--rag-border: var\(--rag-green-border\);[\s\S]*?--rag-background: var\(--rag-green-background\);/);
+	assert.doesNotMatch(ragStyles, /\.rag-tile--attention-neutral \{/);
+	assert.doesNotMatch(ragStyles, /\.rag-tile--attention-unknown \{/);
 	for (const tone of ['green', 'amber', 'red', 'neutral']) {
 		assert.match(detailSource, new RegExp(`dashboard-tile--icon-${tone}`));
 	}
@@ -512,6 +522,7 @@ test('Shared RAG visual tokens drive pills cards and tiles', async () => {
 	assert.match(ragStyles, /\.rag-pill__status \{[\s\S]*?color: var\(--rag-pill-text\);/);
 	assert.match(ragStyles, /\.rag-card,[\s\S]*?\.rag-panel \{[\s\S]*?border-left: 0\.35rem solid var\(--rag-accent, var\(--rag-neutral-accent\)\);[\s\S]*?linear-gradient\(135deg, var\(--rag-background, var\(--rag-neutral-background\)\)/);
 	assert.match(ragStyles, /\.rag-tile \{[\s\S]*?--rag-icon-tone: var\(--rag-accent, var\(--rag-reference\)\);[\s\S]*?border: 1px solid var\(--rag-border, var\(--rag-reference-border\)\);/);
+	assert.match(ragStyles, /\.rag-tile--blue \{[\s\S]*?--rag-accent: var\(--rag-reference\);[\s\S]*?--rag-border: var\(--rag-reference-border\);[\s\S]*?--rag-background: var\(--rag-reference-background\);/);
 	assert.doesNotMatch(ragStyles, /\.rag-pill \{[\s\S]*?--rag-tone: var\(--rag-neutral/);
 	assert.doesNotMatch(ragStyles, /\.rag-card,[\s\S]*?\.rag-panel \{[\s\S]*?--rag-tone: var\(--rag-neutral/);
 });

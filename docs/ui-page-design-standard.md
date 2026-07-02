@@ -164,6 +164,7 @@ RAG cards and panels should:
 Dashboard capability tiles should:
 
 - Use the shared `rag-tile` treatment and a state class such as `rag-tile--attention-red` when a capability has an attention or assurance state.
+- Keep Watchtower blue as the default capability style for neutral, unknown or not-assessed tiles, but let explicit Red, Amber or Green tile states override the default blue visual treatment.
 - Keep icon and title visible without permanent helper copy inside the tile.
 - Provide accessible labels for the state.
 - Avoid count badges, red/amber dots, notification markers or health-score decoration unless a later slice explicitly introduces that pattern.

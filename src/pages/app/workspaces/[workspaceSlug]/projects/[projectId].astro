@@ -221,7 +221,7 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => tile.destination 
 					<div class="dashboard-tile-grid" aria-label="Project dashboard areas">
 						{resolvedProjectTiles.map((tile) => !tile.isAccessible ? (
 							<article
-								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'} dashboard-tile--unavailable rag-tile rag-tile--${tile.tone} rag-tile--attention-${tile.attentionTone ?? 'unknown'}`}
+								class={`dashboard-tile dashboard-tile--${tile.tone} dashboard-tile--icon-${tile.iconTone ?? 'default'} dashboard-tile--unavailable rag-tile rag-tile--${tile.tone} rag-tile--attention-${tile.attentionTone ?? 'unknown'} rag-tile--disabled`}
 								aria-disabled="true"
 								aria-label={tile.ariaLabel ?? `${tile.title} unavailable, ${tile.statusLabel ?? 'Unknown state'}`}
 								tabindex="0"
