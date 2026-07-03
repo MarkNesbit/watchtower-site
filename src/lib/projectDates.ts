@@ -160,6 +160,30 @@ export function deriveProjectDateStatus(
 	return { tone: 'green' as const, label: 'Green', text: 'Green - scheduled' };
 }
 
+function legacyProjectDateForType(
+	dateType: ProjectDateType,
+	legacyProject?: { start_date?: string | null; target_end_date?: string | null; next_review_date?: string | null } | null,
+): string | null {
+	if (dateType === 'start_date') return legacyProject?.start_date ?? null;
+	if (dateType === 'target_end_date') return legacyProject?.target_end_date ?? null;
+	if (dateType === 'review_date') return legacyProject?.next_review_date ?? null;
+	return null;
+}
+
+function defaultProjectDateRecord(
+	activeRecords: ProjectDateRecord[],
+	dateType: ProjectDateType,
+	legacyDate: string | null,
+): ProjectDateRecord | undefined {
+	const candidates = activeRecords.filter((date) => date.date_type === dateType);
+	if (legacyDate) {
+		return candidates.find((date) => date.target_date === legacyDate)
+			?? candidates.find((date) => !date.target_date)
+			?? candidates[0];
+	}
+	return candidates.find((date) => Boolean(date.target_date)) ?? candidates[0];
+}
+
 export function buildProjectDateCards(
 	projectDates: ProjectDateRecord[],
 	legacyProject?: { start_date?: string | null; target_end_date?: string | null; next_review_date?: string | null } | null,
@@ -167,20 +191,16 @@ export function buildProjectDateCards(
 ): ProjectDateCard[] {
 	const activeRecords = projectDates.filter((date) => !date.removed_at);
 	const firstByDefaultType = new Map<ProjectDateType, ProjectDateRecord>();
-	for (const date of activeRecords) {
-		if (isProjectDateType(date.date_type) && DEFAULT_PROJECT_DATE_TYPES.includes(date.date_type) && !firstByDefaultType.has(date.date_type)) {
-			firstByDefaultType.set(date.date_type, date);
-		}
+	for (const dateType of DEFAULT_PROJECT_DATE_TYPES) {
+		const legacyDate = legacyProjectDateForType(dateType, legacyProject);
+		const record = defaultProjectDateRecord(activeRecords, dateType, legacyDate);
+		if (record) firstByDefaultType.set(dateType, record);
 	}
 
 	const defaultCards = DEFAULT_PROJECT_DATE_TYPES.map((dateType) => {
 		const record = firstByDefaultType.get(dateType);
-		const legacyDate = dateType === 'start_date'
-			? legacyProject?.start_date
-			: dateType === 'target_end_date'
-				? legacyProject?.target_end_date
-				: legacyProject?.next_review_date;
-		const targetDate = record?.target_date ?? legacyDate ?? null;
+		const legacyDate = legacyProjectDateForType(dateType, legacyProject);
+		const targetDate = legacyDate ?? record?.target_date ?? null;
 		const warningDays = projectDateWarningDays(dateType);
 		const comments = record?.comments ?? [];
 		return {
