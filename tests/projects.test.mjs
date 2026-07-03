@@ -575,8 +575,8 @@ test('Project dashboard Risk tile uses shared RAG assurance state styling', asyn
 	assert.match(ragStyles, /\.rag-tile--attention-red \{[\s\S]*?--rag-accent: var\(--rag-red-accent\);[\s\S]*?--rag-border: var\(--rag-red-border\);[\s\S]*?--rag-background: var\(--rag-red-background\);/);
 	assert.match(ragStyles, /\.rag-tile--attention-amber \{[\s\S]*?--rag-accent: var\(--rag-amber-accent\);[\s\S]*?--rag-border: var\(--rag-amber-border\);[\s\S]*?--rag-background: var\(--rag-amber-background\);/);
 	assert.match(ragStyles, /\.rag-tile--attention-green \{[\s\S]*?--rag-accent: var\(--rag-green-accent\);[\s\S]*?--rag-border: var\(--rag-green-border\);[\s\S]*?--rag-background: var\(--rag-green-background\);/);
-	assert.doesNotMatch(ragStyles, /\.rag-tile--attention-neutral \{/);
-	assert.doesNotMatch(ragStyles, /\.rag-tile--attention-unknown \{/);
+	assert.match(ragStyles, /\.rag-tile--attention-neutral \{[\s\S]*?--rag-accent: var\(--rag-neutral-accent\);[\s\S]*?--rag-border: var\(--rag-neutral-border\);[\s\S]*?--rag-background: var\(--rag-neutral-background\);/);
+	assert.match(ragStyles, /\.rag-tile--attention-unknown \{[\s\S]*?--rag-accent: var\(--rag-unknown-accent\);[\s\S]*?--rag-border: var\(--rag-unknown-border\);[\s\S]*?--rag-background: var\(--rag-unknown-background\);/);
 	for (const tone of ['green', 'amber', 'red', 'neutral']) {
 		assert.match(detailSource, new RegExp(`dashboard-tile--icon-${tone}`));
 	}
