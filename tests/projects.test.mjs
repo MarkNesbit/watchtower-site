@@ -151,6 +151,12 @@ test('Project list action-state helper aggregates project-area signals without c
 		projectPeople: dashboardAssignments(),
 		risks: [managedHighExposureRisk],
 	}, now), 'green');
+	assert.equal(deriveProjectActionState({
+		project: dashboardProjectFacts(),
+		projectDateCards: greenProjectDates,
+		projectPeople: dashboardAssignments(),
+		risks: [],
+	}, now), 'green');
 
 	assert.equal(deriveProjectActionState({
 		project: dashboardProjectFacts({ governance_route: '' }),
@@ -208,9 +214,14 @@ test('Project list action-state scope uses area signals and defers user-specific
 	assert.match(source, /deriveRiskAreaSignal/);
 	assert.match(source, /aggregateProjectAreaSignalState/);
 	assert.doesNotMatch(source, /deriveRiskConcernTone|deriveRiskExposureTone|project_narrative|attention_items|health/i);
+	assert.match(listSource, /import \{ getFeatureAccess, loadFeatureAccess \}/);
+	assert.match(listSource, /riskFeatureAccess = getFeatureAccess\('riskManagement'\)/);
+	assert.match(listSource, /riskFeatureAccess = await loadFeatureAccess\(serverSupabase, 'riskManagement', accessToken\)/);
+	assert.match(listSource, /riskFeatureAccess\.isAccessible && can\(workspace\.role, 'risk\.view'\)/);
 	assert.match(listSource, /\.from\('project_dates'\)/);
 	assert.match(listSource, /\.from\('project_people'\)/);
 	assert.match(listSource, /\.from\('project_risks'\)/);
+	assert.match(listSource, /Promise\.resolve\(\{ data: \[\], error: null \}\)/);
 	assert.match(listSource, /buildProjectDateCards\(projectDatesByProjectId\.get\(project\.id\) \?\? \[\], project, new Date\(\)\)/);
 	assert.doesNotMatch(listSource, /getUnseenProjectNarrativeCount|markProjectNarrativeViewed|project_narrative_read_states/);
 });
@@ -575,6 +586,9 @@ test('Project dashboard Risk tile uses shared RAG assurance state styling', asyn
 	assert.match(detailSource, /riskFeatureAccess\.isAccessible && can\(workspace\.role, 'risk\.view'\)/);
 	assert.match(detailSource, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
 	assert.match(detailSource, /riskTileSignal = deriveRiskTileAttentionSignal\(risks, new Date\(\)\)/);
+	assert.match(detailSource, /projectRisksForActionState: ProjectRisk\[\] \| null = \[\]/);
+	assert.match(detailSource, /projectRisksForActionState = null/);
+	assert.match(detailSource, /projectActionState = deriveProjectActionState\(\{/);
 	assert.match(detailSource, /riskTileSignal = 'unknown'/);
 	assert.match(detailSource, /const tileSignal = tile\.destination === 'details'[\s\S]*?tile\.destination === 'risks'[\s\S]*?\? riskTileSignal/);
 	assert.match(detailSource, /statusLabel: tile\.destination === 'narrative'[\s\S]*?: dashboardTileSignalStatusLabel\(tileSignal\)/);
