@@ -9,9 +9,14 @@ import RagReferencePill from '../../../../../../components/app/RagReferencePill.
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import { can } from '../../../../../../lib/permissions';
 import {
-	deriveRiskConcernTone,
+	deriveRiskReferenceTone,
+	isActiveRiskStatus,
+	isClosedRiskStatus,
+	isDraftRiskStatus,
 	listProjectRisks,
 	riskDisplayLabel,
+	riskLifecycleLabel,
+	riskReferenceStatusLabel,
 } from '../../../../../../lib/projectRisks';
 import { buildProjectNewRiskPath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
@@ -83,6 +88,9 @@ try {
 }
 
 const canCreateRisk = can(workspaceRole, 'risk.create');
+const activeRisks = risks.filter((risk) => isActiveRiskStatus(risk.status));
+const draftRisks = risks.filter((risk) => isDraftRiskStatus(risk.status));
+const closedRisks = risks.filter((risk) => isClosedRiskStatus(risk.status));
 ---
 <AuthenticatedLayout title={project ? `Risk Register — ${project.name} | WatchTower` : 'Risk Register | WatchTower'}>
 	<section class="risk-register-page" data-risk-management-route data-risk-register-route data-feature-state={featureAccess.state}>
@@ -102,8 +110,8 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 				</ProjectControlPanel>
 
 				<ProjectContentPanel
-					title="Project risks"
-					helper="Review current project risks and open each reference for the assurance view."
+					title="Active risks"
+					helper="Review the active Risk Register first. Draft and closed risks remain visible separately without driving active assurance."
 					headingId="risk-register-table-heading"
 				>
 					<div slot="action" class="risk-register-action">
@@ -142,44 +150,146 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 							<p>{canCreateRisk ? 'Create the first risk when there is a delivery concern to manage.' : 'Viewer access is read-only, so risk creation is unavailable for your role.'}</p>
 						</EmptyState>
 					) : (
-						<div class="risk-register-table-scroll">
-							<table class="simple-table risk-register-table">
-								<thead>
-									<tr>
-										<th scope="col">Ref</th>
-										<th scope="col">Risk</th>
-										<th scope="col">Status</th>
-										<th scope="col">Review date</th>
-										<th scope="col">Updated</th>
-									</tr>
-								</thead>
-								<tbody>
-									{risks.map((risk) => {
-										const derivedConcernTone = deriveRiskConcernTone(risk);
-										return (
-											<tr>
-												<td>
-													<a
-														class="risk-reference-link"
-														href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
-														aria-label={`Open ${risk.risk_ref}, ${riskDisplayLabel(derivedConcernTone)} derived concern`}
-													>
-														<RagReferencePill
-															tone={derivedConcernTone}
-															label={risk.risk_ref}
-															statusLabel={riskDisplayLabel(derivedConcernTone)}
-														/>
-													</a>
-												</td>
-												<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
-												<td>{riskDisplayLabel(risk.status)}</td>
-												<td>{formatDate(risk.review_date, 'No review date')}</td>
-												<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
-											</tr>
-										);
-									})}
-								</tbody>
-							</table>
+						<div class="risk-lifecycle-sections">
+							<section class="risk-lifecycle-section" data-active-risks-section aria-labelledby="active-risks-heading">
+								<h3 id="active-risks-heading">Active risks</h3>
+								{activeRisks.length > 0 ? (
+									<div class="risk-register-table-scroll">
+										<table class="simple-table risk-register-table" data-active-risk-register>
+											<thead>
+												<tr>
+													<th scope="col">Ref</th>
+													<th scope="col">Risk</th>
+													<th scope="col">Lifecycle</th>
+													<th scope="col">Status</th>
+													<th scope="col">Review date</th>
+													<th scope="col">Updated</th>
+												</tr>
+											</thead>
+											<tbody>
+												{activeRisks.map((risk) => {
+													const referenceTone = deriveRiskReferenceTone(risk);
+													const referenceStatus = riskReferenceStatusLabel(risk);
+													return (
+														<tr data-risk-lifecycle="active">
+															<td>
+																<a
+																	class="risk-reference-link"
+																	href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
+																	aria-label={`Open ${risk.risk_ref}, ${referenceStatus} derived concern`}
+																>
+																	<RagReferencePill
+																		tone={referenceTone}
+																		label={risk.risk_ref}
+																		statusLabel={referenceStatus}
+																	/>
+																</a>
+															</td>
+															<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
+															<td>{riskLifecycleLabel(risk.status)}</td>
+															<td>{riskDisplayLabel(risk.status)}</td>
+															<td>{formatDate(risk.review_date, 'No review date')}</td>
+															<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
+														</tr>
+													);
+												})}
+											</tbody>
+										</table>
+									</div>
+								) : (
+									<EmptyState title="No active risks currently require management." data-active-risk-empty-state>
+										<p>Draft and closed risks remain available below when they exist.</p>
+									</EmptyState>
+								)}
+							</section>
+
+							{draftRisks.length > 0 && (
+								<section class="risk-lifecycle-section risk-lifecycle-section--neutral" data-draft-risks-section aria-labelledby="draft-risks-heading">
+									<h3 id="draft-risks-heading">Draft risks</h3>
+									<div class="risk-register-table-scroll">
+										<table class="simple-table risk-register-table" data-draft-risk-register>
+											<thead>
+												<tr>
+													<th scope="col">Ref</th>
+													<th scope="col">Risk</th>
+													<th scope="col">Lifecycle</th>
+													<th scope="col">Status</th>
+													<th scope="col">Review date</th>
+													<th scope="col">Updated</th>
+												</tr>
+											</thead>
+											<tbody>
+												{draftRisks.map((risk) => (
+													<tr data-risk-lifecycle="draft">
+														<td>
+															<a
+																class="risk-reference-link"
+																href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
+																aria-label={`Open ${risk.risk_ref}, Draft risk`}
+															>
+																<RagReferencePill
+																	tone="neutral"
+																	label={risk.risk_ref}
+																	statusLabel="Draft"
+																/>
+															</a>
+														</td>
+														<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
+														<td>{riskLifecycleLabel(risk.status)}</td>
+														<td>{riskDisplayLabel(risk.status)}</td>
+														<td>{formatDate(risk.review_date, 'No review date')}</td>
+														<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
+													</tr>
+												))}
+											</tbody>
+										</table>
+									</div>
+								</section>
+							)}
+
+							{closedRisks.length > 0 && (
+								<details class="risk-lifecycle-section risk-lifecycle-section--neutral" data-closed-risks-section>
+									<summary id="closed-risks-heading">Closed risks</summary>
+									<div class="risk-register-table-scroll">
+										<table class="simple-table risk-register-table" data-closed-risk-register>
+											<thead>
+												<tr>
+													<th scope="col">Ref</th>
+													<th scope="col">Risk</th>
+													<th scope="col">Lifecycle</th>
+													<th scope="col">Status</th>
+													<th scope="col">Review date</th>
+													<th scope="col">Updated</th>
+												</tr>
+											</thead>
+											<tbody>
+												{closedRisks.map((risk) => (
+													<tr data-risk-lifecycle="closed">
+														<td>
+															<a
+																class="risk-reference-link"
+																href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
+																aria-label={`Open ${risk.risk_ref}, Closed risk`}
+															>
+																<RagReferencePill
+																	tone="neutral"
+																	label={risk.risk_ref}
+																	statusLabel="Closed"
+																/>
+															</a>
+														</td>
+														<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
+														<td>{riskLifecycleLabel(risk.status)}</td>
+														<td>{riskDisplayLabel(risk.status)}</td>
+														<td>{formatDate(risk.review_date, 'No review date')}</td>
+														<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
+													</tr>
+												))}
+											</tbody>
+										</table>
+									</div>
+								</details>
+							)}
 						</div>
 					)}
 					<a class="text-link risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
@@ -226,8 +336,35 @@ const canCreateRisk = can(workspaceRole, 'risk.create');
 		overflow-x: auto;
 	}
 
+	.risk-lifecycle-sections {
+		display: grid;
+		gap: 1rem;
+	}
+
+	.risk-lifecycle-section {
+		display: grid;
+		gap: 0.7rem;
+	}
+
+	.risk-lifecycle-section h3,
+	.risk-lifecycle-section summary {
+		color: var(--text);
+		font-size: 1rem;
+		font-weight: 800;
+		letter-spacing: 0;
+	}
+
+	.risk-lifecycle-section summary {
+		cursor: pointer;
+	}
+
+	.risk-lifecycle-section--neutral {
+		border-left: 0.35rem solid var(--rag-neutral-accent);
+		padding-left: 0.85rem;
+	}
+
 	.risk-register-table {
-		min-width: 46rem;
+		min-width: 54rem;
 	}
 
 	.risk-register-table th:first-child {

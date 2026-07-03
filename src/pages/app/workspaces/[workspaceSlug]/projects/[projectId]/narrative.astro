@@ -16,11 +16,12 @@ import {
 } from '../../../../../../lib/projectNarrative';
 import {
 	deriveRiskAssuranceTone,
-	deriveRiskConcernTone,
 	deriveRiskExposureTone,
+	deriveRiskReferenceTone,
 	listProjectRisksByIds,
 	riskDisplayLabel,
 	riskProfileName,
+	riskReferenceStatusLabel,
 } from '../../../../../../lib/projectRisks';
 import { can } from '../../../../../../lib/permissions';
 import { buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
@@ -212,7 +213,7 @@ const riskPreviewFor = (entry) => {
 		unavailableReason: 'The linked risk could not be loaded for this project. It may have been archived, deleted, or unavailable to your current workspace access.',
 		openHref: buildProjectRiskPath(workspaceSlug ?? '', project?.slug ?? projectSlug ?? '', entry.source_record_id),
 	};
-	const concern = deriveRiskConcernTone(risk, new Date());
+	const concern = deriveRiskReferenceTone(risk, new Date());
 	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
 	const assurance = deriveRiskAssuranceTone(risk, new Date());
 	return {
@@ -223,7 +224,7 @@ const riskPreviewFor = (entry) => {
 		status: riskDisplayLabel(risk.status),
 		assurance: riskDisplayLabel(assurance),
 		assuranceTone: assurance,
-		concern: riskDisplayLabel(concern),
+		concern: riskReferenceStatusLabel(risk, new Date()),
 		concernTone: concern,
 		exposure: riskDisplayLabel(exposure),
 		exposureTone: exposure,

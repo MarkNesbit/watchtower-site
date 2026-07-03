@@ -1,8 +1,8 @@
 # Watchtower Project Model
 
-**Status:** Product working reference through WT-NARRATIVE-READSTATE-001
+**Status:** Product working reference through WT-RISK-LIFECYCLE-001
 
-**Last updated:** 2 July 2026
+**Last updated:** 3 July 2026
 
 **Related:** `docs/architecture/ADR-002 Workspace and Membership Model.md`, `docs/architecture/ADR-003 Project Domain Model.md`, `docs/ui-page-design-standard.md`, `docs/project-narrative.md`, `supabase/migrations/20260617000100_create_projects.sql`, `supabase/migrations/20260624000300_project_relationship_foundation.sql`, `supabase/migrations/20260624000400_project_narrative_schema_foundation.sql`, `supabase/migrations/20260625000100_project_narrative_entry_links.sql`, `supabase/migrations/20260702000100_project_narrative_read_states.sql`
 
@@ -172,6 +172,14 @@ Risk-generated entries use `source_type = risk`, retain the source risk UUID in 
 Routine edits do not populate Project Narrative. Description, owner, actioner, review date, due date, mitigation, contingency, ordinary status changes, Green to Amber transitions, Red staying Red, Red moving down, and risk comments remain on the Risk record unless the derived overall concern crosses from non-Red to Red. Project Narrative is therefore a project story and overview layer, not a general audit log.
 
 The Project Narrative detail modal can show read-only current source-risk detail for risk-linked entries. It includes separate exposure, attention/assurance and overall concern signals using the shared RAG visual system, plus an Open full risk in new tab action. It does not allow risk editing. Owner, Admin and Member users still edit risks only through Risk Management; Viewer users can read available narrative entries and source-risk detail but cannot create or edit risks. No attention items, notifications, health scoring, AI summaries, issue creation, or full historical snapshot/replay are introduced by this slice.
+
+## WT-RISK-LIFECYCLE-001 Risk lifecycle handling
+
+Risks now have central lifecycle categories: Draft, Active and Closed. Draft maps to `draft`; Active maps to `open`, `monitoring`, `mitigating`, `escalated` and `materialised`; Closed maps to `closed`, with legacy `accepted` and `resolved` treated as closed compatibility values in helper logic. Reopened risks return to Active by moving back to `open`.
+
+Only Active risks are active assurance records. Draft risks are visible preparation records and Closed risks are auditable historical records. Both can preserve probability, impact, owner, actioner, review date, due date, mitigation and contingency data, but neither drives the Risks dashboard tile, Projects page attention aggregation, active project attention or active assurance gaps. Risk exposure remains separate and visible; it is not erased by draft or closure.
+
+The Risk Register page shows Active risks first, Draft risks below when present, and Closed risks last in a collapsed history section. Draft and Closed risk reference pills use neutral lifecycle treatment instead of derived Red/Amber/Green concern. Permitted users can open/publish Draft risks, close Active risks and reopen Closed risks through server-side `risk.edit` checks. Draft saves do not create Project Narrative entries. Opening/publishing, closing and reopening create source-linked Narrative entries, and close/reopen/open notes are captured in risk notes when supplied. Viewers can read lifecycle state and history but cannot trigger lifecycle changes.
 
 ## WT-002B implementation guidance
 
