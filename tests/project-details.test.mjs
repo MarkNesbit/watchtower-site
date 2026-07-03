@@ -20,6 +20,7 @@ import {
 const migrationUrl = new URL('../supabase/migrations/20260630000200_project_people_assignments.sql', import.meta.url);
 const projectInfoMigrationUrl = new URL('../supabase/migrations/20260630000300_project_information_fields.sql', import.meta.url);
 const projectDatesMigrationUrl = new URL('../supabase/migrations/20260701000100_project_dates_timeline_readiness.sql', import.meta.url);
+const projectDatesWarningDaysMigrationUrl = new URL('../supabase/migrations/20260702000200_allow_start_date_zero_warning_days.sql', import.meta.url);
 const detailsPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/details.astro', import.meta.url);
 const routesUrl = new URL('../src/lib/projectRoutes.ts', import.meta.url);
 const projectsLibraryUrl = new URL('../src/lib/projects.ts', import.meta.url);
@@ -100,6 +101,26 @@ test('Project date cards preserve default slots and hide removed added dates', (
 			comments,
 		},
 		{
+			id: 'active-start',
+			organisation_id: 'org-1',
+			project_id: 'project-1',
+			date_type: 'start_date',
+			target_date: '2026-06-15',
+			warning_days: 0,
+			is_key_date: true,
+			removed_at: null,
+		},
+		{
+			id: 'active-target-end',
+			organisation_id: 'org-1',
+			project_id: 'project-1',
+			date_type: 'target_end_date',
+			target_date: '2026-08-31',
+			warning_days: 14,
+			is_key_date: true,
+			removed_at: null,
+		},
+		{
 			id: 'active-stage-gate',
 			organisation_id: 'org-1',
 			project_id: 'project-1',
@@ -109,12 +130,16 @@ test('Project date cards preserve default slots and hide removed added dates', (
 			is_key_date: true,
 			removed_at: null,
 		},
-	], { start_date: null, target_end_date: null, next_review_date: null }, now);
+	], { start_date: '2026-05-01', target_end_date: '2026-12-01', next_review_date: null }, now);
 
 	const startCard = cards.find((card) => card.dateType === 'start_date' && card.isDefault);
-	assert.equal(startCard?.id, null);
-	assert.equal(startCard?.targetDate, null);
-	assert.equal(startCard?.status.tone, 'amber');
+	assert.equal(startCard?.id, 'active-start');
+	assert.equal(startCard?.targetDate, '2026-06-15');
+	assert.equal(startCard?.status.tone, 'green');
+	const targetEndCard = cards.find((card) => card.dateType === 'target_end_date' && card.isDefault);
+	assert.equal(targetEndCard?.id, 'active-target-end');
+	assert.equal(targetEndCard?.targetDate, '2026-08-31');
+	assert.equal(targetEndCard?.status.tone, 'green');
 	assert.equal(cards.some((card) => card.id === 'removed-uat'), false);
 	assert.equal(cards.some((card) => card.id === 'active-stage-gate'), true);
 	assert.equal(comments[0].comment, 'Keep this context');
@@ -191,6 +216,15 @@ test('Project dates migration creates scoped date and comment tables with constr
 	assert.doesNotMatch(sql, /create\s+table\s+(public\.)?(risks|issues|dependencies|assumptions)|notify|notification/i);
 });
 
+test('Project date warning-days migration permits Start date persistence without changing date types', async () => {
+	const sql = await readFile(projectDatesWarningDaysMigrationUrl, 'utf8');
+	assert.match(sql, /drop constraint if exists project_dates_warning_days_check/);
+	assert.match(sql, /add constraint project_dates_warning_days_check check \(warning_days between 0 and 365\)/);
+	assert.doesNotMatch(sql, /create table public\.project_dates|date_type in|alter table public\.projects/i);
+	assert.equal(projectDateWarningDays('start_date'), 0);
+	assert.equal(projectDateWarningDays('target_end_date'), 14);
+});
+
 test('Project people helper enforces central RBAC and scopes assignment writes through workspace project route', async () => {
 	const source = await readFile(peopleLibraryUrl, 'utf8');
 	assert.match(source, /assertCan\(workspaceRole, 'project\.view'/);
@@ -252,6 +286,9 @@ test('Project date helper validates authority scope comments and legacy compatib
 	assert.match(source, /Custom date label is required when Other is selected/);
 	assert.match(source, /createProjectDateComment/);
 	assert.match(source, /mirrorLegacyProjectDate/);
+	assert.match(source, /dateType === 'start_date'[\s\S]*'start_date'[\s\S]*dateType === 'target_end_date'[\s\S]*'target_end_date'/);
+	assert.match(source, /\.insert\(\{[\s\S]*date_type: cleaned\.dateType[\s\S]*target_date: cleaned\.targetDate[\s\S]*warning_days: projectDateWarningDays\(cleaned\.dateType\)/);
+	assert.match(source, /\.update\(\{[\s\S]*date_type: cleaned\.dateType[\s\S]*target_date: cleaned\.targetDate[\s\S]*warning_days: projectDateWarningDays\(cleaned\.dateType\)/);
 	assert.match(source, /\.update\(\{ removed_at: new Date\(\)\.toISOString\(\) \}\)/);
 	assert.match(source, /projectDateWarningDays\(cleaned\.dateType\)/);
 	assert.doesNotMatch(source, /from\('project_risks'\)|from\('issues'\)|from\('dependencies'\)|from\('assumptions'\)|\.delete\(\)/);
@@ -288,7 +325,8 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(source, /projectDetailsAttentionReasons = projectDetailsSignal\.reasons\.filter/);
 	assert.match(source, /projectDetailsAttentionSections = projectDetailsSectionSignals/);
 	assert.match(source, /data-project-details-attention/);
-	assert.match(source, /Project setup attention/);
+	assert.match(source, /id="project-details-attention-heading">Attention/);
+	assert.doesNotMatch(source, /Project setup attention/);
 	assert.match(source, /Red attention/);
 	assert.match(source, /Amber attention/);
 	assert.match(source, /rag-panel rag-panel--\$\{projectDetailsSignal\.state\}/);
@@ -383,6 +421,12 @@ test('Project Details loads project dates as status cards and keeps governance s
 	assert.match(source, /rag-card rag-card--\$\{card\.status\.tone\}/);
 	assert.match(source, /card\.status\.text/);
 	assert.match(source, /<RagReferencePill tone=\{card\.status\.tone\} label=\{card\.status\.text\} \/>/);
+	assert.match(source, /projectDateId: String\(formData\.get\('project_date_id'\) \?\? ''\)/);
+	assert.match(source, /dateType: String\(formData\.get\('date_type'\) \?\? ''\)/);
+	assert.match(source, /targetDate: String\(formData\.get\('target_date'\) \?\? ''\)/);
+	assert.match(source, /<input type="hidden" name="project_date_id" value=\{card\.id \?\? ''\} \/>/);
+	assert.match(source, /<input type="hidden" name="date_type" value=\{card\.dateType\} \/>/);
+	assert.match(source, /<input name="target_date" type="date" value=\{card\.targetDate \?\? ''\} data-project-date-input \/>/);
 	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
 	assert.match(ragStyles, /\.rag-card,[\s\S]*?border-left: 0\.35rem solid var\(--rag-accent, var\(--rag-neutral-accent\)\);/);
 	assert.doesNotMatch(ragStyles, /\.rag-card,[\s\S]*?--rag-tone: var\(--rag-neutral/);
