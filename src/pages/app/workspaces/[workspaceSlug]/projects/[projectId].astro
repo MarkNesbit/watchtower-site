@@ -36,7 +36,7 @@ let projectNarrativeTileSignal: DashboardTileSignalState = 'unknown';
 let unseenProjectNarrativeEntries: number | null = null;
 let riskTileSignal: DashboardTileSignalState = 'neutral';
 let projectActionState: DashboardTileSignalState = 'unknown';
-let projectRisksForActionState: ProjectRisk[] | null = null;
+let projectRisksForActionState: ProjectRisk[] | null = [];
 
 const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not available';
 const formatValue = (value, fallback = 'Not available') => value || fallback;
@@ -182,6 +182,7 @@ try {
 					projectRisksForActionState = risks;
 					riskTileSignal = deriveRiskTileAttentionSignal(risks, new Date());
 				} catch {
+					projectRisksForActionState = null;
 					riskTileSignal = 'unknown';
 				}
 			}

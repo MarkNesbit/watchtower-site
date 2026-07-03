@@ -4,6 +4,7 @@ import DisabledActionHint from '../../../components/app/DisabledActionHint.astro
 import EmptyState from '../../../components/app/EmptyState.astro';
 import ProjectContentPanel from '../../../components/app/ProjectContentPanel.astro';
 import RagReferencePill from '../../../components/app/RagReferencePill.astro';
+import { getFeatureAccess, loadFeatureAccess } from '../../../lib/featureFlags';
 import { can } from '../../../lib/permissions';
 import { deriveProjectActionStatesByProject, projectActionStateLabel } from '../../../lib/projectAttention';
 import { buildProjectDateCards } from '../../../lib/projectDates';
@@ -19,6 +20,7 @@ let workspaceName = '';
 let canCreateProject = false;
 let createProjectRestriction = 'Select an active workspace before creating a project.';
 let projectActionStates = new Map<string, 'red' | 'amber' | 'green' | 'unknown' | 'neutral'>();
+let riskFeatureAccess = getFeatureAccess('riskManagement');
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -40,6 +42,7 @@ try {
 			canCreateProject = Boolean(settings?.allow_member_project_creation);
 			createProjectRestriction = 'Members cannot create projects in this workspace.';
 		}
+		riskFeatureAccess = await loadFeatureAccess(serverSupabase, 'riskManagement', accessToken);
 		const { data, error } = await serverSupabase
 			.from('projects')
 			.select('id, name, project_ref, slug, status, health, description, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, governance_route, escalation_route, updated_at')
@@ -63,7 +66,7 @@ try {
 					.eq('organisation_id', organisation.id)
 					.in('project_id', projectIds)
 					.eq('status', 'active'),
-				can(workspace.role, 'risk.view')
+				riskFeatureAccess.isAccessible && can(workspace.role, 'risk.view')
 					? serverSupabase
 						.from('project_risks')
 						.select('project_id, risk_ref, title, status, owner_id, actioner_id, review_date, due_date, mitigation_plan, contingency_plan, probability, impact, updated_at')
@@ -71,7 +74,7 @@ try {
 						.in('project_id', projectIds)
 						.is('deleted_at', null)
 						.is('archived_at', null)
-					: Promise.resolve({ data: null, error: new Error('Risk action state unavailable for this role.') }),
+					: Promise.resolve({ data: [], error: null }),
 			]);
 			const projectDatesByProjectId = new Map();
 			for (const projectDate of projectDates ?? []) {
