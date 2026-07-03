@@ -64,13 +64,7 @@ const formatDateTime = (value, fallback = 'Not available') => value
 const formatDate = (value, fallback = 'Not set') => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`))
 	: fallback;
-const healthTone = (value) => {
-	const health = value?.toLowerCase();
-	if (health === 'green') return 'green';
-	if (health === 'amber') return 'amber';
-	if (health === 'red') return 'red';
-	return 'unknown';
-};
+const projectHealthLabel = 'Unknown';
 const assignmentName = (assignment) => {
 	if (assignment.demo_person_id) return assignment.demoPerson?.display_name || 'Demo persona';
 	return assignment.profile?.display_name || assignment.profile?.email || 'Workspace member';
@@ -256,8 +250,8 @@ const canEditProject = can(workspaceRole, 'project.editDetails');
 const assignmentsByRole = new Map(assignments.map((assignment) => [assignment.project_role, assignment]));
 const projectDetailsSectionSignals = deriveProjectDetailsSectionSignals(project, projectDateCards, peopleLoadError ? null : assignments);
 const projectDetailsSignal = deriveProjectDetailsAreaSignal(project, projectDateCards, peopleLoadError ? null : assignments);
-const projectDetailsAttentionReasons = projectDetailsSignal.reasons.filter((reason) => reason.state === 'red' || reason.state === 'amber');
-const projectDetailsAttentionSections = projectDetailsSectionSignals
+const projectDetailsActionReasons = projectDetailsSignal.reasons.filter((reason) => reason.state === 'red' || reason.state === 'amber');
+const projectDetailsActionSections = projectDetailsSectionSignals
 	.map((signal) => ({
 		...signal,
 		redReasons: signal.reasons.filter((reason) => reason.state === 'red'),
@@ -322,25 +316,25 @@ const governanceFields = [
 					{saveMessage && <p class="form-message" data-project-details-save-message>{saveMessage}</p>}
 				</ProjectControlPanel>
 
-				{projectDetailsAttentionReasons.length > 0 && (
+				{projectDetailsActionReasons.length > 0 && (
 					<section
 						class={`project-details-attention rag-panel rag-panel--${projectDetailsSignal.state}`}
 						aria-labelledby="project-details-attention-heading"
-						data-project-details-attention
+						data-project-details-action-state
 					>
 						<div class="project-details-attention__header">
 							<div>
-								<h2 id="project-details-attention-heading">Attention</h2>
+								<h2 id="project-details-attention-heading">Action state</h2>
 							</div>
-							<RagReferencePill tone={projectDetailsSignal.state} label={formatStatusLabel(projectDetailsSignal.state)} statusLabel="Project Details" />
+							<RagReferencePill tone={projectDetailsSignal.state} label={formatStatusLabel(projectDetailsSignal.state)} statusLabel="Project Details action state" />
 						</div>
 						<div class="project-details-attention__groups">
-							{projectDetailsAttentionSections.map((section) => (
+							{projectDetailsActionSections.map((section) => (
 								<div class="project-details-attention__group">
 									<h3>{section.label}</h3>
 									{section.redReasons.length > 0 && (
 										<>
-											<p class="project-details-attention__level">Red attention</p>
+											<p class="project-details-attention__level">Red action needed</p>
 											<ul>
 												{section.redReasons.map((reason) => (
 													<li>
@@ -353,7 +347,7 @@ const governanceFields = [
 									)}
 									{section.amberReasons.length > 0 && (
 										<>
-											<p class="project-details-attention__level">Amber attention</p>
+											<p class="project-details-attention__level">Amber action recommended</p>
 											<ul>
 												{section.amberReasons.map((reason) => (
 													<li>
@@ -372,7 +366,7 @@ const governanceFields = [
 
 				<ProjectContentPanel
 					title="Project identity"
-					helper="Project reference, workspace, internal ID and health are read-only."
+					helper="Project reference, workspace, internal ID and health are read-only. Health is not assessed in the current model."
 					headingId="project-identity-heading"
 				>
 					<div slot="action">
@@ -399,8 +393,8 @@ const governanceFields = [
 							<dt>Project health</dt>
 							<dd>
 								<RagReferencePill
-									tone={healthTone(project.health)}
-									label={formatStatusLabel(formatValue(project.health, 'Not assessed'))}
+									tone="unknown"
+									label={projectHealthLabel}
 								/>
 							</dd>
 						</div>
@@ -831,7 +825,7 @@ const governanceFields = [
 								<dl class="project-details-modal-readonly">
 									<div><dt>Project reference</dt><dd>{formatValue(project.project_ref)}</dd></div>
 									<div><dt>Workspace</dt><dd>{workspaceName}</dd></div>
-									<div><dt>Project health</dt><dd>{formatStatusLabel(formatValue(project.health, 'Not assessed'))}</dd></div>
+									<div><dt>Project health</dt><dd>{projectHealthLabel}</dd></div>
 									<div><dt>Project slug</dt><dd>{formatValue(project.slug)}</dd></div>
 									<div><dt>Internal project ID</dt><dd class="mono-value">{project.id}</dd></div>
 								</dl>

@@ -515,15 +515,15 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(source, /import \{ deriveProjectDetailsAreaSignal, deriveProjectDetailsSectionSignals \}/);
 	assert.match(source, /projectDetailsSectionSignals = deriveProjectDetailsSectionSignals\(project, projectDateCards, peopleLoadError \? null : assignments\)/);
 	assert.match(source, /projectDetailsSignal = deriveProjectDetailsAreaSignal\(project, projectDateCards, peopleLoadError \? null : assignments\)/);
-	assert.match(source, /projectDetailsAttentionReasons = projectDetailsSignal\.reasons\.filter/);
-	assert.match(source, /projectDetailsAttentionSections = projectDetailsSectionSignals/);
-	assert.match(source, /data-project-details-attention/);
-	assert.match(source, /id="project-details-attention-heading">Attention/);
+	assert.match(source, /projectDetailsActionReasons = projectDetailsSignal\.reasons\.filter/);
+	assert.match(source, /projectDetailsActionSections = projectDetailsSectionSignals/);
+	assert.match(source, /data-project-details-action-state/);
+	assert.match(source, /id="project-details-attention-heading">Action state/);
 	assert.doesNotMatch(source, /Project setup attention/);
-	assert.match(source, /Red attention/);
-	assert.match(source, /Amber attention/);
+	assert.match(source, /Red action needed/);
+	assert.match(source, /Amber action recommended/);
 	assert.match(source, /rag-panel rag-panel--\$\{projectDetailsSignal\.state\}/);
-	assert.match(source, /<RagReferencePill tone=\{projectDetailsSignal\.state\} label=\{formatStatusLabel\(projectDetailsSignal\.state\)\} statusLabel="Project Details" \/>/);
+	assert.match(source, /<RagReferencePill tone=\{projectDetailsSignal\.state\} label=\{formatStatusLabel\(projectDetailsSignal\.state\)\} statusLabel="Project Details action state" \/>/);
 	assert.match(source, /href=\{reason\.target\}/);
 	for (const section of [
 		'project_identity',
@@ -558,8 +558,9 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(signalSource, /#project-dates-heading/);
 	assert.match(signalSource, /#project-governance-heading/);
 	assert.match(signalSource, /#project-people-heading/);
-	assert.match(signalSource, /Target end date is not set while the project is Proposed/);
-	assert.match(signalSource, /Target end date is not set for an Active project/);
+	assert.doesNotMatch(signalSource, /Target end date is not set while the project is Proposed/);
+	assert.doesNotMatch(signalSource, /Target end date is not set for an Active project/);
+	assert.match(signalSource, /\$\{card\.label\}: \$\{card\.status\.text\}\./);
 	assert.match(source, /data-project-dialog-open="project-identity-dialog"/);
 	assert.match(source, /id="project-identity-dialog"/);
 	assert.match(source, /data-project-identity-modal/);

@@ -88,8 +88,10 @@ export function dashboardTileSignalLabel(state: DashboardTileSignalState): strin
 }
 
 export function dashboardTileSignalStatusLabel(state: DashboardTileSignalState): string {
-	if (state === 'red' || state === 'amber' || state === 'green') return `${dashboardTileSignalLabel(state)} attention`;
-	if (state === 'neutral') return 'No active attention signals';
+	if (state === 'red') return 'Red action needed';
+	if (state === 'amber') return 'Amber action recommended';
+	if (state === 'green') return 'Green no action needed';
+	if (state === 'neutral') return 'No active action signals';
 	return 'Unknown state';
 }
 
@@ -121,9 +123,6 @@ const PROJECT_DETAILS_SECTION_META: Record<ProjectDetailsSectionKey, { label: st
 	project_roles_responsibilities: { label: 'Project Roles and Responsibilities', anchor: '#project-people-heading' },
 	system_metadata: { label: 'System Metadata', anchor: '#project-system-metadata-heading' },
 };
-
-const ACTIVE_PROJECT_STATUSES = new Set(['active']);
-const INACTIVE_PROJECT_STATUSES = new Set(['completed', 'cancelled', 'closed', 'removed', 'archived']);
 
 function hasActiveAssignment(assignments: ProjectDetailsSignalAssignment[], role: string): boolean {
 	return assignments.some((assignment) => (
@@ -179,36 +178,6 @@ function buildSectionSignal(
 	};
 }
 
-function projectStatusLabel(status: string | null | undefined): string {
-	if (!hasText(status)) return 'this project status';
-	return `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
-}
-
-function missingDateReason(card: ProjectDateCard, projectStatus: string | null | undefined): ProjectAreaSignalReason | null {
-	const status = typeof projectStatus === 'string' ? projectStatus.toLowerCase() : '';
-	if (INACTIVE_PROJECT_STATUSES.has(status)) return null;
-	const label = card.label;
-	if (card.dateType === 'target_end_date') {
-		if (ACTIVE_PROJECT_STATUSES.has(status)) {
-			return reason('project_dates', 'red', 'Target end date is not set for an Active project. Active projects need a target end date for delivery control.', 'Review dates');
-		}
-		if (status === 'proposed') {
-			return reason('project_dates', 'amber', 'Target end date is not set while the project is Proposed. Planning information is incomplete.', 'Review dates');
-		}
-		return reason('project_dates', 'amber', `Target end date is not set while the project is ${projectStatusLabel(status)}.`, 'Review dates');
-	}
-	if (card.dateType === 'review_date') {
-		if (ACTIVE_PROJECT_STATUSES.has(status)) {
-			return reason('project_dates', 'red', 'Review date is not set for an Active project.', 'Review dates');
-		}
-		return reason('project_dates', 'amber', `Review date is not set while the project is ${projectStatusLabel(status)}.`, 'Review dates');
-	}
-	if (card.dateType === 'start_date') {
-		return reason('project_dates', 'amber', 'Start date is not set.', 'Review dates');
-	}
-	return reason('project_dates', 'amber', `${label}: date not set.`, 'Review dates');
-}
-
 export function deriveProjectDetailsSectionSignals(
 	project: ProjectDetailsSignalProject | null | undefined,
 	dateCards: ProjectDateCard[] | null | undefined,
@@ -252,12 +221,7 @@ export function deriveProjectDetailsSectionSignals(
 		dateReasons.push(reason('project_dates', 'unknown', 'Project date readiness could not be checked.', 'Review dates'));
 	} else {
 		for (const card of dateCards) {
-			if (!hasText(card.targetDate)) {
-				const missingReason = missingDateReason(card, project.status);
-				if (missingReason) dateReasons.push(missingReason);
-				continue;
-			}
-			if (card.dateType !== 'start_date' && card.status.tone === 'red') {
+			if (card.status.tone === 'red') {
 				dateReasons.push(reason('project_dates', 'red', `${card.label}: ${card.status.text}.`, 'Review dates'));
 			} else if (card.status.tone === 'amber') {
 				dateReasons.push(reason('project_dates', 'amber', `${card.label}: ${card.status.text}.`, 'Review dates'));
@@ -309,7 +273,7 @@ export function deriveProjectDetailsAreaSignal(
 		label: 'Project Details',
 		reasons: reasons.length > 0
 			? reasons
-			: [{ state: 'green', message: 'Project setup has no current attention items.' }],
+			: [{ state: 'green', message: 'Project setup has no current action signals.' }],
 	};
 }
 
@@ -346,7 +310,7 @@ export function deriveRiskAreaSignal(
 			area: 'risks',
 			state: 'unknown',
 			label: 'Risks',
-			reasons: [{ state: 'unknown', message: 'Risk attention could not be calculated safely.' }],
+			reasons: [{ state: 'unknown', message: 'Risk action state could not be calculated safely.' }],
 		};
 	}
 	const activeRisks = risks.filter((risk) => isDashboardActiveRiskStatus(risk.status));
@@ -355,7 +319,7 @@ export function deriveRiskAreaSignal(
 			area: 'risks',
 			state: 'neutral',
 			label: 'Risks',
-			reasons: [{ state: 'neutral', message: 'No active risks currently require attention.' }],
+			reasons: [{ state: 'neutral', message: 'No active risks currently require action.' }],
 		};
 	}
 
@@ -372,7 +336,7 @@ export function deriveRiskAreaSignal(
 		.filter((item) => item.state === 'red' || item.state === 'amber')
 		.map((item) => ({
 			state: item.state,
-			message: `${item.risk.risk_ref ?? 'A risk'} needs ${dashboardTileSignalLabel(item.state)} attention${item.risk.title ? `: ${item.risk.title}` : '.'}`,
+			message: `${item.risk.risk_ref ?? 'A risk'} has ${dashboardTileSignalLabel(item.state)} action state${item.risk.title ? `: ${item.risk.title}` : '.'}`,
 			target: '#risk-register-heading',
 			actionLabel: 'Review risks',
 		}));
@@ -383,7 +347,7 @@ export function deriveRiskAreaSignal(
 		label: 'Risks',
 		reasons: reasons.length > 0
 			? reasons
-			: [{ state: state === 'unknown' ? 'unknown' : 'green', message: state === 'unknown' ? 'Risk attention could not be calculated safely.' : 'Active risks have no current assurance attention items.' }],
+			: [{ state: state === 'unknown' ? 'unknown' : 'green', message: state === 'unknown' ? 'Risk action state could not be calculated safely.' : 'Active risks have no current assurance action signals.' }],
 	};
 }
 

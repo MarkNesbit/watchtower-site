@@ -82,7 +82,7 @@ try {
 						{PROJECT_STATUSES.map((status) => <option value={status} selected={status === project.status}>{status}</option>)}
 					</select>
 				</label>
-				<p>Health: <strong>{formatValue(project.health, 'Not assessed')}</strong></p>
+				<p>Health: <strong>Unknown</strong></p>
 				<button class="button button--primary" type="submit">Save project</button>
 				{saveMessage && <p class="form-message">{saveMessage}</p>}
 			</form>

@@ -8,6 +8,7 @@ import type { ProjectDateCard } from './projectDates.ts';
 import type { ProjectRisk } from './projectRisks.ts';
 
 export type ProjectAttentionState = 'red' | 'amber' | 'green' | 'unknown' | 'neutral';
+export type ProjectActionState = ProjectAttentionState;
 
 export type ProjectAttentionRisk = Pick<ProjectRisk,
 	| 'project_id'
@@ -22,6 +23,7 @@ export type ProjectAttentionRisk = Pick<ProjectRisk,
 	| 'impact'
 	| 'updated_at'
 > & Partial<Pick<ProjectRisk, 'risk_ref' | 'title'>>;
+export type ProjectActionStateRisk = ProjectAttentionRisk;
 
 export type ProjectAttentionProject = {
 	id?: string | null;
@@ -35,6 +37,7 @@ export type ProjectAttentionProject = {
 	governance_route?: string | null;
 	escalation_route?: string | null;
 };
+export type ProjectActionStateProject = ProjectAttentionProject;
 
 export type ProjectAttentionAssignment = {
 	project_id?: string | null;
@@ -43,6 +46,7 @@ export type ProjectAttentionAssignment = {
 	user_id?: string | null;
 	demo_person_id?: string | null;
 };
+export type ProjectActionStateAssignment = ProjectAttentionAssignment;
 
 export type ProjectAttentionFacts = {
 	project?: ProjectAttentionProject | null;
@@ -50,6 +54,7 @@ export type ProjectAttentionFacts = {
 	projectPeople?: ProjectAttentionAssignment[] | null;
 	risks?: ProjectAttentionRisk[] | null;
 };
+export type ProjectActionStateFacts = ProjectAttentionFacts;
 
 export function projectAttentionLabel(state: ProjectAttentionState): string {
 	if (state === 'red') return 'Red';
@@ -58,6 +63,8 @@ export function projectAttentionLabel(state: ProjectAttentionState): string {
 	if (state === 'neutral') return 'Neutral';
 	return 'Unknown';
 }
+
+export const projectActionStateLabel = projectAttentionLabel;
 
 function deriveRiskOnlyAttentionState(
 	risks: ProjectAttentionRisk[] | null | undefined,
@@ -84,6 +91,8 @@ export function deriveProjectAttentionState(
 	if (Array.isArray(factsOrRisks) || !factsOrRisks) return deriveRiskOnlyAttentionState(factsOrRisks, now);
 	return aggregateProjectAreaSignalState(deriveProjectAreaSignals(factsOrRisks, now));
 }
+
+export const deriveProjectActionState = deriveProjectAttentionState;
 
 export function deriveProjectAttentionStatesByProject(
 	projectIds: string[],
@@ -120,3 +129,5 @@ export function deriveProjectAttentionStatesByProject(
 	}
 	return stateByProjectId;
 }
+
+export const deriveProjectActionStatesByProject = deriveProjectAttentionStatesByProject;

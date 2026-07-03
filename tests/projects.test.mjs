@@ -10,9 +10,9 @@ import {
 	deriveRiskTileAttentionSignal,
 } from '../src/lib/dashboardTileSignals.ts';
 import {
-	deriveProjectAttentionState,
-	deriveProjectAttentionStatesByProject,
-	projectAttentionLabel,
+	deriveProjectActionState,
+	deriveProjectActionStatesByProject,
+	projectActionStateLabel,
 } from '../src/lib/projectAttention.ts';
 import { deriveRiskExposureTone } from '../src/lib/projectRisks.ts';
 import { buildUniqueSlug, slugifyProjectName } from '../src/lib/projectSlugs.ts';
@@ -119,24 +119,24 @@ test('Project route helpers build workspace-safe risk paths', () => {
 	);
 });
 
-test('Project list attention helper aggregates project-area signals without changing health', () => {
+test('Project list action-state helper aggregates project-area signals without changing health', () => {
 	const now = new Date('2026-06-28T12:00:00Z');
 	const greenRisk = attentionRiskFacts();
 	const amberRisk = attentionRiskFacts({ due_date: null });
 	const redRisk = attentionRiskFacts({ owner_id: null });
 
-	assert.equal(deriveProjectAttentionState([greenRisk, amberRisk, redRisk], now), 'red');
-	assert.equal(deriveProjectAttentionState([greenRisk, amberRisk], now), 'amber');
-	assert.equal(deriveProjectAttentionState([greenRisk], now), 'green');
-	assert.equal(deriveProjectAttentionState([], now), 'green');
-	assert.equal(deriveProjectAttentionState(null, now), 'unknown');
-	assert.equal(projectAttentionLabel('red'), 'Red');
+	assert.equal(deriveProjectActionState([greenRisk, amberRisk, redRisk], now), 'red');
+	assert.equal(deriveProjectActionState([greenRisk, amberRisk], now), 'amber');
+	assert.equal(deriveProjectActionState([greenRisk], now), 'green');
+	assert.equal(deriveProjectActionState([], now), 'green');
+	assert.equal(deriveProjectActionState(null, now), 'unknown');
+	assert.equal(projectActionStateLabel('red'), 'Red');
 
 	const closedAndDraftRedRisks = [
 		attentionRiskFacts({ status: 'closed', owner_id: null }),
 		attentionRiskFacts({ status: 'draft', contingency_plan: '' }),
 	];
-	assert.equal(deriveProjectAttentionState(closedAndDraftRedRisks, now), 'green');
+	assert.equal(deriveProjectActionState(closedAndDraftRedRisks, now), 'green');
 
 	const managedHighExposureRisk = attentionRiskFacts({
 		probability: 'high',
@@ -145,28 +145,28 @@ test('Project list attention helper aggregates project-area signals without chan
 		contingency_plan: 'Escalate through steering group.',
 	});
 	assert.equal(deriveRiskExposureTone(managedHighExposureRisk.probability, managedHighExposureRisk.impact), 'red');
-	assert.equal(deriveProjectAttentionState({
+	assert.equal(deriveProjectActionState({
 		project: dashboardProjectFacts(),
 		projectDateCards: greenProjectDates,
 		projectPeople: dashboardAssignments(),
 		risks: [managedHighExposureRisk],
 	}, now), 'green');
 
-	assert.equal(deriveProjectAttentionState({
+	assert.equal(deriveProjectActionState({
 		project: dashboardProjectFacts({ governance_route: '' }),
 		projectDateCards: greenProjectDates,
 		projectPeople: dashboardAssignments(),
 		risks: [greenRisk],
 	}, now), 'amber');
 
-	assert.equal(deriveProjectAttentionState({
+	assert.equal(deriveProjectActionState({
 		project: dashboardProjectFacts({ description: '' }),
 		projectDateCards: greenProjectDates,
 		projectPeople: dashboardAssignments(),
 		risks: [greenRisk],
 	}, now), 'red');
 
-	const statesByProject = deriveProjectAttentionStatesByProject(
+	const statesByProject = deriveProjectActionStatesByProject(
 		['hir-project', 'wat-project', 'clear-project'],
 		new Map([
 			['hir-project', {
@@ -195,13 +195,13 @@ test('Project list attention helper aggregates project-area signals without chan
 	assert.equal(statesByProject.get('clear-project'), 'green');
 });
 
-test('Project list attention helper returns unknown when risk data is unavailable', () => {
-	const statesByProject = deriveProjectAttentionStatesByProject(['project-1', 'project-2'], null);
+test('Project list action-state helper returns unknown when risk data is unavailable', () => {
+	const statesByProject = deriveProjectActionStatesByProject(['project-1', 'project-2'], null);
 	assert.equal(statesByProject.get('project-1'), 'unknown');
 	assert.equal(statesByProject.get('project-2'), 'unknown');
 });
 
-test('Project list attention scope uses area signals and defers user-specific Narrative read-state', async () => {
+test('Project list action-state scope uses area signals and defers user-specific Narrative read-state', async () => {
 	const source = await readFile(new URL('../src/lib/projectAttention.ts', import.meta.url), 'utf8');
 	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
 	assert.match(source, /deriveProjectDetailsAreaSignal/);
@@ -261,7 +261,7 @@ test('Dashboard tile signal helper derives Project Details setup and date readin
 		dashboardAssignments(),
 	);
 	assert.equal(proposedMissingTargetDate.state, 'amber');
-	assert.match(proposedMissingTargetDate.reasons.map((reason) => reason.message).join('\n'), /Target end date is not set while the project is Proposed/);
+	assert.match(proposedMissingTargetDate.reasons.map((reason) => reason.message).join('\n'), /Target end date: Amber - date not set\./);
 
 	const activeMissingTargetDate = deriveProjectDetailsAreaSignal(
 		dashboardProjectFacts({ status: 'active', target_end_date: null }),
@@ -272,8 +272,30 @@ test('Dashboard tile signal helper derives Project Details setup and date readin
 		],
 		dashboardAssignments(),
 	);
-	assert.equal(activeMissingTargetDate.state, 'red');
-	assert.match(activeMissingTargetDate.reasons.map((reason) => reason.message).join('\n'), /Target end date is not set for an Active project/);
+	assert.equal(activeMissingTargetDate.state, 'amber');
+	assert.match(activeMissingTargetDate.reasons.map((reason) => reason.message).join('\n'), /Target end date: Amber - date not set\./);
+
+	const amberDatesSection = deriveProjectDetailsSectionSignals(
+		dashboardProjectFacts({ status: 'active', target_end_date: null }),
+		[
+			dashboardDateCard('start_date', 'green'),
+			dashboardDateCard('target_end_date', 'amber', { targetDate: null, status: { tone: 'amber', label: 'Amber', text: 'Amber - date not set' } }),
+			dashboardDateCard('review_date', 'green'),
+		],
+		dashboardAssignments(),
+	).find((signal) => signal.section === 'project_dates');
+	assert.equal(amberDatesSection?.state, 'amber');
+
+	const redDatesSection = deriveProjectDetailsSectionSignals(
+		dashboardProjectFacts(),
+		[
+			dashboardDateCard('start_date', 'green'),
+			dashboardDateCard('target_end_date', 'green'),
+			dashboardDateCard('review_date', 'red', { status: { tone: 'red', label: 'Red', text: 'Red - review overdue' } }),
+		],
+		dashboardAssignments(),
+	).find((signal) => signal.section === 'project_dates');
+	assert.equal(redDatesSection?.state, 'red');
 
 	const missingResponsibilities = deriveProjectDetailsAreaSignal(
 		dashboardProjectFacts(),
@@ -308,7 +330,7 @@ test('Dashboard tile signal helper derives Project Details setup and date readin
 	assert.equal(deriveProjectDetailsTileSignal(
 		dashboardProjectFacts(),
 		[dashboardDateCard('start_date', 'red'), dashboardDateCard('target_end_date', 'green'), dashboardDateCard('review_date', 'green')],
-	), 'green');
+	), 'red');
 	assert.equal(deriveProjectDetailsTileSignal(
 		dashboardProjectFacts(),
 		[dashboardDateCard('start_date', 'green'), dashboardDateCard('target_end_date', 'green'), dashboardDateCard('review_date', 'green')],
@@ -324,7 +346,7 @@ test('Dashboard tile signal helper handles Narrative read-state and Risk attenti
 	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 2 }), 'amber');
 	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 3 }), 'amber');
 	assert.equal(deriveProjectNarrativeTileSignal({ unseenEntries: 4 }), 'red');
-	assert.equal(dashboardTileSignalStatusLabel('amber'), 'Amber attention');
+	assert.equal(dashboardTileSignalStatusLabel('amber'), 'Amber action recommended');
 
 	const managedHighExposureRisk = attentionRiskFacts({
 		probability: 'high',
@@ -418,7 +440,7 @@ test('Project list and detail render database values with safe Astro templates',
 	assert.match(listSource, /buildProjectPath\(workspaceSlug, project\.slug\)/);
 	assert.match(listSource, /workspaceSlug = organisation\.slug/);
 	assert.match(detailSource, /\.eq\('slug', projectSlug\)/);
-	assert.match(detailSource, /formatValue\(project\.health,\s*'Not assessed'\)/);
+	assert.match(detailSource, /label=\{projectHealthLabel\}/);
 });
 
 test('Project pages do not use client-side imports for project flow', async () => {
@@ -451,7 +473,7 @@ test('Permission helper maps existing workspace roles to project permissions', (
 
 test('Project dashboard is read-only and displays metadata including description', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
-	const labels = ['Description', 'Status', 'Health', 'Created', 'Last updated', 'Created by'];
+	const labels = ['Description', 'Status', 'Action state', 'Health', 'Created', 'Last updated', 'Created by'];
 	for (const label of labels) {
 		assert.match(detailSource, new RegExp(`<dt>${label}</dt>`));
 	}
@@ -466,7 +488,7 @@ test('Project dashboard is read-only and displays metadata including description
 	assert.doesNotMatch(detailSource, /label="Capability hub"|CAPABILITY HUB|Capability hub/);
 	assert.match(detailSource, /project-dashboard-areas-heading\) \{\s*font-size: clamp\(1\.45rem, 2\.4vw, 2rem\);/);
 	assert.match(detailSource, /<ProjectContentPanel[\s\S]*label="Read-only metadata"[\s\S]*title="Key details"/);
-	assert.match(detailSource, /<RagReferencePill[\s\S]*tone=\{healthTone\(project\.health\)\}/);
+	assert.match(detailSource, /<RagReferencePill[\s\S]*tone="unknown"[\s\S]*label=\{projectHealthLabel\}/);
 	assert.doesNotMatch(detailSource, /project-dashboard__bar|project-dashboard__workspace|project-hero-card|project-pills|rag-timeline/);
 	assert.match(detailSource, /Read-only metadata/);
 	assert.match(detailSource, /Project Details/);
@@ -566,7 +588,7 @@ test('Project dashboard Risk tile uses shared RAG assurance state styling', asyn
 	assert.match(detailSource, /\.dashboard-tile__icon \{[\s\S]*?color: var\(--rag-icon-tone, var\(--tile-icon-status, var\(--tile-status\)\)\)/);
 	assert.doesNotMatch(detailSource, /deriveProjectRiskDashboardAssuranceTone|riskAssuranceToneLabel|riskDashboardIconTone|deriveRiskConcernTone/);
 	assert.match(detailSource, /projectNarrativeStatusLabel\(tileSignal, unseenProjectNarrativeEntries\)/);
-	assert.match(detailSource, /Green attention, no unseen entries/);
+	assert.match(detailSource, /Green no action needed, no unseen entries/);
 	assert.match(detailSource, /\$\{unseenEntries\} unseen \$\{entryLabel\}/);
 	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
 	const referenceTileIndex = ragStyles.indexOf('.rag-tile--blue');
@@ -604,7 +626,7 @@ test('Project edit route enforces permission and only exposes safe editable fiel
 	assert.match(editSource, /name="name"/);
 	assert.match(editSource, /name="description"/);
 	assert.match(editSource, /name="status"/);
-	assert.match(editSource, /Health: <strong>{formatValue\(project\.health, 'Not assessed'\)}<\/strong>/);
+	assert.match(editSource, /Health: <strong>Unknown<\/strong>/);
 	assert.doesNotMatch(editSource, /name="health"|name="created_by"|name="updated_by"|name="organisation_id"|name="slug"/);
 	assert.match(editSource, /\.eq\('slug', projectSlug\)/);
 	assert.match(editSource, /\.eq\('organisation_id', organisation\.id\)/);
@@ -768,11 +790,11 @@ test('Project UI displays and protects project reference', async () => {
 	assert.match(newSource, /Watchtower will assign this fixed project reference when the project is created/);
 	assert.doesNotMatch(newSource, /name="project_ref"|formData\.get\('project_ref'\)|projectRef:/);
 	assert.match(listSource, /project_ref/);
-	assert.match(listSource, /<th scope="col">Reference<\/th>/);
+	assert.match(listSource, /<th scope="col">Action state<\/th>/);
 	assert.match(listSource, /<RagReferencePill[\s\S]*label=\{project\.project_ref \?\? 'Not assigned'\}/);
-	assert.match(listSource, /<RagReferencePill[\s\S]*tone=\{projectAttentionStates\.get\(project\.id\) \?\? 'unknown'\}[\s\S]*label=\{project\.project_ref \?\? 'Not assigned'\}/);
-	assert.match(listSource, /statusLabel=\{projectAttentionLabel\(projectAttentionStates\.get\(project\.id\) \?\? 'unknown'\)\}/);
-	assert.match(listSource, /ariaLabel=\{`Project \$\{project\.project_ref \?\? 'not assigned'\} attention state: \$\{projectAttentionLabel\(projectAttentionStates\.get\(project\.id\) \?\? 'unknown'\)\}`\}/);
+	assert.match(listSource, /<RagReferencePill[\s\S]*tone=\{projectActionStates\.get\(project\.id\) \?\? 'unknown'\}[\s\S]*label=\{project\.project_ref \?\? 'Not assigned'\}/);
+	assert.match(listSource, /statusLabel=\{projectActionStateLabel\(projectActionStates\.get\(project\.id\) \?\? 'unknown'\)\}/);
+	assert.match(listSource, /ariaLabel=\{`Project \$\{project\.project_ref \?\? 'not assigned'\} action state: \$\{projectActionStateLabel\(projectActionStates\.get\(project\.id\) \?\? 'unknown'\)\}`\}/);
 	assert.match(detailSource, /projectRef=\{project\.project_ref\}/);
 	assert.match(editSource, /project\.project_ref/);
 	assert.match(editSource, /read-only and cannot be edited after creation in MVP/);
@@ -788,7 +810,7 @@ test('Project list uses shared authenticated page patterns without changing rout
 	assert.match(listSource, /import RagReferencePill/);
 	assert.match(listSource, /<h1 id="projects-page-heading">Projects<\/h1>/);
 	assert.match(listSource, /View and open projects in the current workspace\./);
-	assert.match(listSource, /<ProjectContentPanel[\s\S]*title="Project list"[\s\S]*helper="Open a project dashboard or review its current delivery status\."/);
+	assert.match(listSource, /<ProjectContentPanel[\s\S]*title="Project list"[\s\S]*helper="Open a project dashboard or review its current action state\."/);
 	assert.match(listSource, /slot="action"[\s\S]*href="\/app\/projects\/new">New project<\/a>/);
 	assert.match(listSource, /canCreateProject = can\(workspace\.role, 'project\.create'\)/);
 	assert.match(listSource, /\.from\('organisation_settings'\)[\s\S]*allow_member_project_creation/);
@@ -805,13 +827,13 @@ test('Project list uses shared authenticated page patterns without changing rout
 	assert.match(listSource, /projectDateCards: projectDatesError \? null : buildProjectDateCards\(projectDatesByProjectId\.get\(project\.id\) \?\? \[\], project, new Date\(\)\)/);
 	assert.match(listSource, /projectPeople: projectPeopleError \? null : projectPeopleByProjectId\.get\(project\.id\) \?\? \[\]/);
 	assert.match(listSource, /risks: risksResult\.error \? null : risksByProjectId\.get\(project\.id\) \?\? \[\]/);
-	assert.match(listSource, /deriveProjectAttentionStatesByProject\(projectIds, factsByProjectId, new Date\(\)\)/);
+	assert.match(listSource, /deriveProjectActionStatesByProject\(projectIds, factsByProjectId, new Date\(\)\)/);
 	assert.match(listSource, /\.from\('project_dates'\)[\s\S]*\.in\('project_id', projectIds\)/);
 	assert.match(listSource, /\.from\('project_people'\)[\s\S]*\.in\('project_id', projectIds\)/);
 	assert.match(listSource, /\.from\('project_risks'\)[\s\S]*\.in\('project_id', projectIds\)/);
 	assert.match(listSource, /\.projects-table__name a \{[\s\S]*?color: var\(--accent-strong\);/);
 	assert.match(listSource, /\.projects-table__name a:focus-visible \{[\s\S]*?outline: 3px solid var\(--accent-strong\);/);
-	assert.doesNotMatch(listSource, /healthTone\(projectAttention|projectAttentionStates.*health|health:.*attention/i);
+	assert.doesNotMatch(listSource, /healthTone\(projectAction|projectActionStates.*health|health:.*action/i);
 });
 
 test('Shared RAG visual tokens drive pills cards and tiles', async () => {
