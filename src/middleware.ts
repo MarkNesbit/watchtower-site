@@ -1,7 +1,13 @@
 import { defineMiddleware } from 'astro:middleware';
 
-// This site currently builds as static output, so middleware cannot prove a
-// Supabase session at the edge/server. Do not treat client-written marker
-// cookies as authentication; protected pages perform a real Supabase session
-// check in the browser before revealing placeholder app content.
-export const onRequest = defineMiddleware((_context, next) => next());
+// Do not treat client-written marker cookies as authentication; protected pages
+// perform real Supabase checks before revealing app content.
+export const onRequest = defineMiddleware(async (context, next) => {
+	const response = await next();
+	if (context.url.pathname.startsWith('/app')) {
+		response.headers.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+		response.headers.set('Pragma', 'no-cache');
+		response.headers.set('Expires', '0');
+	}
+	return response;
+});
