@@ -118,6 +118,20 @@
 	--rag-background: var(--rag-green-background);
 }
 
+.rag-tile--attention-neutral {
+	--rag-tone: var(--rag-neutral-accent);
+	--rag-accent: var(--rag-neutral-accent);
+	--rag-border: var(--rag-neutral-border);
+	--rag-background: var(--rag-neutral-background);
+}
+
+.rag-tile--attention-unknown {
+	--rag-tone: var(--rag-unknown-accent);
+	--rag-accent: var(--rag-unknown-accent);
+	--rag-border: var(--rag-unknown-border);
+	--rag-background: var(--rag-unknown-background);
+}
+
 .rag-tile--disabled {
 	--rag-tone: var(--rag-unknown-accent);
 	--rag-accent: var(--rag-unknown-accent);
