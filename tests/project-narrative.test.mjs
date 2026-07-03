@@ -796,7 +796,8 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /buildProjectRiskPath\(workspaceSlug \?\? '', project\?\.slug \?\? projectSlug \?\? '', entry\.source_record_id\)/);
 	assert.match(page, /deriveRiskAssuranceTone\(risk, new Date\(\)\)/);
 	assert.match(page, /deriveRiskExposureTone\(risk\.probability, risk\.impact\)/);
-	assert.match(page, /deriveRiskConcernTone\(risk, new Date\(\)\)/);
+	assert.match(page, /deriveRiskReferenceTone\(risk, new Date\(\)\)/);
+	assert.match(page, /riskReferenceStatusLabel\(risk, new Date\(\)\)/);
 	assert.match(page, /entry\.sourceRisk\.available === false/);
 	assert.match(page, /rag-panel rag-panel--\$\{entry\.sourceRisk\.assuranceTone \|\| 'neutral'\}/);
 	assert.match(page, /setRagClass\(detailModal\.querySelector\('\[data-detail-risk-exposure-card\]'\), 'narrative-risk-signal rag-card', entry\.sourceRisk\.exposureTone\)/);

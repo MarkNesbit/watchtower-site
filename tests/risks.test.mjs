@@ -9,15 +9,23 @@ import {
 	deriveRiskAssuranceTone,
 	deriveRiskConcernTone,
 	deriveRiskExposureTone,
+	deriveRiskReferenceTone,
 	getProjectRisk,
 	getRiskAssuranceBlocks,
+	isActiveRiskStatus,
+	isClosedRiskStatus,
+	isDraftRiskStatus,
 	isRiskReviewDate,
 	listProjectRiskComments,
 	listProjectRisksByIds,
 	listProjectRisks,
 	riskDisplayLabel,
+	riskLifecycleCategory,
+	riskLifecycleLabel,
 	riskProfileName,
+	riskReferenceStatusLabel,
 	riskRagTone,
+	transitionProjectRiskLifecycle,
 	updateProjectRisk,
 	validateRiskFormInput,
 } from '../src/lib/projectRisks.ts';
@@ -439,6 +447,24 @@ test('Risk helper labels and profile fallbacks are stakeholder-friendly', () => 
 	assert.equal(riskProfileName(null), 'Unassigned');
 });
 
+test('Risk lifecycle helpers centralise Draft Active and Closed categorisation', () => {
+	assert.equal(isDraftRiskStatus('draft'), true);
+	assert.equal(isActiveRiskStatus('open'), true);
+	assert.equal(isActiveRiskStatus('monitoring'), true);
+	assert.equal(isActiveRiskStatus('mitigating'), true);
+	assert.equal(isActiveRiskStatus('escalated'), true);
+	assert.equal(isActiveRiskStatus('materialised'), true);
+	assert.equal(isClosedRiskStatus('closed'), true);
+	assert.equal(isClosedRiskStatus('accepted'), true);
+	assert.equal(isClosedRiskStatus('resolved'), true);
+	assert.equal(riskLifecycleCategory('draft'), 'draft');
+	assert.equal(riskLifecycleCategory('open'), 'active');
+	assert.equal(riskLifecycleCategory('closed'), 'closed');
+	assert.equal(riskLifecycleLabel('draft'), 'Draft');
+	assert.equal(riskLifecycleLabel('monitoring'), 'Active');
+	assert.equal(riskLifecycleLabel('closed'), 'Closed');
+});
+
 test('Risk create/edit validation covers references, required fields and dates', () => {
 	assert.equal(buildRiskReference('HHH', 3), 'Risk-HHH-003');
 	assert.throws(() => buildRiskReference('bad slug', 1), /valid project reference/);
@@ -523,6 +549,57 @@ test('Project dashboard risk icon excludes Draft and Closed risks', () => {
 		...excludedRedRisks,
 		assuredRiskFacts({ status: 'monitoring' }),
 	], now), 'green');
+});
+
+test('Draft and Closed risk display is neutral while exposure remains available', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const draftRisk = assuredRiskFacts({
+		status: 'draft',
+		owner_id: null,
+		actioner_id: null,
+		review_date: null,
+		mitigation_plan: '',
+		contingency_plan: '',
+		probability: 'high',
+		impact: 'high',
+	});
+	const closedRisk = assuredRiskFacts({
+		status: 'closed',
+		owner_id: null,
+		actioner_id: null,
+		review_date: null,
+		mitigation_plan: '',
+		contingency_plan: '',
+		probability: 'high',
+		impact: 'high',
+	});
+	const draftBlocks = new Map(getRiskAssuranceBlocks({
+		risk_id: 'risk-draft',
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-010',
+		risk_sequence: 10,
+		title: 'Draft risk',
+		description: '',
+		rag_status: 'red',
+		created_by: 'user-1',
+		created_at: '2026-06-01T10:00:00Z',
+		...draftRisk,
+	}, now).map((block) => [block.id, block]));
+
+	assert.equal(deriveRiskExposureTone(draftRisk.probability, draftRisk.impact), 'red');
+	assert.equal(deriveRiskAssuranceTone(draftRisk, now), 'neutral');
+	assert.equal(deriveRiskAssuranceTone(closedRisk, now), 'neutral');
+	assert.equal(deriveRiskReferenceTone(draftRisk, now), 'neutral');
+	assert.equal(deriveRiskReferenceTone(closedRisk, now), 'neutral');
+	assert.equal(riskReferenceStatusLabel(draftRisk, now), 'Draft');
+	assert.equal(riskReferenceStatusLabel(closedRisk, now), 'Closed');
+	assert.equal(draftBlocks.get('overall-concern').tone, 'neutral');
+	assert.equal(draftBlocks.get('owner').tone, 'neutral');
+	assert.equal(draftBlocks.get('review-date').tone, 'neutral');
+	assert.equal(draftBlocks.get('mitigation').tone, 'neutral');
+	assert.equal(draftBlocks.get('contingency').tone, 'neutral');
+	assert.equal(draftBlocks.get('exposure').tone, 'red');
 });
 
 test('Project dashboard risk icon is not driven by exposure', () => {
@@ -825,6 +902,26 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 	assert.ok(!narrativeCalls.some((call) => call[2].title.includes('Risk became Red')));
 });
 
+test('Creating a Draft risk does not create a Project Narrative entry', async () => {
+	const client = createRiskMutationClient({ existingSequence: 1 });
+	const risk = await createProjectRisk('alpha', 'delivery-hub', {
+		title: 'Draft supplier delay',
+		description: 'Supplier risk is being shaped before publication.',
+		status: 'draft',
+		probability: 'high',
+		impact: 'high',
+		ownerId: '',
+		actionerId: '',
+		reviewDate: '',
+		dueDate: '',
+		mitigationPlan: '',
+		contingencyPlan: '',
+	}, client);
+
+	assert.equal(risk.status, 'draft');
+	assert.equal(client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries').length, 0);
+});
+
 test('Risk edit helper updates only scoped editable fields without narrative for Red staying Red', async () => {
 	const client = createRiskMutationClient();
 	const risk = await updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
@@ -936,6 +1033,78 @@ test('Updating an existing non-Red risk to Red creates a source-linked narrative
 		details: 'Concern: Red. Lifecycle status: Open. Reason: Exposure is Red.',
 		created_timezone: null,
 	});
+});
+
+test('Opening a Draft risk creates an opened narrative without a duplicate Red narrative', async () => {
+	const draftRisk = assuredRiskFacts({
+		title: 'Supplier delay',
+		risk_id: 'risk-1',
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		status: 'draft',
+		probability: 'high',
+		impact: 'high',
+		rag_status: 'red',
+		created_by: 'user-1',
+		created_at: '2026-06-01T10:00:00Z',
+	});
+	const client = createRiskMutationClient({ existingRisk: draftRisk });
+
+	await updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
+		title: 'Supplier delay',
+		description: 'Critical supplier date is moving.',
+		status: 'open',
+		probability: 'high',
+		impact: 'high',
+		ownerId: 'owner-1',
+		actionerId: 'actioner-1',
+		reviewDate: '2026-07-10',
+		dueDate: '2026-08-01',
+		mitigationPlan: 'Confirm alternative supplier.',
+		contingencyPlan: 'Escalate to steering group.',
+	}, client);
+
+	const narrativeCalls = client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries');
+	assert.equal(narrativeCalls.length, 1);
+	assert.equal(narrativeCalls[0][2].title, 'Risk opened: Risk-HHH-001');
+	assert.equal(narrativeCalls[0][2].source_type, 'risk');
+	assert.equal(narrativeCalls[0][2].source_record_id, 'risk-1');
+	assert.doesNotMatch(narrativeCalls[0][2].title, /became Red/);
+});
+
+test('Lifecycle transition helper opens closes and reopens risks with notes and source-linked narrative', async () => {
+	const draftClient = createRiskMutationClient({ existingRisk: { status: 'draft', rag_status: 'red' } });
+	await transitionProjectRiskLifecycle('alpha', 'delivery-hub', 'risk-1', 'open', 'Ready for active management.', draftClient);
+	let updateCall = draftClient.calls.find((call) => call[0] === 'update' && call[1] === 'project_risks');
+	let noteCall = draftClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_risk_notes');
+	let narrativeCall = draftClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries');
+	assert.deepEqual(updateCall[2], { status: 'open', rag_status: 'red' });
+	assert.equal(noteCall[2].note, 'Open note: Ready for active management.');
+	assert.equal(narrativeCall[2].title, 'Risk opened: Risk-HHH-001');
+
+	const closeClient = createRiskMutationClient({ existingRisk: { status: 'open', rag_status: 'green' } });
+	await transitionProjectRiskLifecycle('alpha', 'delivery-hub', 'risk-1', 'close', 'Mitigation completed.', closeClient);
+	updateCall = closeClient.calls.find((call) => call[0] === 'update' && call[1] === 'project_risks');
+	noteCall = closeClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_risk_notes');
+	narrativeCall = closeClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries');
+	assert.deepEqual(updateCall[2], { status: 'closed', rag_status: 'amber' });
+	assert.equal(noteCall[2].note, 'Closure note: Mitigation completed.');
+	assert.equal(narrativeCall[2].title, 'Risk closed: Risk-HHH-001');
+	assert.equal(narrativeCall[2].attention_level, 'neutral');
+	assert.match(narrativeCall[2].details, /Mitigation completed/);
+
+	const reopenClient = createRiskMutationClient({ existingRisk: { status: 'closed', rag_status: 'green' } });
+	await transitionProjectRiskLifecycle('alpha', 'delivery-hub', 'risk-1', 'reopen', 'Supplier date moved again.', reopenClient);
+	updateCall = reopenClient.calls.find((call) => call[0] === 'update' && call[1] === 'project_risks');
+	noteCall = reopenClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_risk_notes');
+	narrativeCall = reopenClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries');
+	assert.deepEqual(updateCall[2], { status: 'open', rag_status: 'red' });
+	assert.equal(noteCall[2].note, 'Reopen note: Supplier date moved again.');
+	assert.equal(narrativeCall[2].title, 'Risk reopened: Risk-HHH-001');
+	assert.equal(narrativeCall[2].attention_level, 'neutral');
+	assert.match(narrativeCall[2].details, /Supplier date moved again/);
 });
 
 test('Updating a Green risk to Amber does not create a narrative entry', async () => {
@@ -1087,7 +1256,7 @@ test('Risk Register route renders a cleaned scoped table and create access state
 	assert.match(route, /\.eq\('slug', projectSlug\)/);
 	assert.match(route, /\.eq\('organisation_id', organisation\.id\)/);
 	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
-	for (const heading of ['Ref', 'Risk', 'Status', 'Review date', 'Updated']) {
+	for (const heading of ['Ref', 'Risk', 'Lifecycle', 'Status', 'Review date', 'Updated']) {
 		assert.match(route, new RegExp(`<th scope="col">${heading}</th>`));
 	}
 	for (const removedHeading of ['RAG', 'Owner', 'Actioner']) {
@@ -1095,11 +1264,21 @@ test('Risk Register route renders a cleaned scoped table and create access state
 	}
 	assert.match(route, /No risks have been recorded for this project yet\./);
 	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
-	assert.match(route, /deriveRiskConcernTone\(risk\)/);
+	assert.match(route, /activeRisks = risks\.filter\(\(risk\) => isActiveRiskStatus\(risk\.status\)\)/);
+	assert.match(route, /draftRisks = risks\.filter\(\(risk\) => isDraftRiskStatus\(risk\.status\)\)/);
+	assert.match(route, /closedRisks = risks\.filter\(\(risk\) => isClosedRiskStatus\(risk\.status\)\)/);
+	assert.match(route, /data-active-risk-register/);
+	assert.match(route, /data-draft-risk-register/);
+	assert.match(route, /data-closed-risk-register/);
+	assert.match(route, /<details class="risk-lifecycle-section risk-lifecycle-section--neutral" data-closed-risks-section>/);
+	assert.match(route, /deriveRiskReferenceTone\(risk\)/);
+	assert.match(route, /riskReferenceStatusLabel\(risk\)/);
 	assert.match(route, /buildProjectNewRiskPath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(route, /<td class="risk-register-table__risk"><strong>\{risk\.title\}<\/strong><\/td>/);
-	assert.match(route, /tone=\{derivedConcernTone\}/);
-	assert.match(route, /statusLabel=\{riskDisplayLabel\(derivedConcernTone\)\}/);
+	assert.match(route, /tone=\{referenceTone\}/);
+	assert.match(route, /statusLabel=\{referenceStatus\}/);
+	assert.match(route, /statusLabel="Draft"/);
+	assert.match(route, /statusLabel="Closed"/);
 	assert.match(route, /derived concern/);
 	assert.doesNotMatch(route, /riskRagTone/);
 	assert.doesNotMatch(route, /risk\.description && <span>/);
@@ -1126,10 +1305,10 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.doesNotMatch(route, /Risk assurance view/);
 	assert.match(route, /class="risk-detail-heading"/);
 	assert.match(route, /label=\{risk\.risk_ref\}/);
-	assert.match(route, /deriveRiskConcernTone\(risk, new Date\(\)\)/);
-	assert.match(route, /tone=\{derivedConcernTone\}/);
-	assert.match(route, /statusLabel=\{riskDisplayLabel\(derivedConcernTone\)\}/);
-	assert.match(route, /derived concern/);
+	assert.match(route, /deriveRiskReferenceTone\(risk, new Date\(\)\)/);
+	assert.match(route, /riskReferenceStatusLabel\(risk, new Date\(\)\)/);
+	assert.match(route, /tone=\{referenceTone\}/);
+	assert.match(route, /statusLabel=\{referenceStatus\}/);
 	assert.doesNotMatch(route, /RISK_RAG_STATUSES/);
 	assert.doesNotMatch(route, /riskRagTone/);
 	assert.match(route, /font-size: clamp\(1\.55rem, 2\.35vw, 2\.45rem\)/);
@@ -1163,6 +1342,15 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /color: #f3f8fc/);
 	assert.match(route, /data-risk-detail-save-form/);
 	assert.match(route, /data-risk-comment-form/);
+	assert.match(route, /data-risk-lifecycle-form/);
+	assert.match(route, /transitionProjectRiskLifecycle\(/);
+	assert.match(route, /name="lifecycle_action" value="open"/);
+	assert.match(route, /name="lifecycle_action" value="close"/);
+	assert.match(route, /name="lifecycle_action" value="reopen"/);
+	assert.match(route, /data-risk-open-action/);
+	assert.match(route, /data-risk-close-action/);
+	assert.match(route, /data-risk-reopen-action/);
+	assert.match(route, /Continue editing/);
 	assert.match(route, /data-risk-comments-section/);
 	assert.match(route, /title="Core Risk Detail"[\s\S]*data-risk-comments-section/);
 	assert.doesNotMatch(route, /<ProjectContentPanel[\s\S]*title="Comments"/);
@@ -1244,6 +1432,9 @@ test('Risk create/edit/comment source avoids deferred side effects', async () =>
 	assert.match(combined, /createProjectNarrativeEntry/);
 	assert.match(combined, /Risk raised:/);
 	assert.match(combined, /Risk became Red:/);
+	assert.match(combined, /Risk opened:/);
+	assert.match(combined, /Risk closed:/);
+	assert.match(combined, /Risk reopened:/);
 	assert.match(combined, /!isRedRiskConcern\(previousConcern\) && isRedRiskConcern\(nextConcern\)/);
 	for (const table of ['attention_items', 'notification_events', 'email_notifications']) {
 		assert.doesNotMatch(combined, new RegExp(`from\\('${table}'\\)|insert\\([\\s\\S]*${table}`, 'i'));

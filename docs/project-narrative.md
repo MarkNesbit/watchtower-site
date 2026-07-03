@@ -117,7 +117,7 @@ Project Narrative read-state remains user-specific and is not included in Projec
 
 The detail modal displays the Narrative reference, title, attention level, details, links, source type, source reference when present, created by/at, and updated by/at when present. For manual entries the source type displays as `Manual`; an empty source reference row is not shown.
 
-For risk-generated entries, the same modal can show read-only current source-risk detail: risk reference, title, description, lifecycle status, probability, impact, owner, actioner, review/due dates, latest update, mitigation/response and contingency. It presents overall concern, exposure, and attention/assurance as separate RAG signals so a high-exposure risk is not treated as the same thing as missing action. The modal includes an explicit Open full risk in new tab action using the workspace-safe Risk Detail route with `target="_blank"` and `rel="noopener noreferrer"`. It does not expose risk editing controls, so Owner/Admin/Member users still edit risks only in Risk Management and Viewer users remain read-only.
+For risk-generated entries, the same modal can show read-only current source-risk detail: risk reference, title, description, lifecycle status, probability, impact, owner, actioner, review/due dates, latest update, mitigation/response and contingency. It presents overall concern, exposure, and attention/assurance as separate RAG signals so a high-exposure risk is not treated as the same thing as missing action. Draft and Closed linked risks display neutral lifecycle/assurance treatment while still showing preserved exposure values. The modal includes an explicit Open full risk in new tab action using the workspace-safe Risk Detail route with `target="_blank"` and `rel="noopener noreferrer"`. It does not expose risk editing controls, so Owner/Admin/Member users still edit risks only in Risk Management and Viewer users remain read-only.
 
 If a risk-linked Narrative entry points at a risk that can no longer be loaded for the selected workspace/project, the modal shows a safe unavailable message instead of displaying stale or cross-scope data. Opening or closing the modal does not update read-state beyond the existing page-open read-state behaviour.
 
@@ -129,20 +129,23 @@ The empty state explains that future manual updates and RAID-linked activity wil
 
 ## WT-RISK-NARRATIVE-001 risk entries
 
-WT-RISK-NARRATIVE-001 adds deliberately limited Risk-to-Narrative integration. Risk-generated entries are created only for two events:
+WT-RISK-NARRATIVE-001 and WT-RISK-LIFECYCLE-001 add deliberately limited Risk-to-Narrative integration. Risk-generated entries are created only for these events:
 
-- a new risk is raised;
-- an existing risk changes from non-Red to Red using the WT-RISK-005 derived overall concern.
+- a new active risk is raised;
+- a draft risk is opened/published for active management;
+- an active risk is closed;
+- a closed risk is reopened;
+- an existing active risk changes from non-Red to Red using the WT-RISK-005 derived overall concern.
 
-The raised-risk entry is enough when a newly created risk is already Red, so create never also emits a duplicate "became Red" entry. Updating a risk that is already Red does not create another Red narrative entry unless the risk first moves out of Red and later becomes Red again.
+The raised-risk entry is enough when a newly created active risk is already Red, so create never also emits a duplicate "became Red" entry. Opening a draft risk creates an opened-risk entry and does not also emit a duplicate Red transition. Updating a risk that is already Red does not create another Red narrative entry unless the risk first moves out of Red and later becomes Red again while active.
 
-Routine risk edits do not populate Project Narrative. Description edits, owner changes, actioner changes, review-date or due-date changes, mitigation or contingency changes, comments, routine lifecycle changes, Green to Amber movement, Amber to Green movement, Red to Amber/Green movement, and Red staying Red are not Narrative events unless the derived overall concern changes from non-Red to Red. Risk comments remain on the risk record and do not create Narrative entries.
+Draft saves and routine risk edits do not populate Project Narrative. Description edits, owner changes, actioner changes, review-date or due-date changes, mitigation or contingency changes, comments, Green to Amber movement, Amber to Green movement, Red to Amber/Green movement, and Red staying Red are not Narrative events unless the derived overall concern changes from non-Red to Red on an active risk. Risk comments remain on the risk record and do not create Narrative entries. Close/reopen/open notes can be captured in `project_risk_notes` when supplied, while the source-linked Narrative entry remains concise and neutral for close/reopen.
 
 Risk remains the source of truth. Project Narrative stores only concise event context and source linkage, not a duplicate risk data store or historical replay. This slice does not introduce attention items, notifications, daily digests, health scoring, AI summaries, issue creation, or risk editing from the Narrative modal.
 
 ## Validation
 
-Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, source metadata, structured link schema/RLS, read-state schema/RLS, no-read-state unseen-count behaviour, last-viewed filtering, read-state upsert behaviour, link validation, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, scoped newest-first listing, Ref/detail modal behaviour, risk source preview/open-full-risk behaviour, route/table structure, dashboard routing, dashboard read-only behaviour, risk raised and non-Red-to-Red triggers, duplicate prevention, non-trigger routine edits/comments, and absence of attention item, notification, health scoring and AI behaviour.
+Automated tests cover the migration structure, project/workspace foreign key, allowed values, manual-entry defaults, source metadata, structured link schema/RLS, read-state schema/RLS, no-read-state unseen-count behaviour, last-viewed filtering, read-state upsert behaviour, link validation, atomic project-scoped numbering, immutable identities, UTC/IANA fields, RLS role intent, application permissions, scoped newest-first listing, Ref/detail modal behaviour, risk source preview/open-full-risk behaviour, route/table structure, dashboard routing, dashboard read-only behaviour, risk raised, draft-open, close, reopen and non-Red-to-Red triggers, duplicate prevention, non-trigger draft saves/routine edits/comments, and absence of attention item, notification, health scoring and AI behaviour.
 
 For an environment with the Supabase CLI and local Docker runtime, validate the complete migration chain with:
 

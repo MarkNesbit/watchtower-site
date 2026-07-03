@@ -4,7 +4,12 @@ import { getWorkspaceBySlug } from './projects.ts';
 
 export const RISK_STATUSES = ['draft', 'open', 'monitoring', 'mitigating', 'escalated', 'materialised', 'closed'] as const;
 export type RiskStatus = (typeof RISK_STATUSES)[number];
-export const DASHBOARD_ACTIVE_RISK_STATUSES = ['open', 'monitoring', 'mitigating', 'escalated', 'materialised'] as const;
+export const DRAFT_RISK_STATUSES = ['draft'] as const;
+export const ACTIVE_RISK_STATUSES = ['open', 'monitoring', 'mitigating', 'escalated', 'materialised'] as const;
+export const CLOSED_RISK_STATUSES = ['accepted', 'closed', 'resolved'] as const;
+export const DASHBOARD_ACTIVE_RISK_STATUSES = ACTIVE_RISK_STATUSES;
+export type RiskLifecycleCategory = 'draft' | 'active' | 'closed';
+export type RiskLifecycleTone = 'green' | 'neutral';
 
 export const RISK_LEVELS = ['low', 'medium', 'high'] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
@@ -138,6 +143,9 @@ const RISK_COMMENT_SELECT = [
 
 const RISK_RAISED_NARRATIVE_PREFIX = 'Risk raised:';
 const RISK_BECAME_RED_NARRATIVE_PREFIX = 'Risk became Red:';
+const RISK_OPENED_NARRATIVE_PREFIX = 'Risk opened:';
+const RISK_CLOSED_NARRATIVE_PREFIX = 'Risk closed:';
+const RISK_REOPENED_NARRATIVE_PREFIX = 'Risk reopened:';
 
 function isConstraintViolation(error: DatabaseError | null, constraintName: string): boolean {
 	if (!error || error.code !== '23505') return false;
@@ -212,6 +220,35 @@ export function isRiskStatus(value: unknown): value is RiskStatus {
 	return typeof value === 'string' && RISK_STATUSES.includes(value as RiskStatus);
 }
 
+export function isDraftRiskStatus(status: unknown): boolean {
+	return DRAFT_RISK_STATUSES.includes(trimmedText(status).toLowerCase() as (typeof DRAFT_RISK_STATUSES)[number]);
+}
+
+export function isClosedRiskStatus(status: unknown): boolean {
+	return CLOSED_RISK_STATUSES.includes(trimmedText(status).toLowerCase() as (typeof CLOSED_RISK_STATUSES)[number]);
+}
+
+export function isActiveRiskStatus(status: unknown): boolean {
+	return ACTIVE_RISK_STATUSES.includes(trimmedText(status).toLowerCase() as (typeof ACTIVE_RISK_STATUSES)[number]);
+}
+
+export function riskLifecycleCategory(status: unknown): RiskLifecycleCategory {
+	if (isDraftRiskStatus(status)) return 'draft';
+	if (isClosedRiskStatus(status)) return 'closed';
+	return 'active';
+}
+
+export function riskLifecycleTone(status: unknown): RiskLifecycleTone {
+	return riskLifecycleCategory(status) === 'active' ? 'green' : 'neutral';
+}
+
+export function riskLifecycleLabel(status: unknown): string {
+	const category = riskLifecycleCategory(status);
+	if (category === 'draft') return 'Draft';
+	if (category === 'closed') return 'Closed';
+	return 'Active';
+}
+
 export function isRiskRagStatus(value: unknown): value is RiskRagStatus {
 	return typeof value === 'string' && RISK_RAG_STATUSES.includes(value as RiskRagStatus);
 }
@@ -257,7 +294,7 @@ export function riskAssuranceToneLabel(tone: RiskAssuranceTone): string {
 	if (tone === 'green') return 'Green';
 	if (tone === 'amber') return 'Amber';
 	if (tone === 'red') return 'Red';
-	return 'Unknown';
+	return 'Neutral';
 }
 
 export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
@@ -327,7 +364,7 @@ export function deriveRiskExposureTone(probability: unknown, impact: unknown): R
 function lifecycleStatusTone(status: unknown): RiskAssuranceTone {
 	const normalised = trimmedText(status).toLowerCase();
 	if (!normalised) return 'neutral';
-	if (normalised === 'draft') return 'amber';
+	if (isDraftRiskStatus(status) || isClosedRiskStatus(status)) return 'neutral';
 	if (normalised === 'materialised') return 'red';
 	if (normalised === 'closed' || normalised === 'accepted' || normalised === 'open' || normalised === 'monitoring' || normalised === 'mitigating' || normalised === 'escalated') return 'green';
 	return 'neutral';
@@ -335,8 +372,7 @@ function lifecycleStatusTone(status: unknown): RiskAssuranceTone {
 
 function actionerTone(status: unknown, actionerId: unknown): RiskAssuranceTone {
 	if (actionerId) return 'green';
-	const normalised = trimmedText(status).toLowerCase();
-	if (normalised === 'closed') return 'neutral';
+	if (!isActiveRiskStatus(status)) return 'neutral';
 	return 'red';
 }
 
@@ -370,6 +406,7 @@ function worstTone(tones: RiskAssuranceTone[]): RiskAssuranceTone {
 export function deriveRiskAssuranceTone(risk: Pick<ProjectRisk,
 	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
 >, now = new Date()): RiskAssuranceTone {
+	if (!isActiveRiskStatus(risk.status)) return 'neutral';
 	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
 	const status = trimmedText(risk.status).toLowerCase();
 	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
@@ -407,7 +444,21 @@ export function deriveRiskConcernTone(risk: Pick<ProjectRisk,
 }
 
 export function isDashboardActiveRiskStatus(status: unknown): boolean {
-	return DASHBOARD_ACTIVE_RISK_STATUSES.includes(trimmedText(status).toLowerCase() as (typeof DASHBOARD_ACTIVE_RISK_STATUSES)[number]);
+	return isActiveRiskStatus(status);
+}
+
+export function deriveRiskReferenceTone(risk: Pick<ProjectRisk,
+	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+>, now = new Date()): RiskRagStatus | 'neutral' {
+	return isActiveRiskStatus(risk.status) ? deriveRiskConcernTone(risk, now) : 'neutral';
+}
+
+export function riskReferenceStatusLabel(risk: Pick<ProjectRisk,
+	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+>, now = new Date()): string {
+	return isActiveRiskStatus(risk.status)
+		? riskDisplayLabel(deriveRiskConcernTone(risk, now))
+		: riskLifecycleLabel(risk.status);
 }
 
 export function deriveProjectRiskDashboardAssuranceTone(
@@ -474,19 +525,92 @@ async function createRiskBecameRedNarrativeEntry(risk: ProjectRisk, workspaceRol
 	);
 }
 
+async function createRiskOpenedNarrativeEntry(risk: ProjectRisk, workspaceRole: WorkspaceRole, client, now = new Date()) {
+	const concern = deriveRiskConcernTone(risk, now);
+	return createProjectNarrativeEntry(
+		{
+			projectId: risk.project_id,
+			sourceType: 'risk',
+			sourceRecordId: risk.risk_id,
+			sourceRef: risk.risk_ref,
+			attentionLevel: riskConcernToNarrativeAttention(concern),
+			title: `${RISK_OPENED_NARRATIVE_PREFIX} ${risk.risk_ref}`,
+			details: `${risk.risk_ref} was opened for active management.`,
+		},
+		workspaceRole,
+		client,
+	);
+}
+
+async function createRiskClosedNarrativeEntry(risk: ProjectRisk, reason: string | null, workspaceRole: WorkspaceRole, client) {
+	return createProjectNarrativeEntry(
+		{
+			projectId: risk.project_id,
+			sourceType: 'risk',
+			sourceRecordId: risk.risk_id,
+			sourceRef: risk.risk_ref,
+			attentionLevel: 'neutral',
+			title: `${RISK_CLOSED_NARRATIVE_PREFIX} ${risk.risk_ref}`,
+			details: compactSentence([`${risk.risk_ref} was closed.`, reason]),
+		},
+		workspaceRole,
+		client,
+	);
+}
+
+async function createRiskReopenedNarrativeEntry(risk: ProjectRisk, reason: string | null, workspaceRole: WorkspaceRole, client) {
+	return createProjectNarrativeEntry(
+		{
+			projectId: risk.project_id,
+			sourceType: 'risk',
+			sourceRecordId: risk.risk_id,
+			sourceRef: risk.risk_ref,
+			attentionLevel: 'neutral',
+			title: `${RISK_REOPENED_NARRATIVE_PREFIX} ${risk.risk_ref}`,
+			details: compactSentence([`${risk.risk_ref} was reopened for active management.`, reason]),
+		},
+		workspaceRole,
+		client,
+	);
+}
+
+async function createRiskLifecycleNote(risk: ProjectRisk, note: string, client) {
+	const trimmedNote = note.trim();
+	if (!trimmedNote) return null;
+	const { data, error } = await client
+		.from('project_risk_notes')
+		.insert({
+			organisation_id: risk.organisation_id,
+			project_id: risk.project_id,
+			risk_id: risk.risk_id,
+			parent_risk_note_id: null,
+			note: trimmedNote,
+			attention_level: 'green',
+		})
+		.select(RISK_COMMENT_SELECT)
+		.single();
+
+	if (error) throw error;
+	return data as ProjectRiskComment;
+}
+
 export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): RiskAssuranceBlock[] {
+	const isActiveLifecycle = isActiveRiskStatus(risk.status);
 	const description = trimmedText(risk.description);
-	const descriptionTone: RiskAssuranceTone = !description ? 'red' : description.length < 30 ? 'amber' : 'green';
+	const descriptionTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : !description ? 'red' : description.length < 30 ? 'amber' : 'green';
 	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
 	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
 	const contingency = trimmedText(risk.contingency_plan);
-	const mitigationTone: RiskAssuranceTone = mitigation ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'green';
-	const contingencyTone: RiskAssuranceTone = contingency ? 'green' : 'red';
+	const mitigationTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : mitigation ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'green';
+	const contingencyTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : contingency ? 'green' : 'red';
 	const actionResponsibilityTone = actionerTone(risk.status, risk.actioner_id);
-	const updatedTone = staleUpdateTone(risk.updated_at, now);
-	const concernTone = deriveRiskConcernTone(risk, now);
+	const updatedTone = isActiveLifecycle ? staleUpdateTone(risk.updated_at, now) : 'neutral';
+	const concernTone = isActiveLifecycle ? deriveRiskConcernTone(risk, now) : 'neutral';
+	const reviewTone = isActiveLifecycle ? review.tone : 'neutral';
+	const dueTone = isActiveLifecycle ? due.tone : 'neutral';
+	const ownerTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : risk.owner_id ? 'green' : 'red';
 
 	return [
 		{
@@ -502,7 +626,7 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 			title: 'Lifecycle status',
 			tone: lifecycleStatusTone(risk.status),
 			statusLabel: riskAssuranceToneLabel(lifecycleStatusTone(risk.status)),
-			value: riskDisplayLabel(risk.status),
+			value: `${riskLifecycleLabel(risk.status)} / ${riskDisplayLabel(risk.status)}`,
 			prompt: lifecycleStatusTone(risk.status) === 'red' ? 'Review status' : lifecycleStatusTone(risk.status) === 'amber' ? 'Confirm status' : undefined,
 		},
 		{
@@ -510,7 +634,9 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 			title: 'Overall concern',
 			tone: concernTone,
 			statusLabel: riskAssuranceToneLabel(concernTone),
-			value: `Derived from ${riskAssuranceToneLabel(exposure)} exposure and ${riskAssuranceToneLabel(deriveRiskAssuranceTone(risk, now))} assurance.`,
+			value: isActiveLifecycle
+				? `Derived from ${riskAssuranceToneLabel(exposure)} exposure and ${riskAssuranceToneLabel(deriveRiskAssuranceTone(risk, now))} assurance.`
+				: `${riskLifecycleLabel(risk.status)} risks are neutral and do not drive active assurance.`,
 		},
 		{
 			id: 'exposure',
@@ -523,10 +649,10 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 		{
 			id: 'owner',
 			title: 'Risk owner',
-			tone: risk.owner_id ? 'green' : 'red',
-			statusLabel: riskAssuranceToneLabel(risk.owner_id ? 'green' : 'red'),
+			tone: ownerTone,
+			statusLabel: riskAssuranceToneLabel(ownerTone),
 			value: riskProfileName(risk.owner, 'Unassigned'),
-			prompt: risk.owner_id ? undefined : 'Set owner',
+			prompt: risk.owner_id || !isActiveLifecycle ? undefined : 'Set owner',
 		},
 		{
 			id: 'actioner',
@@ -539,18 +665,18 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 		{
 			id: 'review-date',
 			title: 'Review cadence',
-			tone: review.tone,
-			statusLabel: riskAssuranceToneLabel(review.tone),
+			tone: reviewTone,
+			statusLabel: riskAssuranceToneLabel(reviewTone),
 			value: review.value,
-			prompt: review.tone === 'red' ? 'Update review date' : review.tone === 'amber' ? 'Add review date' : undefined,
+			prompt: reviewTone === 'red' ? 'Update review date' : reviewTone === 'amber' ? 'Add review date' : undefined,
 		},
 		{
 			id: 'due-date',
 			title: 'Due date',
-			tone: due.tone,
-			statusLabel: riskAssuranceToneLabel(due.tone),
+			tone: dueTone,
+			statusLabel: riskAssuranceToneLabel(dueTone),
 			value: due.value,
-			prompt: due.tone === 'red' ? 'Review due date' : undefined,
+			prompt: dueTone === 'red' ? 'Review due date' : undefined,
 		},
 		{
 			id: 'mitigation',
@@ -850,7 +976,9 @@ export async function createProjectRisk(
 	}
 
 	if (!risk) throw new Error('Watchtower could not assign a unique risk reference. Please try again.');
-	await createRiskRaisedNarrativeEntry(risk, workspace.role, client, eventTime);
+	if (isActiveRiskStatus(risk.status)) {
+		await createRiskRaisedNarrativeEntry(risk, workspace.role, client, eventTime);
+	}
 	const [enrichedRisk] = await enrichRiskProfiles([risk], client);
 	return enrichedRisk;
 }
@@ -901,10 +1029,71 @@ export async function updateProjectRisk(
 	if (error) throw error;
 	if (!data) throw new Error('Risk not found or you do not have access.');
 	const nextConcern = deriveRiskConcernTone(data as ProjectRisk, eventTime);
-	if (!isRedRiskConcern(previousConcern) && isRedRiskConcern(nextConcern)) {
+	const previousLifecycle = riskLifecycleCategory((existingRiskData as ProjectRisk).status);
+	const nextLifecycle = riskLifecycleCategory((data as ProjectRisk).status);
+	if (previousLifecycle === 'draft' && nextLifecycle === 'active') {
+		await createRiskOpenedNarrativeEntry(data as ProjectRisk, workspace.role, client, eventTime);
+	} else if (previousLifecycle === 'active' && nextLifecycle === 'closed') {
+		await createRiskClosedNarrativeEntry(data as ProjectRisk, null, workspace.role, client);
+	} else if (previousLifecycle === 'closed' && nextLifecycle === 'active') {
+		await createRiskReopenedNarrativeEntry(data as ProjectRisk, null, workspace.role, client);
+	} else if (nextLifecycle === 'active' && !isRedRiskConcern(previousConcern) && isRedRiskConcern(nextConcern)) {
 		await createRiskBecameRedNarrativeEntry(data as ProjectRisk, workspace.role, client, eventTime);
 	}
 	const [risk] = await enrichRiskProfiles([data as ProjectRisk], client);
+	return risk;
+}
+
+export async function transitionProjectRiskLifecycle(
+	workspaceSlug: string,
+	projectSlug: string,
+	riskId: string,
+	action: string,
+	reason: string | null | undefined,
+	client,
+	accessToken?: string,
+): Promise<ProjectRisk> {
+	if (action !== 'open' && action !== 'close' && action !== 'reopen') throw new Error('Select a valid risk lifecycle action.');
+	const { workspace, organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.edit', client, accessToken);
+	const existingRisk = await getProjectRisk(organisation.id, project.id, riskId, workspace.role, client);
+	if (!existingRisk) throw new Error('Risk not found or you do not have access.');
+
+	const currentLifecycle = riskLifecycleCategory(existingRisk.status);
+	const nextStatus = action === 'close' ? 'closed' : 'open';
+	if (action === 'open' && currentLifecycle !== 'draft') throw new Error('Only draft risks can be opened.');
+	if (action === 'close' && currentLifecycle !== 'active') throw new Error('Only active risks can be closed.');
+	if (action === 'reopen' && currentLifecycle !== 'closed') throw new Error('Only closed risks can be reopened.');
+
+	const eventTime = new Date();
+	const nextPayload = {
+		status: nextStatus,
+		rag_status: deriveRiskConcernTone({ ...existingRisk, status: nextStatus, updated_at: eventTime.toISOString() }, eventTime),
+	};
+	const { data, error } = await client
+		.from('project_risks')
+		.update(nextPayload)
+		.eq('organisation_id', organisation.id)
+		.eq('project_id', project.id)
+		.eq('risk_id', riskId)
+		.is('deleted_at', null)
+		.is('archived_at', null)
+		.select(RISK_SELECT)
+		.maybeSingle();
+
+	if (error) throw error;
+	if (!data) throw new Error('Risk not found or you do not have access.');
+
+	const updatedRisk = data as ProjectRisk;
+	const trimmedReason = trimmedText(reason);
+	if (trimmedReason) {
+		const notePrefix = action === 'close' ? 'Closure note' : action === 'reopen' ? 'Reopen note' : 'Open note';
+		await createRiskLifecycleNote(updatedRisk, `${notePrefix}: ${trimmedReason}`, client);
+	}
+	if (action === 'open') await createRiskOpenedNarrativeEntry(updatedRisk, workspace.role, client, eventTime);
+	if (action === 'close') await createRiskClosedNarrativeEntry(updatedRisk, trimmedReason || null, workspace.role, client);
+	if (action === 'reopen') await createRiskReopenedNarrativeEntry(updatedRisk, trimmedReason || null, workspace.role, client);
+
+	const [risk] = await enrichRiskProfiles([updatedRisk], client);
 	return risk;
 }
 

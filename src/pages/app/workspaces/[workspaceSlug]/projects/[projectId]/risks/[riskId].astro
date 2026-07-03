@@ -10,13 +10,19 @@ import {
 	RISK_LEVELS,
 	RISK_STATUSES,
 	createProjectRiskComment,
-	deriveRiskConcernTone,
+	deriveRiskReferenceTone,
 	getRiskAssuranceBlocks,
 	getProjectRisk,
+	isActiveRiskStatus,
+	isClosedRiskStatus,
+	isDraftRiskStatus,
 	listProjectRiskComments,
 	listRiskOwnerOptions,
 	riskDisplayLabel,
+	riskLifecycleLabel,
 	riskProfileName,
+	riskReferenceStatusLabel,
+	transitionProjectRiskLifecycle,
 } from '../../../../../../../lib/projectRisks';
 import { buildProjectPath, buildProjectRiskEditPath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../../../lib/projects';
 import { buildLoginRedirectPath, createSupabaseServerClient, getServerAccessToken, isSupabaseAuthSessionError } from '../../../../../../../lib/supabaseServer';
@@ -34,6 +40,7 @@ let workspaceName = '';
 let workspaceRole = '';
 let message = '';
 let commentError = '';
+let lifecycleError = '';
 let featureAccess = getFeatureAccess('riskManagement');
 
 const formatDate = (value, fallback = 'Not available') => value
@@ -99,13 +106,30 @@ try {
 					if (Astro.request.method === 'POST') {
 						if (!accessToken) return Astro.redirect(sessionRedirectPath);
 						const formData = await Astro.request.formData();
-						if (String(formData.get('intent') ?? '') === 'add-comment') {
+						const intent = String(formData.get('intent') ?? '');
+						if (intent === 'add-comment') {
 							try {
 								await createProjectRiskComment(workspaceSlug ?? '', data.slug, risk.risk_id, String(formData.get('comment') ?? ''), serverSupabase, accessToken);
 								return Astro.redirect(Astro.url.pathname);
 							} catch (error) {
 								if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
 								commentError = error instanceof Error ? error.message : 'Unable to add comment.';
+							}
+						} else if (intent === 'risk-lifecycle') {
+							try {
+								await transitionProjectRiskLifecycle(
+									workspaceSlug ?? '',
+									data.slug,
+									risk.risk_id,
+									String(formData.get('lifecycle_action') ?? ''),
+									String(formData.get('reason') ?? ''),
+									serverSupabase,
+									accessToken,
+								);
+								return Astro.redirect(Astro.url.pathname);
+							} catch (error) {
+								if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
+								lifecycleError = error instanceof Error ? error.message : 'Unable to update the risk lifecycle.';
 							}
 						}
 					}
@@ -124,7 +148,12 @@ try {
 const canEditRisk = can(workspaceRole, 'risk.edit');
 const editHref = project && risk ? buildProjectRiskEditPath(workspaceSlug ?? '', project.slug, risk.risk_id) : '';
 const assuranceBlocks = risk ? getRiskAssuranceBlocks(risk, new Date()) : [];
-const derivedConcernTone = risk ? deriveRiskConcernTone(risk, new Date()) : 'neutral';
+const referenceTone = risk ? deriveRiskReferenceTone(risk, new Date()) : 'neutral';
+const referenceStatus = risk ? riskReferenceStatusLabel(risk, new Date()) : 'Neutral';
+const riskIsDraft = risk ? isDraftRiskStatus(risk.status) : false;
+const riskIsActive = risk ? isActiveRiskStatus(risk.status) : false;
+const riskIsClosed = risk ? isClosedRiskStatus(risk.status) : false;
+const editActionLabel = riskIsDraft ? 'Continue editing' : 'Edit Risk';
 const blockValue = (block) => {
 	if (block.id === 'review-date') return formatDate(risk?.review_date, block.value);
 	if (block.id === 'due-date') return formatDate(risk?.due_date, block.value);
@@ -176,10 +205,10 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					<h1 slot="title" id="risk-detail-heading" class="risk-detail-heading">
 						<span class="risk-detail-heading__reference">
 							<RagReferencePill
-								tone={derivedConcernTone}
+								tone={referenceTone}
 								label={risk.risk_ref}
-								statusLabel={riskDisplayLabel(derivedConcernTone)}
-								ariaLabel={`${risk.risk_ref}, ${riskDisplayLabel(derivedConcernTone)} derived concern`}
+								statusLabel={referenceStatus}
+								ariaLabel={`${risk.risk_ref}, ${referenceStatus}`}
 							/>
 						</span>
 					</h1>
@@ -194,7 +223,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					<dl class="risk-detail-summary-strip" data-risk-summary-strip>
 						<div>
 							<dt>Lifecycle status</dt>
-							<dd>{riskDisplayLabel(risk.status)}</dd>
+							<dd>{riskLifecycleLabel(risk.status)} / {riskDisplayLabel(risk.status)}</dd>
 						</div>
 						<div>
 							<dt>Created by</dt>
@@ -209,6 +238,44 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 							<dd><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></dd>
 						</div>
 					</dl>
+					{canEditRisk && (
+						<div class="risk-lifecycle-actions" data-risk-lifecycle-actions>
+							{riskIsDraft && (
+								<form method="post" data-risk-lifecycle-form>
+									<input type="hidden" name="intent" value="risk-lifecycle" />
+									<input type="hidden" name="lifecycle_action" value="open" />
+									<label>
+										<span>Open note</span>
+										<textarea name="reason" rows="2" placeholder="Optional note for the risk history"></textarea>
+									</label>
+									<button class="button button--primary" type="submit" data-risk-open-action>Open / Publish risk</button>
+								</form>
+							)}
+							{riskIsActive && (
+								<form method="post" data-risk-lifecycle-form>
+									<input type="hidden" name="intent" value="risk-lifecycle" />
+									<input type="hidden" name="lifecycle_action" value="close" />
+									<label>
+										<span>Closure reason</span>
+										<textarea name="reason" rows="2" placeholder="Optional closure note"></textarea>
+									</label>
+									<button class="button button--secondary" type="submit" data-risk-close-action>Close risk</button>
+								</form>
+							)}
+							{riskIsClosed && (
+								<form method="post" data-risk-lifecycle-form>
+									<input type="hidden" name="intent" value="risk-lifecycle" />
+									<input type="hidden" name="lifecycle_action" value="reopen" />
+									<label>
+										<span>Reopen reason</span>
+										<textarea name="reason" rows="2" placeholder="Optional reopen note"></textarea>
+									</label>
+									<button class="button button--primary" type="submit" data-risk-reopen-action>Reopen risk</button>
+								</form>
+							)}
+							{lifecycleError && <p class="field-error" role="alert" data-risk-lifecycle-error>{lifecycleError}</p>}
+						</div>
+					)}
 				</ProjectControlPanel>
 
 				<ProjectContentPanel
@@ -222,7 +289,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 								class="button button--primary"
 								href={editHref}
 								data-risk-edit-action
-							>Edit Risk</a>
+							>{editActionLabel}</a>
 						) : (
 							<button
 								class="button button--primary"
@@ -231,7 +298,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 								aria-label="Viewer access is read-only. Risk editing is unavailable."
 								data-risk-edit-disabled
 								data-viewer-read-only
-							>Edit Risk</button>
+							>{editActionLabel}</button>
 						)}
 					</div>
 
@@ -489,7 +556,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		});
 	});
 
-	document.querySelectorAll('[data-risk-detail-save-form], [data-risk-comment-form]').forEach((form) => {
+	document.querySelectorAll('[data-risk-detail-save-form], [data-risk-comment-form], [data-risk-lifecycle-form]').forEach((form) => {
 		if (form instanceof HTMLFormElement) syncSessionBeforeSubmit(form);
 	});
 
@@ -558,6 +625,37 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
 		gap: 0.65rem 0.85rem;
 		margin: 0.85rem 0 0;
+	}
+
+	.risk-lifecycle-actions {
+		display: grid;
+		gap: 0.75rem;
+		margin-top: 1rem;
+	}
+
+	.risk-lifecycle-actions form {
+		display: grid;
+		grid-template-columns: minmax(12rem, 1fr) auto;
+		gap: 0.7rem;
+		align-items: end;
+	}
+
+	.risk-lifecycle-actions label {
+		display: grid;
+		gap: 0.35rem;
+		color: var(--muted-strong);
+		font-size: 0.85rem;
+		font-weight: 700;
+	}
+
+	.risk-lifecycle-actions textarea {
+		width: 100%;
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		border-radius: 8px;
+		background: rgba(4, 12, 24, 0.42);
+		color: var(--text);
+		padding: 0.65rem 0.75rem;
+		resize: vertical;
 	}
 
 	.risk-detail-summary-strip div {
@@ -821,6 +919,10 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 	@media (max-width: 760px) {
 		.risk-detail-action {
 			justify-items: stretch;
+		}
+
+		.risk-lifecycle-actions form {
+			grid-template-columns: 1fr;
 		}
 
 		.risk-assurance-grid {
