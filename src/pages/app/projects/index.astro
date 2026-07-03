@@ -5,7 +5,7 @@ import EmptyState from '../../../components/app/EmptyState.astro';
 import ProjectContentPanel from '../../../components/app/ProjectContentPanel.astro';
 import RagReferencePill from '../../../components/app/RagReferencePill.astro';
 import { can } from '../../../lib/permissions';
-import { deriveProjectAttentionStatesByProject, projectAttentionLabel } from '../../../lib/projectAttention';
+import { deriveProjectActionStatesByProject, projectActionStateLabel } from '../../../lib/projectAttention';
 import { buildProjectDateCards } from '../../../lib/projectDates';
 import { buildProjectPath, getCurrentWorkspace } from '../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
@@ -18,7 +18,7 @@ let workspaceSlug = '';
 let workspaceName = '';
 let canCreateProject = false;
 let createProjectRestriction = 'Select an active workspace before creating a project.';
-let projectAttentionStates = new Map<string, 'red' | 'amber' | 'green' | 'unknown' | 'neutral'>();
+let projectActionStates = new Map<string, 'red' | 'amber' | 'green' | 'unknown' | 'neutral'>();
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -71,7 +71,7 @@ try {
 						.in('project_id', projectIds)
 						.is('deleted_at', null)
 						.is('archived_at', null)
-					: Promise.resolve({ data: null, error: new Error('Risk attention unavailable for this role.') }),
+					: Promise.resolve({ data: null, error: new Error('Risk action state unavailable for this role.') }),
 			]);
 			const projectDatesByProjectId = new Map();
 			for (const projectDate of projectDates ?? []) {
@@ -100,9 +100,9 @@ try {
 					risks: risksResult.error ? null : risksByProjectId.get(project.id) ?? [],
 				},
 			]));
-			projectAttentionStates = deriveProjectAttentionStatesByProject(projectIds, factsByProjectId, new Date());
+			projectActionStates = deriveProjectActionStatesByProject(projectIds, factsByProjectId, new Date());
 		} else {
-			projectAttentionStates = deriveProjectAttentionStatesByProject(projectIds, null);
+			projectActionStates = deriveProjectActionStatesByProject(projectIds, null);
 		}
 	}
 } catch (error) {
@@ -113,13 +113,7 @@ const formatDate = (value) => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
 	: 'Not available';
 const formatLabel = (value, fallback = 'Not available') => value ? value.charAt(0).toUpperCase() + value.slice(1) : fallback;
-const healthTone = (value) => {
-	const health = value?.toLowerCase();
-	if (health === 'green') return 'green';
-	if (health === 'amber') return 'amber';
-	if (health === 'red') return 'red';
-	return 'unknown';
-};
+const projectHealthLabel = 'Unknown';
 ---
 <AuthenticatedLayout title="Projects | WatchTower">
 	<section class="projects-page" data-projects-page>
@@ -134,7 +128,7 @@ const healthTone = (value) => {
 
 		<ProjectContentPanel
 			title="Project list"
-			helper="Open a project dashboard or review its current delivery status."
+			helper="Open a project dashboard or review its current action state."
 			headingId="project-list-heading"
 		>
 			<div slot="action" class="projects-page__action">
@@ -167,25 +161,25 @@ const healthTone = (value) => {
 				<div class="projects-table-scroll">
 					<table class="simple-table projects-table">
 						<thead>
-							<tr><th scope="col">Reference</th><th scope="col">Project</th><th scope="col">Status</th><th scope="col">Health</th><th scope="col">Last updated</th></tr>
+							<tr><th scope="col">Action state</th><th scope="col">Project</th><th scope="col">Status</th><th scope="col">Health</th><th scope="col">Last updated</th></tr>
 						</thead>
 						<tbody>
 							{projects.map((project) => (
 								<tr>
 									<td>
 										<RagReferencePill
-											tone={projectAttentionStates.get(project.id) ?? 'unknown'}
+											tone={projectActionStates.get(project.id) ?? 'unknown'}
 											label={project.project_ref ?? 'Not assigned'}
-											statusLabel={projectAttentionLabel(projectAttentionStates.get(project.id) ?? 'unknown')}
-											ariaLabel={`Project ${project.project_ref ?? 'not assigned'} attention state: ${projectAttentionLabel(projectAttentionStates.get(project.id) ?? 'unknown')}`}
+											statusLabel={projectActionStateLabel(projectActionStates.get(project.id) ?? 'unknown')}
+											ariaLabel={`Project ${project.project_ref ?? 'not assigned'} action state: ${projectActionStateLabel(projectActionStates.get(project.id) ?? 'unknown')}`}
 										/>
 									</td>
 									<td class="projects-table__name"><a href={buildProjectPath(workspaceSlug, project.slug)} aria-label={`Open ${project.name}`}>{project.name}</a></td>
 									<td><span class="projects-table__status">{formatLabel(project.status, 'Unknown')}</span></td>
 									<td>
 										<RagReferencePill
-											tone={healthTone(project.health)}
-											label={formatLabel(project.health, 'Not assessed')}
+											tone="unknown"
+											label={projectHealthLabel}
 										/>
 									</td>
 									<td><time datetime={project.updated_at}>{formatDate(project.updated_at)}</time></td>

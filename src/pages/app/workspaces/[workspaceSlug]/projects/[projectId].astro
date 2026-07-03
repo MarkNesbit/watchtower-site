@@ -14,10 +14,11 @@ import {
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../lib/featureFlags';
 import type { FeatureAccess, FeatureKey } from '../../../../../lib/featureFlags';
 import { can } from '../../../../../lib/permissions';
+import { deriveProjectActionState, projectActionStateLabel } from '../../../../../lib/projectAttention';
 import { buildProjectDateCards, listProjectDates, type ProjectDateCard } from '../../../../../lib/projectDates';
 import { getUnseenProjectNarrativeCount } from '../../../../../lib/projectNarrative';
 import { buildProjectDetailsPath, buildProjectNarrativePath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
-import { listProjectRisks } from '../../../../../lib/projectRisks';
+import { listProjectRisks, type ProjectRisk } from '../../../../../lib/projectRisks';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -34,23 +35,19 @@ let projectDetailsTileSignal: DashboardTileSignalState = 'unknown';
 let projectNarrativeTileSignal: DashboardTileSignalState = 'unknown';
 let unseenProjectNarrativeEntries: number | null = null;
 let riskTileSignal: DashboardTileSignalState = 'neutral';
+let projectActionState: DashboardTileSignalState = 'unknown';
+let projectRisksForActionState: ProjectRisk[] | null = null;
 
 const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not available';
 const formatValue = (value, fallback = 'Not available') => value || fallback;
 const formatStatusLabel = (value) => value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Unknown';
-const healthTone = (value) => {
-	const health = value?.toLowerCase();
-	if (health === 'green') return 'green';
-	if (health === 'amber') return 'amber';
-	if (health === 'red') return 'red';
-	return 'unknown';
-};
+const projectHealthLabel = 'Unknown';
 const tileAriaLabel = (title: string, state: DashboardTileSignalState) => `${title}: ${dashboardTileSignalStatusLabel(state)}`;
 const projectNarrativeStatusLabel = (state: DashboardTileSignalState, unseenEntries: number | null) => {
 	if (!Number.isInteger(unseenEntries) || unseenEntries < 0) return dashboardTileSignalStatusLabel(state);
-	if (unseenEntries === 0) return 'Green attention, no unseen entries';
+	if (unseenEntries === 0) return 'Green no action needed, no unseen entries';
 	const entryLabel = unseenEntries === 1 ? 'entry' : 'entries';
-	return `${formatStatusLabel(state)} attention, ${unseenEntries} unseen ${entryLabel}`;
+	return `${formatStatusLabel(state)} action state, ${unseenEntries} unseen ${entryLabel}`;
 };
 
 type ProjectTile = {
@@ -182,11 +179,18 @@ try {
 			if (riskFeatureAccess.isAccessible && can(workspace.role, 'risk.view')) {
 				try {
 					const risks = await listProjectRisks(organisation.id, project.id, workspace.role, serverSupabase);
+					projectRisksForActionState = risks;
 					riskTileSignal = deriveRiskTileAttentionSignal(risks, new Date());
 				} catch {
 					riskTileSignal = 'unknown';
 				}
 			}
+			projectActionState = deriveProjectActionState({
+				project,
+				projectDateCards,
+				projectPeople: projectDetailAssignments,
+				risks: projectRisksForActionState,
+			}, new Date());
 		}
 	}
 } catch (error) {
@@ -258,11 +262,20 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => {
 							<dd>{formatStatusLabel(project.status)}</dd>
 						</div>
 						<div>
+							<dt>Action state</dt>
+							<dd>
+								<RagReferencePill
+									tone={projectActionState}
+									label={projectActionStateLabel(projectActionState)}
+								/>
+							</dd>
+						</div>
+						<div>
 							<dt>Health</dt>
 							<dd>
 								<RagReferencePill
-									tone={healthTone(project.health)}
-									label={formatStatusLabel(formatValue(project.health, 'Not assessed'))}
+									tone="unknown"
+									label={projectHealthLabel}
 								/>
 							</dd>
 						</div>
@@ -352,7 +365,7 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => {
 
 	.project-status-summary {
 		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 0.7rem;
 		margin: 0;
 	}

@@ -143,7 +143,7 @@ Cards should be reserved for individual repeated items, modals, and genuinely fr
 
 ## RAG And Reference Pill Pattern
 
-Use `RagReferencePill` for project references, RAG states, attention states, and future compound record references where a small pill improves scanning. Shared RAG styling lives in `src/styles/rag.css` and supports `red`, `amber`, `green`, `neutral`, and `unknown` states. The older blue treatment is reserved for non-RAG reference accents, not health or attention meaning.
+Use `RagReferencePill` for project references, RAG states, action states, and future compound record references where a small pill improves scanning. Shared RAG styling lives in `src/styles/rag.css` and supports `red`, `amber`, `green`, `neutral`, and `unknown` states. Project health is not currently assessed and should display as Unknown; the older blue treatment is reserved for non-RAG reference accents and capability availability, not health or action-state meaning.
 
 RAG colours are shared design tokens. Future Issues, Dependencies, Assumptions, Actions and Decisions screens should reuse the token classes rather than inventing page-local Red, Amber or Green values. The default active tokens are `#ff5f5f` for Red, `#f6c453` for Amber and `#6ee7a8` for Green, each with matching border and subdued background tokens. Neutral and Unknown use slate/blue-grey token sets.
 
@@ -163,13 +163,13 @@ RAG cards and panels should:
 
 Dashboard capability tiles should:
 
-- Use the shared `rag-tile` treatment and a state class such as `rag-tile--attention-red` when a capability has an attention or assurance state.
-- Keep Watchtower blue as the default capability style for neutral, unknown or not-assessed tiles, but let explicit Red, Amber or Green tile states override the default blue visual treatment.
+- Use the shared `rag-tile` treatment and a state class such as `rag-tile--attention-red` when a capability has an action or assurance state.
+- Keep Watchtower blue as the default capability availability style for neutral, unknown or not-assessed tiles, while treating explicit Red, Amber or Green tile states as action state rather than health.
 - Keep icon and title visible without permanent helper copy inside the tile.
 - Provide accessible labels for the state.
 - Avoid count badges, red/amber dots, notification markers or health-score decoration unless a later slice explicitly introduces that pattern.
 
-Parent surfaces such as the Projects list and Project Dashboard must not show Red or Amber attention without a destination page explaining why. WT-SIGNAL-CONSISTENCY-001 applies this first to Project Details: the dashboard tile, Project Details attention panel and Projects list reference pill share the same setup/date/responsibility reasons. WT-PROJ-DETAILS-SIGNALS-001 makes those reasons section-owned: the Project Details attention panel appears below the hero/access area and before the detail sections, summarizes only section-level Red and Amber reasons, and links back to the relevant section. Each Project Details section shows an accessible compact RAG marker and subtle state accent rather than a full internal rationale banner. Green sections should be visible but calm, confirming state without adding explanatory blocks. Editable Red/Amber reasons must either have a working permission-safe edit path for permitted users or be explained as not yet resolvable in the current MVP.
+Parent surfaces such as the Projects list and Project Dashboard must not show Red or Amber action state without a destination page explaining why. WT-SIGNAL-CONSISTENCY-001 applies this first to Project Details: the dashboard tile, Project Details action-state panel and Projects list reference pill share the same setup/date/responsibility reasons. WT-PROJ-DETAILS-SIGNALS-001 makes those reasons section-owned: the Project Details action-state panel appears below the hero/access area and before the detail sections, summarizes only section-level Red and Amber reasons, and links back to the relevant section. Each Project Details section shows an accessible compact RAG marker and subtle state accent rather than a full internal rationale banner. Green sections should be visible but calm, confirming state without adding explanatory blocks. Project Dates section state must aggregate from visible child date cards and those dates must remain timeline/setup records, not RAID records. Editable Red/Amber reasons must either have a working permission-safe edit path for permitted users or be explained as not yet resolvable in the current MVP.
 
 ## Mobile Behaviour
 
@@ -190,7 +190,7 @@ Project pages should:
 - Use native buttons for actions that open modals or submit forms.
 - Use links only for navigation.
 - Keep disabled actions non-interactive and explain the restriction.
-- Avoid relying on colour alone for RAG or attention states.
+- Avoid relying on colour alone for RAG or action states.
 - Preserve safe Astro templating for user-supplied database values.
 
 ## Reusable Components
@@ -206,7 +206,7 @@ WT-US-0209 introduced these lightweight components in `src/components/app/`:
 
 Project Narrative uses the shared hero, control panel, content panel, disabled-action helper, and empty state. The project dashboard now also uses the shared hero, status/control panel, and content panel shell while preserving its existing feature-gated tile behaviour. The project list page uses the shared content panel, empty state, disabled-action hint, and reference pill treatment without adding a single-project hero. WT-RISK-002A applies the same project-page pattern to the Risk Register and risk detail foundation, WT-RISK-002B extends it with project-scoped New Risk and Edit Risk form pages, WT-RISK-002C adds a compact register plus block-level assurance cards on risk detail, WT-RISK-003 keeps those patterns while adding actioner assignment to the risk form and action responsibility block, WT-RISK-004 makes risk detail cards focused modal entry points with comments below the assurance content, WT-RISK-004A/004B consolidate and polish the detail page into a Current risk metadata strip plus Core Risk Detail section, and WT-RISK-005 keeps the same pill treatment while deriving the risk concern state from exposure plus assurance rather than manual RAG selection. WT-RISK-NARRATIVE-001 extends the Project Narrative detail modal for source-risk entries with read-only current Risk detail, separate exposure/assurance/overall concern RAG signals, and an Open full risk in new tab action; it does not add risk editing controls or turn Narrative into an audit table.
 
-Dashboard capability tiles stay understandable from visible title text and accessible labels rather than rollover-only helper text. The Risk tile may use the shared RAG tile treatment to reflect the highest active risk assurance state; Draft and Closed risks are excluded, exposure does not drive the state, and tiles must not gain count badges, dots, notification markers or health-scoring decorations.
+Dashboard capability tiles stay understandable from visible title text and accessible labels rather than rollover-only helper text. The Risk tile may use the shared RAG tile treatment to reflect the highest active risk assurance action state; Draft and Closed risks are excluded, exposure does not drive the state, capability availability remains separate from action state, and tiles must not gain count badges, dots, notification markers or health-scoring decorations.
 
 ## Duplication Opportunities Identified
 
@@ -216,7 +216,7 @@ Existing duplication or near-duplication appears in:
 - Risk detail assurance block treatments and future RAID quality prompts.
 - Project Narrative and future RAID no-record/error states.
 - Viewer/read-only disabled action messaging across edit, risk, and narrative routes.
-- RAG/attention/reference badge treatments across dashboard tiles, risks, and narrative entries.
+- RAG/action-state/reference badge treatments across dashboard tiles, risks, and narrative entries.
 
 Future work should adopt shared components page by page rather than refactoring every authenticated route at once.
 
