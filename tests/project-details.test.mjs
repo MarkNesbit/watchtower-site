@@ -15,6 +15,7 @@ import {
 	isProjectDateType,
 	projectDateTypeLabel,
 	projectDateWarningDays,
+	saveProjectDate,
 } from '../src/lib/projectDates.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260630000200_project_people_assignments.sql', import.meta.url);
@@ -26,6 +27,99 @@ const routesUrl = new URL('../src/lib/projectRoutes.ts', import.meta.url);
 const projectsLibraryUrl = new URL('../src/lib/projects.ts', import.meta.url);
 const peopleLibraryUrl = new URL('../src/lib/projectPeople.ts', import.meta.url);
 const datesLibraryUrl = new URL('../src/lib/projectDates.ts', import.meta.url);
+
+function createProjectDateSaveClient() {
+	const operations = [];
+	const user = { id: 'user-1' };
+	class Query {
+		constructor(table) {
+			this.table = table;
+			this.filters = [];
+			this.action = 'select';
+			this.payload = null;
+		}
+
+		select(value) {
+			this.selection = value;
+			return this;
+		}
+
+		eq(field, value) {
+			this.filters.push({ field, value });
+			return this;
+		}
+
+		is(field, value) {
+			this.filters.push({ field, value });
+			return this;
+		}
+
+		limit(value) {
+			this.limitValue = value;
+			return this;
+		}
+
+		insert(payload) {
+			this.action = 'insert';
+			this.payload = payload;
+			operations.push({ table: this.table, action: 'insert', payload, filters: this.filters });
+			return this;
+		}
+
+		update(payload) {
+			this.action = 'update';
+			this.payload = payload;
+			operations.push({ table: this.table, action: 'update', payload, filters: this.filters });
+			return this;
+		}
+
+		async maybeSingle() {
+			if (this.table === 'organisation_members') {
+				return {
+					data: {
+						role: 'owner',
+						organisations: { id: 'org-1', name: 'Acme Delivery', slug: 'acme-delivery' },
+					},
+					error: null,
+				};
+			}
+			if (this.table === 'projects') {
+				return { data: { id: 'project-1', organisation_id: 'org-1', slug: 'alpha' }, error: null };
+			}
+			return { data: null, error: null };
+		}
+
+		async single() {
+			if (this.table === 'project_dates' && this.action === 'insert') {
+				return {
+					data: {
+						id: 'date-1',
+						...this.payload,
+						created_at: '2026-07-03T08:00:00Z',
+						updated_at: '2026-07-03T08:00:00Z',
+						removed_at: null,
+					},
+					error: null,
+				};
+			}
+			return { data: this.payload, error: null };
+		}
+
+		then(resolve, reject) {
+			return Promise.resolve({ data: null, error: null }).then(resolve, reject);
+		}
+	}
+
+	return {
+		operations,
+		client: {
+			auth: {
+				getUser: async () => ({ data: { user }, error: null }),
+			},
+			from: (table) => new Query(table),
+		},
+	};
+}
 
 test('Project people roles are controlled and human-readable', () => {
 	assert.ok(PROJECT_PEOPLE_ROLES.includes('sponsor'));
@@ -134,15 +228,88 @@ test('Project date cards preserve default slots and hide removed added dates', (
 
 	const startCard = cards.find((card) => card.dateType === 'start_date' && card.isDefault);
 	assert.equal(startCard?.id, 'active-start');
-	assert.equal(startCard?.targetDate, '2026-06-15');
+	assert.equal(startCard?.targetDate, '2026-05-01');
 	assert.equal(startCard?.status.tone, 'green');
 	const targetEndCard = cards.find((card) => card.dateType === 'target_end_date' && card.isDefault);
 	assert.equal(targetEndCard?.id, 'active-target-end');
-	assert.equal(targetEndCard?.targetDate, '2026-08-31');
+	assert.equal(targetEndCard?.targetDate, '2026-12-01');
 	assert.equal(targetEndCard?.status.tone, 'green');
 	assert.equal(cards.some((card) => card.id === 'removed-uat'), false);
 	assert.equal(cards.some((card) => card.id === 'active-stage-gate'), true);
 	assert.equal(comments[0].comment, 'Keep this context');
+});
+
+test('Project date cards use legacy default dates over stale structured rows', () => {
+	const now = new Date('2026-07-01T12:00:00Z');
+	const cards = buildProjectDateCards([
+		{
+			id: 'stale-start',
+			organisation_id: 'org-1',
+			project_id: 'project-1',
+			date_type: 'start_date',
+			target_date: '2026-04-01',
+			warning_days: 0,
+			is_key_date: true,
+			removed_at: null,
+		},
+		{
+			id: 'empty-target-end',
+			organisation_id: 'org-1',
+			project_id: 'project-1',
+			date_type: 'target_end_date',
+			target_date: null,
+			warning_days: 14,
+			is_key_date: true,
+			removed_at: null,
+		},
+		{
+			id: 'removed-review',
+			organisation_id: 'org-1',
+			project_id: 'project-1',
+			date_type: 'review_date',
+			target_date: '2026-07-01',
+			warning_days: 2,
+			is_key_date: true,
+			removed_at: '2026-06-30T10:00:00Z',
+		},
+	], {
+		start_date: '2026-06-15',
+		target_end_date: '2026-09-30',
+		next_review_date: '2026-07-15',
+	}, now);
+
+	const startCard = cards.find((card) => card.dateType === 'start_date' && card.isDefault);
+	assert.equal(startCard?.id, 'stale-start');
+	assert.equal(startCard?.targetDate, '2026-06-15');
+	assert.deepEqual(startCard?.status, { tone: 'green', label: 'Green', text: 'Green - started' });
+	const targetEndCard = cards.find((card) => card.dateType === 'target_end_date' && card.isDefault);
+	assert.equal(targetEndCard?.id, 'empty-target-end');
+	assert.equal(targetEndCard?.targetDate, '2026-09-30');
+	assert.equal(targetEndCard?.status.tone, 'green');
+	const reviewCard = cards.find((card) => card.dateType === 'review_date' && card.isDefault);
+	assert.equal(reviewCard?.id, null);
+	assert.equal(reviewCard?.targetDate, '2026-07-15');
+	assert.equal(reviewCard?.status.tone, 'green');
+});
+
+test('Project date cards show saved structured Start date when legacy Start date is empty', () => {
+	const cards = buildProjectDateCards([
+		{
+			id: 'saved-start',
+			organisation_id: 'org-1',
+			project_id: 'project-1',
+			date_type: 'start_date',
+			target_date: '2026-06-30',
+			warning_days: 0,
+			is_key_date: true,
+			removed_at: null,
+		},
+	], { start_date: null, target_end_date: null, next_review_date: null }, new Date('2026-07-01T12:00:00Z'));
+
+	const startCard = cards.find((card) => card.dateType === 'start_date' && card.isDefault);
+	assert.equal(startCard?.id, 'saved-start');
+	assert.equal(startCard?.targetDate, '2026-06-30');
+	assert.deepEqual(startCard?.status, { tone: 'green', label: 'Green', text: 'Green - started' });
 });
 
 test('Project date mutation authority excludes viewer and simulated viewer roles', async () => {
@@ -152,6 +319,32 @@ test('Project date mutation authority excludes viewer and simulated viewer roles
 		activeRoleSimulation: { demo_person_id: 'demo-viewer' },
 	}, 'org-1', 'project-1', {}, undefined), false);
 	assert.equal(await canChangeProjectDates({ role: 'owner' }, 'org-1', 'project-1', {}, undefined), true);
+});
+
+test('Saving Start date from a default missing card writes the structured row and legacy field', async () => {
+	const { client, operations } = createProjectDateSaveClient();
+	const savedDate = await saveProjectDate('acme-delivery', 'alpha', {
+		projectDateId: '',
+		dateType: 'start_date',
+		customLabel: '',
+		targetDate: '2026-06-30',
+		comment: '',
+	}, client, 'access-token');
+
+	assert.equal(savedDate?.date_type, 'start_date');
+	assert.equal(savedDate?.target_date, '2026-06-30');
+	const dateInsert = operations.find((operation) => operation.table === 'project_dates' && operation.action === 'insert');
+	assert.deepEqual(dateInsert?.payload, {
+		organisation_id: 'org-1',
+		project_id: 'project-1',
+		date_type: 'start_date',
+		custom_label: null,
+		target_date: '2026-06-30',
+		warning_days: 0,
+		is_key_date: true,
+	});
+	const legacyUpdate = operations.find((operation) => operation.table === 'projects' && operation.action === 'update');
+	assert.deepEqual(legacyUpdate?.payload, { start_date: '2026-06-30' });
 });
 
 test('Project people migration keeps assignment separate from workspace permissions', async () => {
