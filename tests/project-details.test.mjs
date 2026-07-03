@@ -325,7 +325,8 @@ test('Project Details route displays full available details read-first with moda
 	assert.match(source, /projectDetailsAttentionReasons = projectDetailsSignal\.reasons\.filter/);
 	assert.match(source, /projectDetailsAttentionSections = projectDetailsSectionSignals/);
 	assert.match(source, /data-project-details-attention/);
-	assert.match(source, /Project setup attention/);
+	assert.match(source, /id="project-details-attention-heading">Attention/);
+	assert.doesNotMatch(source, /Project setup attention/);
 	assert.match(source, /Red attention/);
 	assert.match(source, /Amber attention/);
 	assert.match(source, /rag-panel rag-panel--\$\{projectDetailsSignal\.state\}/);
