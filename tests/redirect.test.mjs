@@ -42,6 +42,14 @@ test('middleware does not use the wt-session marker cookie as authentication', a
 	assert.doesNotMatch(middleware, /signed-in/);
 });
 
+test('middleware prevents authenticated app pages from being browser cached', async () => {
+	const middleware = await readFile(new URL('../src/middleware.ts', import.meta.url), 'utf8');
+	assert.match(middleware, /context\.url\.pathname\.startsWith\('\/app'\)/);
+	assert.match(middleware, /Cache-Control', 'private, no-store, no-cache, must-revalidate'/);
+	assert.match(middleware, /Pragma', 'no-cache'/);
+	assert.match(middleware, /Expires', '0'/);
+});
+
 test('/app shell is hidden until the client confirms a real Supabase session', async () => {
 	const layout = await readFile(new URL('../src/layouts/AuthenticatedLayout.astro', import.meta.url), 'utf8');
 	const authStatus = await readFile(new URL('../src/components/auth/AuthStatus.astro', import.meta.url), 'utf8');
