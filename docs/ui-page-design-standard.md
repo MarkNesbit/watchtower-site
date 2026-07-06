@@ -143,9 +143,11 @@ Cards should be reserved for individual repeated items, modals, and genuinely fr
 
 ## RAG And Reference Pill Pattern
 
-Use `RagReferencePill` for project references, RAG states, action states, and future compound record references where a small pill improves scanning. Shared RAG styling lives in `src/styles/rag.css` and supports `red`, `amber`, `green`, `neutral`, and `unknown` states. Project health is not currently assessed and should display as Unknown; the older blue treatment is reserved for non-RAG reference accents and capability availability, not health or action-state meaning.
+Use `RagReferencePill` for project references, RAG states, action states, risk exposure labels, and future compound record references where a small pill improves scanning. Shared RAG styling lives in `src/styles/rag.css` and supports `red`, `amber`, `green`, `neutral`, and `unknown` states for action-state/assurance use. Project health is not currently assessed and should display as Unknown; the older blue treatment is reserved for non-RAG reference accents and capability availability, not health or action-state meaning.
 
 RAG colours are shared design tokens. Future Issues, Dependencies, Assumptions, Actions and Decisions screens should reuse the token classes rather than inventing page-local Red, Amber or Green values. The default active tokens are `#ff5f5f` for Red, `#f6c453` for Amber and `#6ee7a8` for Green, each with matching border and subdued background tokens. Neutral and Unknown use slate/blue-grey token sets.
+
+Risk exposure is not a RAG/action-state value in the Watchtower Default MVP UX. Exposure labels are Critical, High, Medium and Low. Critical uses red styling, High uses orange, Medium uses amber and Low uses yellow through the dedicated `risk-critical`, `risk-high`, `risk-medium` and `risk-low` tone classes. Low exposure must not use green; Green remains reserved for action state or assurance meaning no current action due.
 
 Pills should:
 

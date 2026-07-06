@@ -771,8 +771,8 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /Current source risk/);
 	assert.match(page, /Risk detail/);
 	assert.match(page, /data-detail-risk-reference/);
-	assert.match(page, /data-detail-risk-concern/);
-	assert.match(page, /data-detail-risk-concern-card/);
+	assert.match(page, /data-detail-risk-action-state/);
+	assert.match(page, /data-detail-risk-action-state-card/);
 	assert.match(page, />Action state<\/span>/);
 	assert.match(page, /data-detail-risk-exposure-card/);
 	assert.match(page, /data-detail-risk-assurance-card/);
@@ -797,6 +797,7 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /buildProjectRiskPath\(workspaceSlug \?\? '', project\?\.slug \?\? projectSlug \?\? '', entry\.source_record_id\)/);
 	assert.match(page, /deriveRiskAssuranceTone\(risk, new Date\(\)\)/);
 	assert.match(page, /deriveRiskExposureTone\(risk\.probability, risk\.impact\)/);
+	assert.match(page, /riskExposureToneLabel\(exposure\)/);
 	assert.match(page, /deriveRiskReferenceTone\(risk, new Date\(\)\)/);
 	assert.match(page, /riskReferenceStatusLabel\(risk, new Date\(\)\)/);
 	assert.match(page, /entry\.sourceRisk\.available === false/);
