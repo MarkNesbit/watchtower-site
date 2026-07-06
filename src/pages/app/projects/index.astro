@@ -45,7 +45,7 @@ try {
 		riskFeatureAccess = await loadFeatureAccess(serverSupabase, 'riskManagement', accessToken);
 		const { data, error } = await serverSupabase
 			.from('projects')
-			.select('id, name, project_ref, slug, status, health, description, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, governance_route, escalation_route, updated_at')
+			.select('id, name, project_ref, slug, status, health, description, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, review_cadence, governance_route, escalation_route, updated_at')
 			.eq('organisation_id', organisation.id)
 			.is('deleted_at', null)
 			.is('archived_at', null)

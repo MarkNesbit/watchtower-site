@@ -34,6 +34,7 @@ export type ProjectAttentionProject = {
 	criticality?: string | null;
 	target_end_date?: string | null;
 	next_review_date?: string | null;
+	review_cadence?: string | null;
 	governance_route?: string | null;
 	escalation_route?: string | null;
 };
