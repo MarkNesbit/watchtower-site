@@ -773,6 +773,7 @@ test('Project Narrative page provides manual creation and read-only detail modal
 	assert.match(page, /data-detail-risk-reference/);
 	assert.match(page, /data-detail-risk-concern/);
 	assert.match(page, /data-detail-risk-concern-card/);
+	assert.match(page, />Action state<\/span>/);
 	assert.match(page, /data-detail-risk-exposure-card/);
 	assert.match(page, /data-detail-risk-assurance-card/);
 	assert.match(page, /data-detail-risk-assurance/);

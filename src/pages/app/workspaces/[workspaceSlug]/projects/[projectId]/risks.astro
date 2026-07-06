@@ -176,7 +176,7 @@ const closedRisks = risks.filter((risk) => isClosedRiskStatus(risk.status));
 																<a
 																	class="risk-reference-link"
 																	href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
-																	aria-label={`Open ${risk.risk_ref}, ${referenceStatus} derived concern`}
+																	aria-label={`Open ${risk.risk_ref}, ${referenceStatus} action state`}
 																>
 																	<RagReferencePill
 																		tone={referenceTone}

@@ -17,6 +17,7 @@ export type RiskLevel = (typeof RISK_LEVELS)[number];
 export const RISK_RAG_STATUSES = ['blue', 'green', 'amber', 'red'] as const;
 export type RiskRagStatus = (typeof RISK_RAG_STATUSES)[number];
 export type RiskAssuranceTone = 'green' | 'amber' | 'red' | 'neutral';
+export type RiskActionStateTone = 'green' | 'amber' | 'red';
 export type RiskDashboardAssuranceTone = RiskAssuranceTone;
 
 const RISK_SEQUENCE_CONSTRAINT = 'project_risks_project_sequence_key';
@@ -80,6 +81,11 @@ export type RiskAssuranceBlock = {
 	statusLabel: string;
 	value: string;
 	prompt?: string;
+};
+
+export type RiskActionStateDriver = {
+	tone: RiskAssuranceTone;
+	message: string;
 };
 
 export type RiskOwnerOption = RiskProfile & {
@@ -306,12 +312,12 @@ export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
 		.join(' ');
 }
 
-function isRedRiskConcern(value: unknown): boolean {
+function isRedRiskActionState(value: unknown): boolean {
 	return value === 'red';
 }
 
-function riskConcernToNarrativeAttention(concern: RiskRagStatus): 'green' | 'amber' | 'red' | 'neutral' {
-	return concern === 'green' || concern === 'amber' || concern === 'red' ? concern : 'neutral';
+function riskActionStateToNarrativeAttention(actionState: RiskActionStateTone): 'green' | 'amber' | 'red' {
+	return actionState;
 }
 
 function compactSentence(parts: Array<string | null | undefined>): string {
@@ -349,7 +355,7 @@ function riskReviewDateIsOverdue(value: unknown, now: Date): boolean {
 	return Boolean(date && date < startOfUtcDay(now));
 }
 
-export function deriveRiskExposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
+export function deriveWatchtowerDefaultRiskExposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
 	if (!RISK_LEVELS.includes(probability as RiskLevel) || !RISK_LEVELS.includes(impact as RiskLevel)) return 'red';
 	if (probability === 'high' && impact === 'high') return 'red';
 	if (probability === 'low' && impact === 'low') return 'green';
@@ -359,6 +365,10 @@ export function deriveRiskExposureTone(probability: unknown, impact: unknown): R
 	) return 'red';
 	if (probability === 'high' || impact === 'high' || probability === 'medium' || impact === 'medium') return 'amber';
 	return 'green';
+}
+
+export function deriveRiskExposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
+	return deriveWatchtowerDefaultRiskExposureTone(probability, impact);
 }
 
 function lifecycleStatusTone(status: unknown): RiskAssuranceTone {
@@ -407,7 +417,7 @@ export function deriveRiskAssuranceTone(risk: Pick<ProjectRisk,
 	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
 >, now = new Date()): RiskAssuranceTone {
 	if (!isActiveRiskStatus(risk.status)) return 'neutral';
-	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
+	const exposure = deriveWatchtowerDefaultRiskExposureTone(risk.probability, risk.impact);
 	const status = trimmedText(risk.status).toLowerCase();
 	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
@@ -433,14 +443,20 @@ export function deriveRiskAssuranceTone(risk: Pick<ProjectRisk,
 	]);
 }
 
-export function deriveRiskConcernTone(risk: Pick<ProjectRisk,
+export function deriveRiskActionStateTone(risk: Pick<ProjectRisk,
 	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
->, now = new Date()): RiskRagStatus {
-	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
+>, now = new Date()): RiskActionStateTone {
+	const exposure = deriveWatchtowerDefaultRiskExposureTone(risk.probability, risk.impact);
 	const assurance = deriveRiskAssuranceTone(risk, now);
 	if (assurance === 'red' || exposure === 'red') return 'red';
 	if (assurance === 'amber' || exposure === 'amber') return 'amber';
 	return 'green';
+}
+
+export function deriveRiskConcernTone(risk: Pick<ProjectRisk,
+	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+>, now = new Date()): RiskRagStatus {
+	return deriveRiskActionStateTone(risk, now);
 }
 
 export function isDashboardActiveRiskStatus(status: unknown): boolean {
@@ -450,14 +466,14 @@ export function isDashboardActiveRiskStatus(status: unknown): boolean {
 export function deriveRiskReferenceTone(risk: Pick<ProjectRisk,
 	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
 >, now = new Date()): RiskRagStatus | 'neutral' {
-	return isActiveRiskStatus(risk.status) ? deriveRiskConcernTone(risk, now) : 'neutral';
+	return isActiveRiskStatus(risk.status) ? deriveRiskActionStateTone(risk, now) : 'neutral';
 }
 
 export function riskReferenceStatusLabel(risk: Pick<ProjectRisk,
 	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
 >, now = new Date()): string {
 	return isActiveRiskStatus(risk.status)
-		? riskDisplayLabel(deriveRiskConcernTone(risk, now))
+		? riskDisplayLabel(deriveRiskActionStateTone(risk, now))
 		: riskLifecycleLabel(risk.status);
 }
 
@@ -483,25 +499,71 @@ export function deriveRiskRedNarrativeReason(risk: Pick<ProjectRisk,
 	return null;
 }
 
-function buildRiskNarrativeDetails(risk: ProjectRisk, concern: RiskRagStatus, reason?: string | null): string {
+export function getRiskActionStateDrivers(risk: Pick<ProjectRisk,
+	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+>, now = new Date()): RiskActionStateDriver[] {
+	if (!isActiveRiskStatus(risk.status)) {
+		return [{
+			tone: 'neutral',
+			message: `${riskLifecycleLabel(risk.status)} risks do not drive active risk action state.`,
+		}];
+	}
+
+	const exposure = deriveWatchtowerDefaultRiskExposureTone(risk.probability, risk.impact);
+	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
+	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
+	const mitigation = trimmedText(risk.mitigation_plan);
+	const contingency = trimmedText(risk.contingency_plan);
+	const updated = staleUpdateTone(risk.updated_at, now);
+	const status = trimmedText(risk.status).toLowerCase();
+	const drivers: RiskActionStateDriver[] = [];
+
+	if (exposure === 'red' || exposure === 'amber') {
+		drivers.push({
+			tone: exposure,
+			message: `Exposure is ${riskAssuranceToneLabel(exposure)} using the Watchtower default assessment.`,
+		});
+	}
+	if (!risk.owner_id) drivers.push({ tone: 'red', message: 'Risk owner is missing.' });
+	if (actionerTone(risk.status, risk.actioner_id) === 'red') drivers.push({ tone: 'red', message: 'Actioner is missing.' });
+	if (review.tone === 'red') drivers.push({ tone: 'red', message: 'Review date is overdue.' });
+	if (review.tone === 'amber') drivers.push({ tone: 'amber', message: 'Review date is missing.' });
+	if (due.tone === 'red') drivers.push({ tone: 'red', message: 'Due date is overdue.' });
+	if (due.tone === 'amber') drivers.push({ tone: 'amber', message: 'Due date is missing.' });
+	if (!mitigation && exposure === 'red') drivers.push({ tone: 'red', message: 'Mitigation plan is missing for Red exposure.' });
+	if (!mitigation && exposure === 'amber') drivers.push({ tone: 'amber', message: 'Mitigation plan is missing for Amber exposure.' });
+	if (!contingency) drivers.push({ tone: 'red', message: 'Contingency plan is missing.' });
+	if (status === 'materialised') drivers.push({ tone: 'red', message: 'Lifecycle status is Materialised.' });
+	if (status === 'escalated' && (!risk.owner_id || !risk.actioner_id || review.tone !== 'green')) {
+		drivers.push({ tone: 'red', message: 'Escalated risks need owner, actioner and current review data.' });
+	}
+	if (updated === 'red') drivers.push({ tone: 'red', message: 'Risk has not been updated recently.' });
+	if (updated === 'amber') drivers.push({ tone: 'amber', message: 'Risk update is getting stale.' });
+
+	return drivers.length > 0
+		? drivers
+		: [{ tone: 'green', message: 'No current action-state drivers found from exposure, governance data or review cadence.' }];
+}
+
+function buildRiskNarrativeDetails(risk: ProjectRisk, actionState: RiskActionStateTone, reason?: string | null): string {
 	return compactSentence([
-		`Concern: ${riskDisplayLabel(concern)}.`,
+		`Action state: ${riskDisplayLabel(actionState)}.`,
 		`Lifecycle status: ${riskDisplayLabel(risk.status)}.`,
 		reason ? `Reason: ${reason}` : null,
 	]);
 }
 
 async function createRiskRaisedNarrativeEntry(risk: ProjectRisk, workspaceRole: WorkspaceRole, client, now = new Date()) {
-	const concern = deriveRiskConcernTone(risk, now);
+	const actionState = deriveRiskActionStateTone(risk, now);
 	return createProjectNarrativeEntry(
 		{
 			projectId: risk.project_id,
 			sourceType: 'risk',
 			sourceRecordId: risk.risk_id,
 			sourceRef: risk.risk_ref,
-			attentionLevel: riskConcernToNarrativeAttention(concern),
+			attentionLevel: riskActionStateToNarrativeAttention(actionState),
 			title: `${RISK_RAISED_NARRATIVE_PREFIX} ${risk.risk_ref} — ${risk.title}`,
-			details: buildRiskNarrativeDetails(risk, concern),
+			details: buildRiskNarrativeDetails(risk, actionState),
 		},
 		workspaceRole,
 		client,
@@ -526,14 +588,14 @@ async function createRiskBecameRedNarrativeEntry(risk: ProjectRisk, workspaceRol
 }
 
 async function createRiskOpenedNarrativeEntry(risk: ProjectRisk, workspaceRole: WorkspaceRole, client, now = new Date()) {
-	const concern = deriveRiskConcernTone(risk, now);
+	const actionState = deriveRiskActionStateTone(risk, now);
 	return createProjectNarrativeEntry(
 		{
 			projectId: risk.project_id,
 			sourceType: 'risk',
 			sourceRecordId: risk.risk_id,
 			sourceRef: risk.risk_ref,
-			attentionLevel: riskConcernToNarrativeAttention(concern),
+			attentionLevel: riskActionStateToNarrativeAttention(actionState),
 			title: `${RISK_OPENED_NARRATIVE_PREFIX} ${risk.risk_ref}`,
 			details: `${risk.risk_ref} was opened for active management.`,
 		},
@@ -598,7 +660,7 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 	const isActiveLifecycle = isActiveRiskStatus(risk.status);
 	const description = trimmedText(risk.description);
 	const descriptionTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : !description ? 'red' : description.length < 30 ? 'amber' : 'green';
-	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
+	const exposure = deriveWatchtowerDefaultRiskExposureTone(risk.probability, risk.impact);
 	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
@@ -607,7 +669,6 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 	const contingencyTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : contingency ? 'green' : 'red';
 	const actionResponsibilityTone = actionerTone(risk.status, risk.actioner_id);
 	const updatedTone = isActiveLifecycle ? staleUpdateTone(risk.updated_at, now) : 'neutral';
-	const concernTone = isActiveLifecycle ? deriveRiskConcernTone(risk, now) : 'neutral';
 	const reviewTone = isActiveLifecycle ? review.tone : 'neutral';
 	const dueTone = isActiveLifecycle ? due.tone : 'neutral';
 	const ownerTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : risk.owner_id ? 'green' : 'red';
@@ -630,20 +691,11 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 			prompt: lifecycleStatusTone(risk.status) === 'red' ? 'Review status' : lifecycleStatusTone(risk.status) === 'amber' ? 'Confirm status' : undefined,
 		},
 		{
-			id: 'overall-concern',
-			title: 'Overall concern',
-			tone: concernTone,
-			statusLabel: riskAssuranceToneLabel(concernTone),
-			value: isActiveLifecycle
-				? `Derived from ${riskAssuranceToneLabel(exposure)} exposure and ${riskAssuranceToneLabel(deriveRiskAssuranceTone(risk, now))} assurance.`
-				: `${riskLifecycleLabel(risk.status)} risks are neutral and do not drive active assurance.`,
-		},
-		{
 			id: 'exposure',
 			title: 'Exposure',
 			tone: exposure,
 			statusLabel: riskAssuranceToneLabel(exposure),
-			value: `${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact`,
+			value: `Watchtower default assessment: ${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact`,
 			prompt: exposure === 'red' ? 'Review exposure' : undefined,
 		},
 		{
@@ -927,7 +979,7 @@ function normaliseRiskPayload(input: RiskFormInput, now = new Date()) {
 	};
 	return {
 		...payload,
-		rag_status: deriveRiskConcernTone({
+		rag_status: deriveRiskActionStateTone({
 			...payload,
 			updated_at: now.toISOString(),
 		}),
@@ -1013,7 +1065,7 @@ export async function updateProjectRisk(
 
 	if (existingRiskError) throw existingRiskError;
 	if (!existingRiskData) throw new Error('Risk not found or you do not have access.');
-	const previousConcern = deriveRiskConcernTone(existingRiskData as ProjectRisk, eventTime);
+	const previousActionState = deriveRiskActionStateTone(existingRiskData as ProjectRisk, eventTime);
 
 	const { data, error } = await client
 		.from('project_risks')
@@ -1028,7 +1080,7 @@ export async function updateProjectRisk(
 
 	if (error) throw error;
 	if (!data) throw new Error('Risk not found or you do not have access.');
-	const nextConcern = deriveRiskConcernTone(data as ProjectRisk, eventTime);
+	const nextActionState = deriveRiskActionStateTone(data as ProjectRisk, eventTime);
 	const previousLifecycle = riskLifecycleCategory((existingRiskData as ProjectRisk).status);
 	const nextLifecycle = riskLifecycleCategory((data as ProjectRisk).status);
 	if (previousLifecycle === 'draft' && nextLifecycle === 'active') {
@@ -1037,7 +1089,7 @@ export async function updateProjectRisk(
 		await createRiskClosedNarrativeEntry(data as ProjectRisk, null, workspace.role, client);
 	} else if (previousLifecycle === 'closed' && nextLifecycle === 'active') {
 		await createRiskReopenedNarrativeEntry(data as ProjectRisk, null, workspace.role, client);
-	} else if (nextLifecycle === 'active' && !isRedRiskConcern(previousConcern) && isRedRiskConcern(nextConcern)) {
+	} else if (nextLifecycle === 'active' && !isRedRiskActionState(previousActionState) && isRedRiskActionState(nextActionState)) {
 		await createRiskBecameRedNarrativeEntry(data as ProjectRisk, workspace.role, client, eventTime);
 	}
 	const [risk] = await enrichRiskProfiles([data as ProjectRisk], client);
@@ -1067,7 +1119,7 @@ export async function transitionProjectRiskLifecycle(
 	const eventTime = new Date();
 	const nextPayload = {
 		status: nextStatus,
-		rag_status: deriveRiskConcernTone({ ...existingRisk, status: nextStatus, updated_at: eventTime.toISOString() }, eventTime),
+		rag_status: deriveRiskActionStateTone({ ...existingRisk, status: nextStatus, updated_at: eventTime.toISOString() }, eventTime),
 	};
 	const { data, error } = await client
 		.from('project_risks')
