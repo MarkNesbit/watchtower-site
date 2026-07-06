@@ -16,9 +16,13 @@ export type RiskLevel = (typeof RISK_LEVELS)[number];
 
 export const RISK_RAG_STATUSES = ['blue', 'green', 'amber', 'red'] as const;
 export type RiskRagStatus = (typeof RISK_RAG_STATUSES)[number];
+export const RISK_EXPOSURES = ['low', 'medium', 'high', 'critical'] as const;
+export type RiskExposure = (typeof RISK_EXPOSURES)[number];
+export type RiskExposureTone = 'risk-low' | 'risk-medium' | 'risk-high' | 'risk-critical';
 export type RiskAssuranceTone = 'green' | 'amber' | 'red' | 'neutral';
 export type RiskActionStateTone = 'green' | 'amber' | 'red';
 export type RiskDashboardAssuranceTone = RiskAssuranceTone;
+export type RiskDisplayTone = RiskAssuranceTone | RiskExposureTone;
 
 const RISK_SEQUENCE_CONSTRAINT = 'project_risks_project_sequence_key';
 const RISK_REF_CONSTRAINT = 'project_risks_project_ref_key';
@@ -77,7 +81,7 @@ export type ProjectRiskComment = {
 export type RiskAssuranceBlock = {
 	id: string;
 	title: string;
-	tone: RiskAssuranceTone;
+	tone: RiskDisplayTone;
 	statusLabel: string;
 	value: string;
 	prompt?: string;
@@ -303,6 +307,27 @@ export function riskAssuranceToneLabel(tone: RiskAssuranceTone): string {
 	return 'Neutral';
 }
 
+export function riskExposureLabel(exposure: RiskExposure): string {
+	if (exposure === 'critical') return 'Critical';
+	if (exposure === 'high') return 'High';
+	if (exposure === 'medium') return 'Medium';
+	return 'Low';
+}
+
+export function riskExposureTone(exposure: RiskExposure): RiskExposureTone {
+	if (exposure === 'critical') return 'risk-critical';
+	if (exposure === 'high') return 'risk-high';
+	if (exposure === 'medium') return 'risk-medium';
+	return 'risk-low';
+}
+
+export function riskExposureToneLabel(tone: RiskExposureTone): string {
+	if (tone === 'risk-critical') return 'Critical';
+	if (tone === 'risk-high') return 'High';
+	if (tone === 'risk-medium') return 'Medium';
+	return 'Low';
+}
+
 export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
 	if (typeof value !== 'string' || !value.trim()) return fallback;
 	return value
@@ -355,19 +380,23 @@ function riskReviewDateIsOverdue(value: unknown, now: Date): boolean {
 	return Boolean(date && date < startOfUtcDay(now));
 }
 
-export function deriveWatchtowerDefaultRiskExposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
-	if (!RISK_LEVELS.includes(probability as RiskLevel) || !RISK_LEVELS.includes(impact as RiskLevel)) return 'red';
-	if (probability === 'high' && impact === 'high') return 'red';
-	if (probability === 'low' && impact === 'low') return 'green';
+export function deriveWatchtowerDefaultRiskExposure(probability: unknown, impact: unknown): RiskExposure {
+	if (!RISK_LEVELS.includes(probability as RiskLevel) || !RISK_LEVELS.includes(impact as RiskLevel)) return 'critical';
+	if (probability === 'high' && impact === 'high') return 'critical';
+	if (probability === 'low' && impact === 'low') return 'low';
 	if (
 		(probability === 'medium' && impact === 'high') ||
 		(probability === 'high' && impact === 'medium')
-	) return 'red';
-	if (probability === 'high' || impact === 'high' || probability === 'medium' || impact === 'medium') return 'amber';
-	return 'green';
+	) return 'high';
+	if (probability === 'high' || impact === 'high' || probability === 'medium' || impact === 'medium') return 'medium';
+	return 'low';
 }
 
-export function deriveRiskExposureTone(probability: unknown, impact: unknown): RiskAssuranceTone {
+export function deriveWatchtowerDefaultRiskExposureTone(probability: unknown, impact: unknown): RiskExposureTone {
+	return riskExposureTone(deriveWatchtowerDefaultRiskExposure(probability, impact));
+}
+
+export function deriveRiskExposureTone(probability: unknown, impact: unknown): RiskExposureTone {
 	return deriveWatchtowerDefaultRiskExposureTone(probability, impact);
 }
 
@@ -417,13 +446,13 @@ export function deriveRiskAssuranceTone(risk: Pick<ProjectRisk,
 	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
 >, now = new Date()): RiskAssuranceTone {
 	if (!isActiveRiskStatus(risk.status)) return 'neutral';
-	const exposure = deriveWatchtowerDefaultRiskExposureTone(risk.probability, risk.impact);
+	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
 	const status = trimmedText(risk.status).toLowerCase();
 	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
 	const contingency = trimmedText(risk.contingency_plan);
-	const missingMitigationTone: RiskAssuranceTone = mitigation ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'green';
+	const missingMitigationTone: RiskAssuranceTone = mitigation ? 'green' : exposure === 'critical' ? 'red' : exposure === 'high' || exposure === 'medium' ? 'amber' : 'green';
 	const updated = staleUpdateTone(risk.updated_at, now);
 	const statusTone: RiskAssuranceTone = status === 'materialised'
 		? 'red'
@@ -446,17 +475,10 @@ export function deriveRiskAssuranceTone(risk: Pick<ProjectRisk,
 export function deriveRiskActionStateTone(risk: Pick<ProjectRisk,
 	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
 >, now = new Date()): RiskActionStateTone {
-	const exposure = deriveWatchtowerDefaultRiskExposureTone(risk.probability, risk.impact);
 	const assurance = deriveRiskAssuranceTone(risk, now);
-	if (assurance === 'red' || exposure === 'red') return 'red';
-	if (assurance === 'amber' || exposure === 'amber') return 'amber';
+	if (assurance === 'red') return 'red';
+	if (assurance === 'amber') return 'amber';
 	return 'green';
-}
-
-export function deriveRiskConcernTone(risk: Pick<ProjectRisk,
-	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
->, now = new Date()): RiskRagStatus {
-	return deriveRiskActionStateTone(risk, now);
 }
 
 export function isDashboardActiveRiskStatus(status: unknown): boolean {
@@ -489,11 +511,12 @@ export function deriveProjectRiskDashboardAssuranceTone(
 }
 
 export function deriveRiskRedNarrativeReason(risk: Pick<ProjectRisk,
-	'owner_id' | 'actioner_id' | 'review_date' | 'contingency_plan' | 'probability' | 'impact'
+	'owner_id' | 'actioner_id' | 'review_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact'
 >, now = new Date()): string | null {
-	if (deriveRiskExposureTone(risk.probability, risk.impact) === 'red') return 'Exposure is Red.';
+	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
 	if (!risk.owner_id) return 'Owner is missing.';
 	if (!risk.actioner_id) return 'Actioner is missing.';
+	if (exposure === 'critical' && !trimmedText(risk.mitigation_plan)) return 'Mitigation plan is missing for Critical exposure.';
 	if (!trimmedText(risk.contingency_plan)) return 'Contingency plan is missing.';
 	if (riskReviewDateIsOverdue(risk.review_date, now)) return 'Review date is overdue.';
 	return null;
@@ -509,7 +532,7 @@ export function getRiskActionStateDrivers(risk: Pick<ProjectRisk,
 		}];
 	}
 
-	const exposure = deriveWatchtowerDefaultRiskExposureTone(risk.probability, risk.impact);
+	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
 	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
@@ -518,20 +541,14 @@ export function getRiskActionStateDrivers(risk: Pick<ProjectRisk,
 	const status = trimmedText(risk.status).toLowerCase();
 	const drivers: RiskActionStateDriver[] = [];
 
-	if (exposure === 'red' || exposure === 'amber') {
-		drivers.push({
-			tone: exposure,
-			message: `Exposure is ${riskAssuranceToneLabel(exposure)} using the Watchtower default assessment.`,
-		});
-	}
 	if (!risk.owner_id) drivers.push({ tone: 'red', message: 'Risk owner is missing.' });
 	if (actionerTone(risk.status, risk.actioner_id) === 'red') drivers.push({ tone: 'red', message: 'Actioner is missing.' });
 	if (review.tone === 'red') drivers.push({ tone: 'red', message: 'Review date is overdue.' });
 	if (review.tone === 'amber') drivers.push({ tone: 'amber', message: 'Review date is missing.' });
 	if (due.tone === 'red') drivers.push({ tone: 'red', message: 'Due date is overdue.' });
 	if (due.tone === 'amber') drivers.push({ tone: 'amber', message: 'Due date is missing.' });
-	if (!mitigation && exposure === 'red') drivers.push({ tone: 'red', message: 'Mitigation plan is missing for Red exposure.' });
-	if (!mitigation && exposure === 'amber') drivers.push({ tone: 'amber', message: 'Mitigation plan is missing for Amber exposure.' });
+	if (!mitigation && exposure === 'critical') drivers.push({ tone: 'red', message: 'Mitigation plan is missing for Critical exposure.' });
+	if (!mitigation && (exposure === 'high' || exposure === 'medium')) drivers.push({ tone: 'amber', message: `Mitigation plan is missing for ${riskExposureLabel(exposure)} exposure.` });
 	if (!contingency) drivers.push({ tone: 'red', message: 'Contingency plan is missing.' });
 	if (status === 'materialised') drivers.push({ tone: 'red', message: 'Lifecycle status is Materialised.' });
 	if (status === 'escalated' && (!risk.owner_id || !risk.actioner_id || review.tone !== 'green')) {
@@ -660,12 +677,13 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 	const isActiveLifecycle = isActiveRiskStatus(risk.status);
 	const description = trimmedText(risk.description);
 	const descriptionTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : !description ? 'red' : description.length < 30 ? 'amber' : 'green';
-	const exposure = deriveWatchtowerDefaultRiskExposureTone(risk.probability, risk.impact);
+	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
+	const exposureTone = riskExposureTone(exposure);
 	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
 	const contingency = trimmedText(risk.contingency_plan);
-	const mitigationTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : mitigation ? 'green' : exposure === 'red' ? 'red' : exposure === 'amber' ? 'amber' : 'green';
+	const mitigationTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : mitigation ? 'green' : exposure === 'critical' ? 'red' : exposure === 'high' || exposure === 'medium' ? 'amber' : 'green';
 	const contingencyTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : contingency ? 'green' : 'red';
 	const actionResponsibilityTone = actionerTone(risk.status, risk.actioner_id);
 	const updatedTone = isActiveLifecycle ? staleUpdateTone(risk.updated_at, now) : 'neutral';
@@ -693,10 +711,10 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 		{
 			id: 'exposure',
 			title: 'Exposure',
-			tone: exposure,
-			statusLabel: riskAssuranceToneLabel(exposure),
-			value: `Watchtower default assessment: ${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact`,
-			prompt: exposure === 'red' ? 'Review exposure' : undefined,
+			tone: exposureTone,
+			statusLabel: riskExposureLabel(exposure),
+			value: `${riskExposureLabel(exposure)} exposure. Watchtower default assessment: ${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact`,
+			prompt: exposure === 'critical' ? 'Review exposure' : undefined,
 		},
 		{
 			id: 'owner',

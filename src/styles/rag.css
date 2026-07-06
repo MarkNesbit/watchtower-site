@@ -26,6 +26,18 @@
 	--rag-unknown-accent: #a8b3c2;
 	--rag-unknown-border: rgba(168, 179, 194, 0.55);
 	--rag-unknown-background: rgba(148, 163, 184, 0.10);
+	--risk-exposure-critical-accent: #ff5f5f;
+	--risk-exposure-critical-border: rgba(255, 95, 95, 0.78);
+	--risk-exposure-critical-background: rgba(255, 95, 95, 0.12);
+	--risk-exposure-high-accent: #ff9f1c;
+	--risk-exposure-high-border: rgba(255, 159, 28, 0.74);
+	--risk-exposure-high-background: rgba(255, 159, 28, 0.13);
+	--risk-exposure-medium-accent: #f6c453;
+	--risk-exposure-medium-border: rgba(246, 196, 83, 0.78);
+	--risk-exposure-medium-background: rgba(246, 196, 83, 0.12);
+	--risk-exposure-low-accent: #fde047;
+	--risk-exposure-low-border: rgba(253, 224, 71, 0.72);
+	--risk-exposure-low-background: rgba(253, 224, 71, 0.12);
 	--rag-reference: #00a0ff;
 	--rag-reference-border: rgba(0, 160, 255, 0.64);
 	--rag-reference-background: rgba(0, 160, 255, 0.12);
@@ -95,6 +107,42 @@
 	--rag-accent: var(--rag-reference);
 	--rag-border: var(--rag-reference-border);
 	--rag-background: var(--rag-reference-background);
+}
+
+.rag-pill--risk-critical,
+.rag-card--risk-critical,
+.rag-panel--risk-critical {
+	--rag-tone: var(--risk-exposure-critical-accent);
+	--rag-accent: var(--risk-exposure-critical-accent);
+	--rag-border: var(--risk-exposure-critical-border);
+	--rag-background: var(--risk-exposure-critical-background);
+}
+
+.rag-pill--risk-high,
+.rag-card--risk-high,
+.rag-panel--risk-high {
+	--rag-tone: var(--risk-exposure-high-accent);
+	--rag-accent: var(--risk-exposure-high-accent);
+	--rag-border: var(--risk-exposure-high-border);
+	--rag-background: var(--risk-exposure-high-background);
+}
+
+.rag-pill--risk-medium,
+.rag-card--risk-medium,
+.rag-panel--risk-medium {
+	--rag-tone: var(--risk-exposure-medium-accent);
+	--rag-accent: var(--risk-exposure-medium-accent);
+	--rag-border: var(--risk-exposure-medium-border);
+	--rag-background: var(--risk-exposure-medium-background);
+}
+
+.rag-pill--risk-low,
+.rag-card--risk-low,
+.rag-panel--risk-low {
+	--rag-tone: var(--risk-exposure-low-accent);
+	--rag-accent: var(--risk-exposure-low-accent);
+	--rag-border: var(--risk-exposure-low-border);
+	--rag-background: var(--risk-exposure-low-background);
 }
 
 .rag-tile--attention-red {

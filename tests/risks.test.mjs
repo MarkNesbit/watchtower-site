@@ -8,6 +8,7 @@ import {
 	deriveRiskActionStateTone,
 	deriveProjectRiskDashboardAssuranceTone,
 	deriveRiskAssuranceTone,
+	deriveWatchtowerDefaultRiskExposure,
 	deriveRiskExposureTone,
 	deriveRiskReferenceTone,
 	deriveWatchtowerDefaultRiskExposureTone,
@@ -22,6 +23,7 @@ import {
 	listProjectRisksByIds,
 	listProjectRisks,
 	riskDisplayLabel,
+	riskExposureToneLabel,
 	riskLifecycleCategory,
 	riskLifecycleLabel,
 	riskProfileName,
@@ -490,18 +492,44 @@ test('Risk create/edit validation covers references, required fields and dates',
 });
 
 test('Risk exposure derives from probability and impact through the Watchtower default assessment', () => {
-	assert.equal(deriveRiskExposureTone('low', 'low'), 'green');
-	assert.equal(deriveRiskExposureTone('low', 'medium'), 'amber');
-	assert.equal(deriveRiskExposureTone('medium', 'low'), 'amber');
-	assert.equal(deriveRiskExposureTone('medium', 'medium'), 'amber');
-	assert.equal(deriveRiskExposureTone('high', 'low'), 'amber');
-	assert.equal(deriveRiskExposureTone('low', 'high'), 'amber');
-	assert.equal(deriveRiskExposureTone('medium', 'high'), 'red');
-	assert.equal(deriveRiskExposureTone('high', 'medium'), 'red');
-	assert.equal(deriveRiskExposureTone('high', 'high'), 'red');
-	assert.equal(deriveRiskExposureTone('', 'low'), 'red');
-	assert.equal(deriveRiskExposureTone('low', undefined), 'red');
-	assert.equal(deriveWatchtowerDefaultRiskExposureTone('high', 'medium'), 'red');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('low', 'low'), 'low');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('low', 'medium'), 'medium');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('medium', 'low'), 'medium');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('medium', 'medium'), 'medium');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('high', 'low'), 'medium');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('low', 'high'), 'medium');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('medium', 'high'), 'high');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('high', 'medium'), 'high');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('high', 'high'), 'critical');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('', 'low'), 'critical');
+	assert.equal(deriveWatchtowerDefaultRiskExposure('low', undefined), 'critical');
+	assert.equal(deriveRiskExposureTone('low', 'low'), 'risk-low');
+	assert.equal(deriveRiskExposureTone('high', 'high'), 'risk-critical');
+	assert.equal(deriveWatchtowerDefaultRiskExposureTone('high', 'medium'), 'risk-high');
+	assert.equal(riskExposureToneLabel(deriveRiskExposureTone('low', 'low')), 'Low');
+});
+
+test('Watchtower default risk exposure display does not use green for Low exposure', async () => {
+	const styles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
+	const component = await readFile(new URL('../src/components/app/RagReferencePill.astro', import.meta.url), 'utf8');
+	const lowExposureRule = styles.slice(styles.indexOf('.rag-pill--risk-low,'), styles.indexOf('.rag-tile--attention-red'));
+
+	assert.match(styles, /--risk-exposure-low-accent: #fde047/);
+	assert.match(styles, /\.rag-pill--risk-low,[\s\S]*?--rag-accent: var\(--risk-exposure-low-accent\);/);
+	assert.doesNotMatch(styles, /risk-exposure-low-accent: #6ee7a8/);
+	assert.doesNotMatch(lowExposureRule, /--rag-green/);
+	assert.match(component, /'risk-low'/);
+	assert.equal(riskExposureToneLabel('risk-low'), 'Low');
+});
+
+test('Risk terminology contract leaves project health as Unknown', async () => {
+	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+	const projectDetails = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/details.astro', import.meta.url), 'utf8');
+	const projectList = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
+	const combined = [dashboard, projectDetails, projectList].join('\n');
+
+	assert.match(combined, /projectHealthLabel = 'Unknown'/);
+	assert.doesNotMatch(combined, /healthTone\(projectAction|projectActionStates.*health|deriveRiskExposureTone\(.*health|deriveRiskActionStateTone\(.*health/i);
 });
 
 test('Risk assurance derives from governance and control quality signals', () => {
@@ -519,18 +547,18 @@ test('Risk assurance derives from governance and control quality signals', () =>
 	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'escalated' }), now), 'green');
 });
 
-test('Risk action state uses exposure plus governance assurance drivers', () => {
+test('Risk action state uses governance assurance drivers separately from exposure', () => {
 	const now = new Date('2026-06-28T12:00:00Z');
 	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ owner_id: null }), now), 'red');
-	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ probability: 'medium', impact: 'medium' }), now), 'amber');
-	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ probability: 'high', impact: 'high' }), now), 'red');
+	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ probability: 'medium', impact: 'medium' }), now), 'green');
+	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ probability: 'high', impact: 'high' }), now), 'green');
 	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ due_date: null }), now), 'amber');
 	assert.equal(deriveRiskActionStateTone(assuredRiskFacts(), now), 'green');
 });
 
 test('Risk action state rationale names drivers separately from exposure display', () => {
 	const now = new Date('2026-06-28T12:00:00Z');
-	const highExposureManagedRisk = assuredRiskFacts({ probability: 'high', impact: 'high' });
+	const criticalExposureManagedRisk = assuredRiskFacts({ probability: 'high', impact: 'high' });
 	const lowerExposureGovernanceGap = assuredRiskFacts({
 		probability: 'low',
 		impact: 'low',
@@ -538,12 +566,16 @@ test('Risk action state rationale names drivers separately from exposure display
 		review_date: '2026-06-01',
 	});
 
-	const highExposureDrivers = getRiskActionStateDrivers(highExposureManagedRisk, now).map((driver) => driver.message);
 	const governanceDrivers = getRiskActionStateDrivers(lowerExposureGovernanceGap, now);
 
-	assert.equal(deriveRiskExposureTone(highExposureManagedRisk.probability, highExposureManagedRisk.impact), 'red');
-	assert.ok(highExposureDrivers.includes('Exposure is Red using the Watchtower default assessment.'));
-	assert.equal(deriveRiskExposureTone(lowerExposureGovernanceGap.probability, lowerExposureGovernanceGap.impact), 'green');
+	assert.equal(deriveRiskExposureTone(criticalExposureManagedRisk.probability, criticalExposureManagedRisk.impact), 'risk-critical');
+	assert.equal(riskExposureToneLabel(deriveRiskExposureTone(criticalExposureManagedRisk.probability, criticalExposureManagedRisk.impact)), 'Critical');
+	assert.equal(deriveRiskActionStateTone(criticalExposureManagedRisk, now), 'green');
+	assert.deepEqual(getRiskActionStateDrivers(criticalExposureManagedRisk, now), [{
+		tone: 'green',
+		message: 'No current action-state drivers found from exposure, governance data or review cadence.',
+	}]);
+	assert.equal(deriveRiskExposureTone(lowerExposureGovernanceGap.probability, lowerExposureGovernanceGap.impact), 'risk-low');
 	assert.equal(deriveRiskActionStateTone(lowerExposureGovernanceGap, now), 'red');
 	assert.ok(governanceDrivers.some((driver) => driver.message === 'Risk owner is missing.'));
 	assert.ok(governanceDrivers.some((driver) => driver.message === 'Review date is overdue.'));
@@ -559,7 +591,7 @@ test('Long risk text does not alter exposure or action state', () => {
 		contingency_plan: 'Contingency step with named fallback owners and criteria. '.repeat(20),
 	});
 
-	assert.equal(deriveRiskExposureTone(longManagedRisk.probability, longManagedRisk.impact), 'green');
+	assert.equal(deriveRiskExposureTone(longManagedRisk.probability, longManagedRisk.impact), 'risk-low');
 	assert.equal(deriveRiskActionStateTone(longManagedRisk, now), 'green');
 	assert.equal(deriveRiskAssuranceTone(longManagedRisk, now), 'green');
 });
@@ -620,13 +652,13 @@ test('Draft and Closed risk display is neutral while exposure remains available'
 		risk_sequence: 10,
 		title: 'Draft risk',
 		description: '',
-		rag_status: 'red',
+		rag_status: 'green',
 		created_by: 'user-1',
 		created_at: '2026-06-01T10:00:00Z',
 		...draftRisk,
 	}, now).map((block) => [block.id, block]));
 
-	assert.equal(deriveRiskExposureTone(draftRisk.probability, draftRisk.impact), 'red');
+	assert.equal(deriveRiskExposureTone(draftRisk.probability, draftRisk.impact), 'risk-critical');
 	assert.equal(deriveRiskAssuranceTone(draftRisk, now), 'neutral');
 	assert.equal(deriveRiskAssuranceTone(closedRisk, now), 'neutral');
 	assert.equal(deriveRiskReferenceTone(draftRisk, now), 'neutral');
@@ -638,7 +670,8 @@ test('Draft and Closed risk display is neutral while exposure remains available'
 	assert.equal(draftBlocks.get('review-date').tone, 'neutral');
 	assert.equal(draftBlocks.get('mitigation').tone, 'neutral');
 	assert.equal(draftBlocks.get('contingency').tone, 'neutral');
-	assert.equal(draftBlocks.get('exposure').tone, 'red');
+	assert.equal(draftBlocks.get('exposure').tone, 'risk-critical');
+	assert.equal(draftBlocks.get('exposure').statusLabel, 'Critical');
 });
 
 test('Project dashboard risk icon is not driven by exposure', () => {
@@ -650,7 +683,7 @@ test('Project dashboard risk icon is not driven by exposure', () => {
 		contingency_plan: 'Escalate through steering group.',
 	});
 
-	assert.equal(deriveRiskExposureTone(highExposureWithGreenAssurance.probability, highExposureWithGreenAssurance.impact), 'red');
+	assert.equal(deriveRiskExposureTone(highExposureWithGreenAssurance.probability, highExposureWithGreenAssurance.impact), 'risk-critical');
 	assert.equal(deriveRiskAssuranceTone(highExposureWithGreenAssurance, now), 'green');
 	assert.equal(deriveProjectRiskDashboardAssuranceTone([highExposureWithGreenAssurance], now), 'green');
 });
@@ -682,8 +715,10 @@ test('Risk assurance blocks derive MVP quality signals without using manual RAG 
 	assert.equal(byId.get('description').tone, 'red');
 	assert.equal(byId.get('owner').tone, 'red');
 	assert.equal(byId.get('review-date').tone, 'red');
-	assert.equal(byId.get('exposure').tone, 'red');
+	assert.equal(byId.get('exposure').tone, 'risk-critical');
+	assert.equal(byId.get('exposure').statusLabel, 'Critical');
 	assert.match(byId.get('exposure').value, /Watchtower default assessment: High probability \/ High impact/);
+	assert.match(byId.get('exposure').value, /^Critical exposure\./);
 	assert.equal(byId.has('overall-concern'), false);
 	assert.ok(getRiskActionStateDrivers({
 		status: 'open',
@@ -929,7 +964,7 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		status: 'open',
 		probability: 'high',
 		impact: 'medium',
-		rag_status: 'red',
+		rag_status: 'green',
 		owner_id: 'owner-1',
 		actioner_id: 'actioner-1',
 		review_date: '2026-07-10',
@@ -944,9 +979,9 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		source_type: 'risk',
 		source_record_id: 'risk-2',
 		source_ref: 'Risk-HHH-002',
-		attention_level: 'red',
+		attention_level: 'amber',
 		title: 'Risk raised: Risk-HHH-002 — Supplier delay',
-		details: 'Action state: Red. Lifecycle status: Open.',
+		details: 'Action state: Amber. Lifecycle status: Open.',
 		created_timezone: null,
 	});
 	assert.ok(!client.calls.some((call) => call[0] === 'from' && ['project_risk_notes', 'notification_events', 'attention_items'].includes(call[1])));
@@ -1044,7 +1079,7 @@ test('Creating a Red risk creates only the raised narrative entry', async () => 
 	assert.equal(narrativeCalls[0][2].source_record_id, 'risk-2');
 });
 
-test('Updating an existing non-Red risk to Red creates a source-linked narrative entry', async () => {
+test('Updating an existing non-Red risk to Red action state creates a source-linked narrative entry', async () => {
 	const greenRisk = assuredRiskFacts({
 		title: 'Supplier delay',
 		risk_id: 'risk-1',
@@ -1064,7 +1099,7 @@ test('Updating an existing non-Red risk to Red creates a source-linked narrative
 		status: 'open',
 		probability: 'high',
 		impact: 'high',
-		ownerId: 'owner-1',
+		ownerId: '',
 		actionerId: 'actioner-1',
 		reviewDate: '2026-07-10',
 		dueDate: '2026-08-01',
@@ -1081,7 +1116,7 @@ test('Updating an existing non-Red risk to Red creates a source-linked narrative
 		source_ref: 'Risk-HHH-001',
 		attention_level: 'red',
 		title: 'Risk became Red: Risk-HHH-001 — Supplier delay',
-		details: 'Action state: Red. Lifecycle status: Open. Reason: Exposure is Red.',
+		details: 'Action state: Red. Lifecycle status: Open. Reason: Owner is missing.',
 		created_timezone: null,
 	});
 });
@@ -1140,7 +1175,7 @@ test('Lifecycle transition helper opens closes and reopens risks with notes and 
 	updateCall = closeClient.calls.find((call) => call[0] === 'update' && call[1] === 'project_risks');
 	noteCall = closeClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_risk_notes');
 	narrativeCall = closeClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries');
-	assert.deepEqual(updateCall[2], { status: 'closed', rag_status: 'amber' });
+	assert.deepEqual(updateCall[2], { status: 'closed', rag_status: 'green' });
 	assert.equal(noteCall[2].note, 'Closure note: Mitigation completed.');
 	assert.equal(narrativeCall[2].title, 'Risk closed: Risk-HHH-001');
 	assert.equal(narrativeCall[2].attention_level, 'neutral');

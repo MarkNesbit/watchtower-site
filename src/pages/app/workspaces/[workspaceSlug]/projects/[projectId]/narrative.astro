@@ -20,6 +20,7 @@ import {
 	deriveRiskReferenceTone,
 	listProjectRisksByIds,
 	riskDisplayLabel,
+	riskExposureToneLabel,
 	riskProfileName,
 	riskReferenceStatusLabel,
 } from '../../../../../../lib/projectRisks';
@@ -213,7 +214,7 @@ const riskPreviewFor = (entry) => {
 		unavailableReason: 'The linked risk could not be loaded for this project. It may have been archived, deleted, or unavailable to your current workspace access.',
 		openHref: buildProjectRiskPath(workspaceSlug ?? '', project?.slug ?? projectSlug ?? '', entry.source_record_id),
 	};
-	const concern = deriveRiskReferenceTone(risk, new Date());
+	const actionState = deriveRiskReferenceTone(risk, new Date());
 	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
 	const assurance = deriveRiskAssuranceTone(risk, new Date());
 	return {
@@ -224,9 +225,9 @@ const riskPreviewFor = (entry) => {
 		status: riskDisplayLabel(risk.status),
 		assurance: riskDisplayLabel(assurance),
 		assuranceTone: assurance,
-		concern: riskReferenceStatusLabel(risk, new Date()),
-		concernTone: concern,
-		exposure: riskDisplayLabel(exposure),
+		actionState: riskReferenceStatusLabel(risk, new Date()),
+		actionStateTone: actionState,
+		exposure: riskExposureToneLabel(exposure),
 		exposureTone: exposure,
 		probability: riskDisplayLabel(risk.probability),
 		impact: riskDisplayLabel(risk.impact),
@@ -471,10 +472,10 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							</div>
 							<p class="narrative-risk-preview__fallback" data-detail-risk-fallback hidden></p>
 							<div class="narrative-risk-preview__signals" data-detail-risk-signals>
-								<article class="narrative-risk-signal rag-card rag-card--neutral" data-detail-risk-concern-card>
+								<article class="narrative-risk-signal rag-card rag-card--neutral" data-detail-risk-action-state-card>
 									<span>Action state</span>
-									<strong data-detail-risk-concern-value>Not available</strong>
-									<span class="attention-badge rag-pill rag-pill--neutral" data-detail-risk-concern></span>
+									<strong data-detail-risk-action-state-value>Not available</strong>
+									<span class="attention-badge rag-pill rag-pill--neutral" data-detail-risk-action-state></span>
 								</article>
 								<article class="narrative-risk-signal rag-card rag-card--neutral" data-detail-risk-exposure-card>
 									<span>Exposure</span>
@@ -676,13 +677,13 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							setText('[data-detail-risk-description]', entry.sourceRisk.description);
 							setText('[data-detail-risk-mitigation]', entry.sourceRisk.mitigation);
 							setText('[data-detail-risk-contingency]', entry.sourceRisk.contingency);
-							setText('[data-detail-risk-concern-value]', entry.sourceRisk.concern);
+							setText('[data-detail-risk-action-state-value]', entry.sourceRisk.actionState);
 							setText('[data-detail-risk-exposure-value]', entry.sourceRisk.exposure);
 							setText('[data-detail-risk-assurance-value]', entry.sourceRisk.assurance);
-							setPill('[data-detail-risk-concern]', entry.sourceRisk.concern, entry.sourceRisk.concernTone);
+							setPill('[data-detail-risk-action-state]', entry.sourceRisk.actionState, entry.sourceRisk.actionStateTone);
 							setPill('[data-detail-risk-exposure]', entry.sourceRisk.exposure, entry.sourceRisk.exposureTone);
 							setPill('[data-detail-risk-assurance]', entry.sourceRisk.assurance, entry.sourceRisk.assuranceTone);
-							setRagClass(detailModal.querySelector('[data-detail-risk-concern-card]'), 'narrative-risk-signal rag-card', entry.sourceRisk.concernTone);
+							setRagClass(detailModal.querySelector('[data-detail-risk-action-state-card]'), 'narrative-risk-signal rag-card', entry.sourceRisk.actionStateTone);
 							setRagClass(detailModal.querySelector('[data-detail-risk-exposure-card]'), 'narrative-risk-signal rag-card', entry.sourceRisk.exposureTone);
 							setRagClass(detailModal.querySelector('[data-detail-risk-assurance-card]'), 'narrative-risk-signal rag-card', entry.sourceRisk.assuranceTone);
 							const openRisk = detailModal.querySelector('[data-detail-risk-open]');

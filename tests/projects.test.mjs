@@ -144,7 +144,7 @@ test('Project list action-state helper aggregates project-area signals without c
 		mitigation_plan: 'Confirmed supplier alternate.',
 		contingency_plan: 'Escalate through steering group.',
 	});
-	assert.equal(deriveRiskExposureTone(managedHighExposureRisk.probability, managedHighExposureRisk.impact), 'red');
+	assert.equal(deriveRiskExposureTone(managedHighExposureRisk.probability, managedHighExposureRisk.impact), 'risk-critical');
 	assert.equal(deriveProjectActionState({
 		project: dashboardProjectFacts(),
 		projectDateCards: greenProjectDates,
@@ -366,7 +366,7 @@ test('Dashboard tile signal helper handles Narrative read-state and Risk attenti
 		mitigation_plan: 'Confirmed supplier alternate.',
 		contingency_plan: 'Escalate through steering group.',
 	});
-	assert.equal(deriveRiskExposureTone(managedHighExposureRisk.probability, managedHighExposureRisk.impact), 'red');
+	assert.equal(deriveRiskExposureTone(managedHighExposureRisk.probability, managedHighExposureRisk.impact), 'risk-critical');
 	assert.equal(deriveRiskTileAttentionSignal([managedHighExposureRisk], now), 'green');
 	assert.equal(deriveRiskTileAttentionSignal([attentionRiskFacts({ owner_id: null })], now), 'red');
 	assert.equal(deriveRiskTileAttentionSignal([attentionRiskFacts({ due_date: null })], now), 'amber');
