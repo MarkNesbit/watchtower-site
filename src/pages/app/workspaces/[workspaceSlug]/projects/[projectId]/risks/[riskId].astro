@@ -163,6 +163,11 @@ const blockValue = (block) => {
 	if (block.id === 'updated') return formatDateTime(risk?.updated_at, block.value);
 	return block.value;
 };
+const longTextBlockIds = new Set(['description', 'mitigation', 'contingency']);
+const LONG_TEXT_PREVIEW_THRESHOLD = 180;
+const supportsLongTextPreview = (block) => longTextBlockIds.has(block.id);
+const shouldShowFullTextDialog = (block, value) => supportsLongTextPreview(block) && value.length > LONG_TEXT_PREVIEW_THRESHOLD;
+const viewFullLabel = (block) => `View full ${block.title.toLowerCase()}`;
 const riskFormFields = risk ? {
 	title: risk.title ?? '',
 	description: risk.description ?? '',
@@ -309,162 +314,193 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					</div>
 
 					<div class="risk-assurance-grid" data-risk-assurance-blocks>
-						{assuranceBlocks.map((block) => (
-							<article class={`risk-assurance-block risk-assurance-block--${block.tone} rag-card rag-card--${block.tone}`} data-risk-assurance-block={block.id} data-assurance-tone={block.tone}>
-								{hasModalConfig(block.id) ? (
-									<>
-										<button class="risk-assurance-block__button" type="button" aria-haspopup="dialog" data-risk-dialog-open={`risk-dialog-${block.id}`}>
+						{assuranceBlocks.map((block) => {
+							const value = blockValue(block);
+							const isLongTextBlock = supportsLongTextPreview(block);
+							const hasFullTextDialog = shouldShowFullTextDialog(block, value);
+							return (
+								<article class={`risk-assurance-block risk-assurance-block--${block.tone} rag-card rag-card--${block.tone}`} data-risk-assurance-block={block.id} data-assurance-tone={block.tone}>
+									{hasModalConfig(block.id) ? (
+										<>
+											<button class="risk-assurance-block__button" type="button" aria-haspopup="dialog" data-risk-dialog-open={`risk-dialog-${block.id}`}>
+												<span class="risk-assurance-block__heading">
+													<span class="risk-assurance-block__title">{block.title}</span>
+													<RagReferencePill tone={block.tone} label={block.statusLabel} />
+												</span>
+												<span class={`risk-assurance-block__value${isLongTextBlock ? ' risk-assurance-block__value--long-text' : ''}`} data-risk-long-text-preview={isLongTextBlock ? block.id : undefined}>{value}</span>
+												{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
+											</button>
+
+											{hasFullTextDialog && (
+												<>
+													<button class="risk-assurance-block__full-text" type="button" data-risk-dialog-open={`risk-full-text-dialog-${block.id}`} data-risk-full-text-trigger={block.id}>
+														{viewFullLabel(block)}
+													</button>
+
+													<dialog class="risk-full-text-dialog" id={`risk-full-text-dialog-${block.id}`} aria-labelledby={`risk-full-text-dialog-${block.id}-title`} data-risk-full-text-dialog data-risk-modal-backdrop-blur>
+														<div class="risk-action-dialog__header">
+															<div>
+																<p class="eyebrow">{risk.risk_ref} — {risk.title}</p>
+																<h3 id={`risk-full-text-dialog-${block.id}-title`}>{block.title}</h3>
+															</div>
+															<form method="dialog">
+																<button class="risk-action-dialog__close" type="submit" aria-label="Close">x</button>
+															</form>
+														</div>
+														<div class="risk-full-text-dialog__content" data-risk-full-text-content={block.id}>
+															<p>{value}</p>
+														</div>
+														<form class="risk-full-text-dialog__actions" method="dialog">
+															<button class="button button--secondary" type="submit" data-risk-full-text-close>Close</button>
+														</form>
+													</dialog>
+												</>
+											)}
+
+											<dialog class="risk-action-dialog" id={`risk-dialog-${block.id}`} aria-labelledby={`risk-dialog-${block.id}-title`} data-risk-dialog data-risk-modal-backdrop-blur>
+												<div class="risk-action-dialog__header">
+													<div>
+														<p class="eyebrow">{block.title}</p>
+														<h3 id={`risk-dialog-${block.id}-title`}>{modalConfig(block.id).title}</h3>
+													</div>
+													<form method="dialog">
+														<button class="risk-action-dialog__close" type="submit" aria-label="Close">x</button>
+													</form>
+												</div>
+
+												{canEditRisk ? (
+													<form class="risk-action-form" method="post" action={editHref} data-risk-detail-save-form>
+														{hiddenFieldsFor(block.id).map(([name, value]) => (
+															<input type="hidden" name={name} value={value} />
+														))}
+
+												{modalHasField(block.id, 'title') && (
+													<label>
+														<span>Risk title</span>
+														<input name="title" value={riskFormFields.title} required autocomplete="off" />
+													</label>
+												)}
+
+												{modalHasField(block.id, 'description') && (
+													<label>
+														<span>Description</span>
+														<textarea name="description" rows="5">{riskFormFields.description}</textarea>
+													</label>
+												)}
+
+												{modalHasField(block.id, 'status') && (
+													<label>
+														<span>Status</span>
+														<select name="status" required>
+															{RISK_STATUSES.map((status) => <option value={status} selected={riskFormFields.status === status}>{riskDisplayLabel(status)}</option>)}
+														</select>
+													</label>
+												)}
+
+												{modalHasField(block.id, 'probability') && (
+													<label>
+														<span>Probability</span>
+														<select name="probability" required>
+															{RISK_LEVELS.map((level) => <option value={level} selected={riskFormFields.probability === level}>{riskDisplayLabel(level)}</option>)}
+														</select>
+													</label>
+												)}
+
+												{modalHasField(block.id, 'impact') && (
+													<label>
+														<span>Impact</span>
+														<select name="impact" required>
+															{RISK_LEVELS.map((level) => <option value={level} selected={riskFormFields.impact === level}>{riskDisplayLabel(level)}</option>)}
+														</select>
+													</label>
+												)}
+
+												{modalHasField(block.id, 'owner_id') && (
+													<label>
+														<span>Risk owner</span>
+														<select name="owner_id">
+															<option value="">Unassigned</option>
+															{ownerOptions.map((owner) => (
+																<option value={owner.id} selected={riskFormFields.owner_id === owner.id}>{riskProfileName(owner, `Workspace member ${owner.id.slice(0, 8)}`)}</option>
+															))}
+														</select>
+													</label>
+												)}
+
+												{modalHasField(block.id, 'actioner_id') && (
+													<label>
+														<span>Actioner</span>
+														<select name="actioner_id">
+															<option value="">Unassigned</option>
+															{ownerOptions.map((actioner) => (
+																<option value={actioner.id} selected={riskFormFields.actioner_id === actioner.id}>{riskProfileName(actioner, `Workspace member ${actioner.id.slice(0, 8)}`)}</option>
+															))}
+														</select>
+													</label>
+												)}
+
+												{modalHasField(block.id, 'review_date') && (
+													<label>
+														<span>Review date</span>
+														<div class="risk-date-quick-actions" aria-label="Review date quick actions">
+															<button type="button" data-review-date-offset="7">1 week</button>
+															<button type="button" data-review-date-offset="14">2 weeks</button>
+															<button type="button" data-review-date-manual>Manual</button>
+														</div>
+														<input name="review_date" type="date" value={riskFormFields.review_date} />
+													</label>
+												)}
+
+												{modalHasField(block.id, 'due_date') && (
+													<label>
+														<span>Due date</span>
+														<input name="due_date" type="date" value={riskFormFields.due_date} />
+													</label>
+												)}
+
+												{modalHasField(block.id, 'mitigation_plan') && (
+													<label>
+														<span>Mitigation plan</span>
+														<textarea name="mitigation_plan" rows="6">{riskFormFields.mitigation_plan}</textarea>
+													</label>
+												)}
+
+												{modalHasField(block.id, 'contingency_plan') && (
+													<label>
+														<span>Contingency plan</span>
+														<textarea name="contingency_plan" rows="6">{riskFormFields.contingency_plan}</textarea>
+													</label>
+												)}
+
+												<div class="risk-action-form__actions">
+													<button class="button button--secondary" type="button" data-risk-dialog-cancel>Cancel</button>
+													<button class="button button--primary" type="submit">{modalConfig(block.id).submit}</button>
+												</div>
+													</form>
+												) : (
+													<div class="risk-action-form" data-viewer-read-only>
+														<p>{value}</p>
+														<p>Viewer access is read-only. Risk editing is unavailable.</p>
+														<form method="dialog">
+															<button class="button button--secondary" type="submit">Close</button>
+														</form>
+													</div>
+												)}
+											</dialog>
+										</>
+									) : (
+										<div class="risk-assurance-block__button risk-assurance-block__button--static">
 											<span class="risk-assurance-block__heading">
 												<span class="risk-assurance-block__title">{block.title}</span>
 												<RagReferencePill tone={block.tone} label={block.statusLabel} />
 											</span>
-											<span class="risk-assurance-block__value">{blockValue(block)}</span>
+											<span class={`risk-assurance-block__value${isLongTextBlock ? ' risk-assurance-block__value--long-text' : ''}`} data-risk-long-text-preview={isLongTextBlock ? block.id : undefined}>{value}</span>
 											{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
-										</button>
-
-										<dialog class="risk-action-dialog" id={`risk-dialog-${block.id}`} aria-labelledby={`risk-dialog-${block.id}-title`} data-risk-dialog data-risk-modal-backdrop-blur>
-											<div class="risk-action-dialog__header">
-												<div>
-													<p class="eyebrow">{block.title}</p>
-													<h3 id={`risk-dialog-${block.id}-title`}>{modalConfig(block.id).title}</h3>
-												</div>
-												<form method="dialog">
-													<button class="risk-action-dialog__close" type="submit" aria-label="Close">x</button>
-												</form>
-											</div>
-
-											{canEditRisk ? (
-												<form class="risk-action-form" method="post" action={editHref} data-risk-detail-save-form>
-													{hiddenFieldsFor(block.id).map(([name, value]) => (
-														<input type="hidden" name={name} value={value} />
-													))}
-
-											{modalHasField(block.id, 'title') && (
-												<label>
-													<span>Risk title</span>
-													<input name="title" value={riskFormFields.title} required autocomplete="off" />
-												</label>
-											)}
-
-											{modalHasField(block.id, 'description') && (
-												<label>
-													<span>Description</span>
-													<textarea name="description" rows="5">{riskFormFields.description}</textarea>
-												</label>
-											)}
-
-											{modalHasField(block.id, 'status') && (
-												<label>
-													<span>Status</span>
-													<select name="status" required>
-														{RISK_STATUSES.map((status) => <option value={status} selected={riskFormFields.status === status}>{riskDisplayLabel(status)}</option>)}
-													</select>
-												</label>
-											)}
-
-											{modalHasField(block.id, 'probability') && (
-												<label>
-													<span>Probability</span>
-													<select name="probability" required>
-														{RISK_LEVELS.map((level) => <option value={level} selected={riskFormFields.probability === level}>{riskDisplayLabel(level)}</option>)}
-													</select>
-												</label>
-											)}
-
-											{modalHasField(block.id, 'impact') && (
-												<label>
-													<span>Impact</span>
-													<select name="impact" required>
-														{RISK_LEVELS.map((level) => <option value={level} selected={riskFormFields.impact === level}>{riskDisplayLabel(level)}</option>)}
-													</select>
-												</label>
-											)}
-
-											{modalHasField(block.id, 'owner_id') && (
-												<label>
-													<span>Risk owner</span>
-													<select name="owner_id">
-														<option value="">Unassigned</option>
-														{ownerOptions.map((owner) => (
-															<option value={owner.id} selected={riskFormFields.owner_id === owner.id}>{riskProfileName(owner, `Workspace member ${owner.id.slice(0, 8)}`)}</option>
-														))}
-													</select>
-												</label>
-											)}
-
-											{modalHasField(block.id, 'actioner_id') && (
-												<label>
-													<span>Actioner</span>
-													<select name="actioner_id">
-														<option value="">Unassigned</option>
-														{ownerOptions.map((actioner) => (
-															<option value={actioner.id} selected={riskFormFields.actioner_id === actioner.id}>{riskProfileName(actioner, `Workspace member ${actioner.id.slice(0, 8)}`)}</option>
-														))}
-													</select>
-												</label>
-											)}
-
-											{modalHasField(block.id, 'review_date') && (
-												<label>
-													<span>Review date</span>
-													<div class="risk-date-quick-actions" aria-label="Review date quick actions">
-														<button type="button" data-review-date-offset="7">1 week</button>
-														<button type="button" data-review-date-offset="14">2 weeks</button>
-														<button type="button" data-review-date-manual>Manual</button>
-													</div>
-													<input name="review_date" type="date" value={riskFormFields.review_date} />
-												</label>
-											)}
-
-											{modalHasField(block.id, 'due_date') && (
-												<label>
-													<span>Due date</span>
-													<input name="due_date" type="date" value={riskFormFields.due_date} />
-												</label>
-											)}
-
-											{modalHasField(block.id, 'mitigation_plan') && (
-												<label>
-													<span>Mitigation plan</span>
-													<textarea name="mitigation_plan" rows="6">{riskFormFields.mitigation_plan}</textarea>
-												</label>
-											)}
-
-											{modalHasField(block.id, 'contingency_plan') && (
-												<label>
-													<span>Contingency plan</span>
-													<textarea name="contingency_plan" rows="6">{riskFormFields.contingency_plan}</textarea>
-												</label>
-											)}
-
-											<div class="risk-action-form__actions">
-												<button class="button button--secondary" type="button" data-risk-dialog-cancel>Cancel</button>
-												<button class="button button--primary" type="submit">{modalConfig(block.id).submit}</button>
-											</div>
-												</form>
-											) : (
-												<div class="risk-action-form" data-viewer-read-only>
-													<p>{blockValue(block)}</p>
-													<p>Viewer access is read-only. Risk editing is unavailable.</p>
-													<form method="dialog">
-														<button class="button button--secondary" type="submit">Close</button>
-													</form>
-												</div>
-											)}
-										</dialog>
-									</>
-								) : (
-									<div class="risk-assurance-block__button risk-assurance-block__button--static">
-										<span class="risk-assurance-block__heading">
-											<span class="risk-assurance-block__title">{block.title}</span>
-											<RagReferencePill tone={block.tone} label={block.statusLabel} />
-										</span>
-										<span class="risk-assurance-block__value">{blockValue(block)}</span>
-										{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
-									</div>
-								)}
-							</article>
-						))}
+										</div>
+									)}
+								</article>
+							);
+						})}
 					</div>
 
 					<section class="risk-action-rationale" aria-labelledby="risk-action-rationale-heading" data-risk-action-state-rationale>
@@ -559,11 +595,26 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		return `${year}-${month}-${day}`;
 	};
 
+	let activeDialogTrigger = null;
+
 	document.querySelectorAll('[data-risk-dialog-open]').forEach((button) => {
 		button.addEventListener('click', () => {
 			if (!(button instanceof HTMLElement)) return;
 			const dialog = document.getElementById(button.dataset.riskDialogOpen || '');
-			if (dialog instanceof HTMLDialogElement) dialog.showModal();
+			if (dialog instanceof HTMLDialogElement) {
+				activeDialogTrigger = button;
+				dialog.showModal();
+			}
+		});
+	});
+
+	document.querySelectorAll('[data-risk-dialog], [data-risk-full-text-dialog]').forEach((dialog) => {
+		if (!(dialog instanceof HTMLDialogElement)) return;
+		dialog.addEventListener('close', () => {
+			if (activeDialogTrigger instanceof HTMLElement && document.contains(activeDialogTrigger)) {
+				activeDialogTrigger.focus();
+			}
+			activeDialogTrigger = null;
 		});
 	});
 
@@ -772,10 +823,37 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		overflow-wrap: anywhere;
 	}
 
+	.risk-assurance-block__value--long-text {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 3;
+		overflow: hidden;
+	}
+
 	.risk-assurance-block__prompt {
 		color: var(--accent-strong);
 		font-size: 0.88rem;
 		font-weight: 850;
+	}
+
+	.risk-assurance-block__full-text {
+		justify-self: start;
+		margin: 0 0.85rem 0.85rem;
+		border: 0;
+		padding: 0;
+		background: transparent;
+		color: var(--accent-strong);
+		font: inherit;
+		font-size: 0.86rem;
+		font-weight: 850;
+		text-decoration: underline;
+		text-underline-offset: 0.18em;
+		cursor: pointer;
+	}
+
+	.risk-assurance-block__full-text:hover,
+	.risk-assurance-block__full-text:focus-visible {
+		color: var(--text);
 	}
 
 	.risk-action-rationale {
@@ -814,7 +892,17 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		color: var(--text);
 	}
 
-	.risk-action-dialog::backdrop {
+	.risk-full-text-dialog {
+		width: min(46rem, calc(100vw - 2rem));
+		border: 1px solid var(--border);
+		border-radius: 0.5rem;
+		padding: 1rem;
+		background: #07111d;
+		color: var(--text);
+	}
+
+	.risk-action-dialog::backdrop,
+	.risk-full-text-dialog::backdrop {
 		background: rgba(0, 0, 0, 0.72);
 		backdrop-filter: blur(10px);
 		-webkit-backdrop-filter: blur(10px);
@@ -843,6 +931,28 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		font: inherit;
 		font-size: 1.25rem;
 		cursor: pointer;
+	}
+
+	.risk-full-text-dialog__content {
+		max-height: min(58vh, 32rem);
+		overflow: auto;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 8px;
+		padding: 0.85rem;
+		background: rgba(4, 12, 24, 0.32);
+	}
+
+	.risk-full-text-dialog__content p {
+		margin: 0;
+		color: var(--muted-strong);
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	.risk-full-text-dialog__actions {
+		display: flex;
+		justify-content: flex-end;
+		margin-top: 1rem;
 	}
 
 	.risk-action-form,

@@ -549,6 +549,21 @@ test('Risk action state rationale names drivers separately from exposure display
 	assert.ok(governanceDrivers.some((driver) => driver.message === 'Review date is overdue.'));
 });
 
+test('Long risk text does not alter exposure or action state', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const longManagedRisk = assuredRiskFacts({
+		probability: 'low',
+		impact: 'low',
+		description: 'A detailed narrative '.repeat(40),
+		mitigation_plan: 'Mitigation step with enough operational detail to fill the card. '.repeat(20),
+		contingency_plan: 'Contingency step with named fallback owners and criteria. '.repeat(20),
+	});
+
+	assert.equal(deriveRiskExposureTone(longManagedRisk.probability, longManagedRisk.impact), 'green');
+	assert.equal(deriveRiskActionStateTone(longManagedRisk, now), 'green');
+	assert.equal(deriveRiskAssuranceTone(longManagedRisk, now), 'green');
+});
+
 test('Project dashboard risk icon derives highest active risk assurance state only', () => {
 	const now = new Date('2026-06-28T12:00:00Z');
 	const greenRisk = assuredRiskFacts();
@@ -1363,11 +1378,24 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /data-risk-action-state-summary/);
 	assert.match(route, /data-risk-action-state-rationale/);
 	assert.match(route, /data-risk-assurance-blocks/);
+	assert.match(route, /longTextBlockIds = new Set\(\['description', 'mitigation', 'contingency'\]\)/);
+	assert.match(route, /LONG_TEXT_PREVIEW_THRESHOLD = 180/);
+	assert.match(route, /value\.length > LONG_TEXT_PREVIEW_THRESHOLD/);
 	assert.match(route, /risk-assurance-block--\$\{block\.tone\} rag-card rag-card--\$\{block\.tone\}/);
 	assert.match(route, /<RagReferencePill tone=\{block\.tone\} label=\{block\.statusLabel\} \/>/);
 	for (const block of ['description', 'status', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
 		assert.match(route, new RegExp(`data-risk-assurance-block=\\{block\\.id\\}`));
 	}
+	assert.match(route, /risk-assurance-block__value--long-text/);
+	assert.match(route, /data-risk-long-text-preview/);
+	assert.match(route, /data-risk-full-text-trigger=\{block\.id\}/);
+	assert.match(route, /data-risk-full-text-dialog/);
+	assert.match(route, /data-risk-full-text-content=\{block\.id\}/);
+	assert.match(route, /data-risk-full-text-close/);
+	assert.match(route, /risk-full-text-dialog__content/);
+	assert.match(route, /-webkit-line-clamp: 3/);
+	assert.match(route, /activeDialogTrigger\.focus\(\)/);
+	assert.match(route, /document\.querySelectorAll\('\[data-risk-dialog\], \[data-risk-full-text-dialog\]'\)/);
 	assert.doesNotMatch(route, /overall-concern/);
 	assert.match(route, /Action state rationale/);
 	assert.match(route, /hasModalConfig\(block\.id\)/);
