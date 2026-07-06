@@ -5,11 +5,13 @@ import {
 	buildRiskReference,
 	createProjectRiskComment,
 	createProjectRisk,
+	deriveRiskActionStateTone,
 	deriveProjectRiskDashboardAssuranceTone,
 	deriveRiskAssuranceTone,
-	deriveRiskConcernTone,
 	deriveRiskExposureTone,
 	deriveRiskReferenceTone,
+	deriveWatchtowerDefaultRiskExposureTone,
+	getRiskActionStateDrivers,
 	getProjectRisk,
 	getRiskAssuranceBlocks,
 	isActiveRiskStatus,
@@ -487,7 +489,7 @@ test('Risk create/edit validation covers references, required fields and dates',
 	});
 });
 
-test('Risk exposure derives from probability and impact without manual concern input', () => {
+test('Risk exposure derives from probability and impact through the Watchtower default assessment', () => {
 	assert.equal(deriveRiskExposureTone('low', 'low'), 'green');
 	assert.equal(deriveRiskExposureTone('low', 'medium'), 'amber');
 	assert.equal(deriveRiskExposureTone('medium', 'low'), 'amber');
@@ -499,6 +501,7 @@ test('Risk exposure derives from probability and impact without manual concern i
 	assert.equal(deriveRiskExposureTone('high', 'high'), 'red');
 	assert.equal(deriveRiskExposureTone('', 'low'), 'red');
 	assert.equal(deriveRiskExposureTone('low', undefined), 'red');
+	assert.equal(deriveWatchtowerDefaultRiskExposureTone('high', 'medium'), 'red');
 });
 
 test('Risk assurance derives from governance and control quality signals', () => {
@@ -516,13 +519,34 @@ test('Risk assurance derives from governance and control quality signals', () =>
 	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'escalated' }), now), 'green');
 });
 
-test('Overall risk concern uses exposure plus assurance overrides', () => {
+test('Risk action state uses exposure plus governance assurance drivers', () => {
 	const now = new Date('2026-06-28T12:00:00Z');
-	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ owner_id: null }), now), 'red');
-	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ probability: 'medium', impact: 'medium' }), now), 'amber');
-	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ probability: 'high', impact: 'high' }), now), 'red');
-	assert.equal(deriveRiskConcernTone(assuredRiskFacts({ due_date: null }), now), 'amber');
-	assert.equal(deriveRiskConcernTone(assuredRiskFacts(), now), 'green');
+	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ owner_id: null }), now), 'red');
+	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ probability: 'medium', impact: 'medium' }), now), 'amber');
+	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ probability: 'high', impact: 'high' }), now), 'red');
+	assert.equal(deriveRiskActionStateTone(assuredRiskFacts({ due_date: null }), now), 'amber');
+	assert.equal(deriveRiskActionStateTone(assuredRiskFacts(), now), 'green');
+});
+
+test('Risk action state rationale names drivers separately from exposure display', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const highExposureManagedRisk = assuredRiskFacts({ probability: 'high', impact: 'high' });
+	const lowerExposureGovernanceGap = assuredRiskFacts({
+		probability: 'low',
+		impact: 'low',
+		owner_id: null,
+		review_date: '2026-06-01',
+	});
+
+	const highExposureDrivers = getRiskActionStateDrivers(highExposureManagedRisk, now).map((driver) => driver.message);
+	const governanceDrivers = getRiskActionStateDrivers(lowerExposureGovernanceGap, now);
+
+	assert.equal(deriveRiskExposureTone(highExposureManagedRisk.probability, highExposureManagedRisk.impact), 'red');
+	assert.ok(highExposureDrivers.includes('Exposure is Red using the Watchtower default assessment.'));
+	assert.equal(deriveRiskExposureTone(lowerExposureGovernanceGap.probability, lowerExposureGovernanceGap.impact), 'green');
+	assert.equal(deriveRiskActionStateTone(lowerExposureGovernanceGap, now), 'red');
+	assert.ok(governanceDrivers.some((driver) => driver.message === 'Risk owner is missing.'));
+	assert.ok(governanceDrivers.some((driver) => driver.message === 'Review date is overdue.'));
 });
 
 test('Project dashboard risk icon derives highest active risk assurance state only', () => {
@@ -594,7 +618,7 @@ test('Draft and Closed risk display is neutral while exposure remains available'
 	assert.equal(deriveRiskReferenceTone(closedRisk, now), 'neutral');
 	assert.equal(riskReferenceStatusLabel(draftRisk, now), 'Draft');
 	assert.equal(riskReferenceStatusLabel(closedRisk, now), 'Closed');
-	assert.equal(draftBlocks.get('overall-concern').tone, 'neutral');
+	assert.equal(getRiskActionStateDrivers(draftRisk, now)[0].message, 'Draft risks do not drive active risk action state.');
 	assert.equal(draftBlocks.get('owner').tone, 'neutral');
 	assert.equal(draftBlocks.get('review-date').tone, 'neutral');
 	assert.equal(draftBlocks.get('mitigation').tone, 'neutral');
@@ -644,8 +668,20 @@ test('Risk assurance blocks derive MVP quality signals without using manual RAG 
 	assert.equal(byId.get('owner').tone, 'red');
 	assert.equal(byId.get('review-date').tone, 'red');
 	assert.equal(byId.get('exposure').tone, 'red');
-	assert.equal(byId.get('overall-concern').tone, 'red');
-	assert.match(byId.get('overall-concern').value, /Derived from Red exposure and Red assurance/);
+	assert.match(byId.get('exposure').value, /Watchtower default assessment: High probability \/ High impact/);
+	assert.equal(byId.has('overall-concern'), false);
+	assert.ok(getRiskActionStateDrivers({
+		status: 'open',
+		probability: 'high',
+		impact: 'high',
+		owner_id: null,
+		actioner_id: null,
+		review_date: '2026-06-01',
+		due_date: null,
+		mitigation_plan: '',
+		contingency_plan: '',
+		updated_at: '2026-04-01T10:00:00Z',
+	}, new Date('2026-06-28T12:00:00Z')).some((driver) => driver.message === 'Risk owner is missing.'));
 	assert.equal(byId.get('mitigation').tone, 'red');
 	assert.equal(byId.get('contingency').tone, 'red');
 	assert.equal(byId.get('updated').tone, 'red');
@@ -895,7 +931,7 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		source_ref: 'Risk-HHH-002',
 		attention_level: 'red',
 		title: 'Risk raised: Risk-HHH-002 — Supplier delay',
-		details: 'Concern: Red. Lifecycle status: Open.',
+		details: 'Action state: Red. Lifecycle status: Open.',
 		created_timezone: null,
 	});
 	assert.ok(!client.calls.some((call) => call[0] === 'from' && ['project_risk_notes', 'notification_events', 'attention_items'].includes(call[1])));
@@ -1030,7 +1066,7 @@ test('Updating an existing non-Red risk to Red creates a source-linked narrative
 		source_ref: 'Risk-HHH-001',
 		attention_level: 'red',
 		title: 'Risk became Red: Risk-HHH-001 — Supplier delay',
-		details: 'Concern: Red. Lifecycle status: Open. Reason: Exposure is Red.',
+		details: 'Action state: Red. Lifecycle status: Open. Reason: Exposure is Red.',
 		created_timezone: null,
 	});
 });
@@ -1279,7 +1315,7 @@ test('Risk Register route renders a cleaned scoped table and create access state
 	assert.match(route, /statusLabel=\{referenceStatus\}/);
 	assert.match(route, /statusLabel="Draft"/);
 	assert.match(route, /statusLabel="Closed"/);
-	assert.match(route, /derived concern/);
+	assert.match(route, /action state/);
 	assert.doesNotMatch(route, /riskRagTone/);
 	assert.doesNotMatch(route, /risk\.description && <span>/);
 	assert.match(route, /data-risk-create-action/);
@@ -1300,7 +1336,7 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /Risk not found or you do not have access\./);
 	assert.match(route, /title="Current risk"/);
 	assert.doesNotMatch(route, /status="Actionable assurance"/);
-	assert.match(route, /title="Core Risk Detail"/);
+	assert.match(route, /title="Current Risk Detail"/);
 	assert.doesNotMatch(route, /What needs attention/);
 	assert.doesNotMatch(route, /Risk assurance view/);
 	assert.match(route, /class="risk-detail-heading"/);
@@ -1323,18 +1359,24 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /updaterName\(risk\)/);
 	assert.doesNotMatch(route, /ownerName\(risk\)/);
 	assert.match(route, /getRiskAssuranceBlocks\(risk, new Date\(\)\)/);
+	assert.match(route, /getRiskActionStateDrivers\(risk, new Date\(\)\)/);
+	assert.match(route, /data-risk-action-state-summary/);
+	assert.match(route, /data-risk-action-state-rationale/);
 	assert.match(route, /data-risk-assurance-blocks/);
 	assert.match(route, /risk-assurance-block--\$\{block\.tone\} rag-card rag-card--\$\{block\.tone\}/);
 	assert.match(route, /<RagReferencePill tone=\{block\.tone\} label=\{block\.statusLabel\} \/>/);
-	for (const block of ['description', 'status', 'overall-concern', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
+	for (const block of ['description', 'status', 'exposure', 'owner', 'actioner', 'review-date', 'due-date', 'mitigation', 'contingency', 'updated']) {
 		assert.match(route, new RegExp(`data-risk-assurance-block=\\{block\\.id\\}`));
 	}
+	assert.doesNotMatch(route, /overall-concern/);
+	assert.match(route, /Action state rationale/);
 	assert.match(route, /hasModalConfig\(block\.id\)/);
 	assert.match(route, /risk-assurance-block__button--static/);
 	assert.match(route, /data-risk-dialog-open/);
 	assert.match(route, /exposure: \{ title: 'Edit exposure', fields: \['probability', 'impact'\], submit: 'Save exposure' \}/);
 	assert.doesNotMatch(route, /name="rag_status"/);
 	assert.doesNotMatch(route, /Concern signal/);
+	assert.doesNotMatch(route, /Overall concern/);
 	assert.match(route, /data-risk-modal-backdrop-blur/);
 	assert.match(route, /backdrop-filter: blur\(10px\)/);
 	assert.match(route, /\.risk-action-form__actions \[data-risk-dialog-cancel\]/);
@@ -1352,7 +1394,7 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /data-risk-reopen-action/);
 	assert.match(route, /Continue editing/);
 	assert.match(route, /data-risk-comments-section/);
-	assert.match(route, /title="Core Risk Detail"[\s\S]*data-risk-comments-section/);
+	assert.match(route, /title="Current Risk Detail"[\s\S]*data-risk-comments-section/);
 	assert.doesNotMatch(route, /<ProjectContentPanel[\s\S]*title="Comments"/);
 	assert.match(route, /name="intent" value="add-comment"/);
 	assert.match(route, /Back to Risk Register/);
@@ -1435,7 +1477,7 @@ test('Risk create/edit/comment source avoids deferred side effects', async () =>
 	assert.match(combined, /Risk opened:/);
 	assert.match(combined, /Risk closed:/);
 	assert.match(combined, /Risk reopened:/);
-	assert.match(combined, /!isRedRiskConcern\(previousConcern\) && isRedRiskConcern\(nextConcern\)/);
+	assert.match(combined, /!isRedRiskActionState\(previousActionState\) && isRedRiskActionState\(nextActionState\)/);
 	for (const table of ['attention_items', 'notification_events', 'email_notifications']) {
 		assert.doesNotMatch(combined, new RegExp(`from\\('${table}'\\)|insert\\([\\s\\S]*${table}`, 'i'));
 	}

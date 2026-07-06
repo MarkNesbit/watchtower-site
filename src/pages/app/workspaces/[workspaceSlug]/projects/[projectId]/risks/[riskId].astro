@@ -11,6 +11,7 @@ import {
 	RISK_STATUSES,
 	createProjectRiskComment,
 	deriveRiskReferenceTone,
+	getRiskActionStateDrivers,
 	getRiskAssuranceBlocks,
 	getProjectRisk,
 	isActiveRiskStatus,
@@ -148,8 +149,10 @@ try {
 const canEditRisk = can(workspaceRole, 'risk.edit');
 const editHref = project && risk ? buildProjectRiskEditPath(workspaceSlug ?? '', project.slug, risk.risk_id) : '';
 const assuranceBlocks = risk ? getRiskAssuranceBlocks(risk, new Date()) : [];
+const actionStateDrivers = risk ? getRiskActionStateDrivers(risk, new Date()) : [];
 const referenceTone = risk ? deriveRiskReferenceTone(risk, new Date()) : 'neutral';
 const referenceStatus = risk ? riskReferenceStatusLabel(risk, new Date()) : 'Neutral';
+const actionStateSummary = actionStateDrivers[0]?.message ?? 'Risk action state could not be calculated safely.';
 const riskIsDraft = risk ? isDraftRiskStatus(risk.status) : false;
 const riskIsActive = risk ? isActiveRiskStatus(risk.status) : false;
 const riskIsClosed = risk ? isClosedRiskStatus(risk.status) : false;
@@ -220,6 +223,9 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 				</nav>
 
 				<ProjectControlPanel title="Current risk" headingId="risk-detail-controls-heading">
+					<p class="risk-action-state-summary" data-risk-action-state-summary>
+						<strong>Action state:</strong> {referenceStatus}. {actionStateSummary}
+					</p>
 					<dl class="risk-detail-summary-strip" data-risk-summary-strip>
 						<div>
 							<dt>Lifecycle status</dt>
@@ -279,8 +285,8 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 				</ProjectControlPanel>
 
 				<ProjectContentPanel
-					title="Core Risk Detail"
-					helper="Open a card to update the field behind that assurance signal."
+					title="Current Risk Detail"
+					helper="Exposure uses the current Watchtower default assessment. Action state rationale is shown separately below."
 					headingId="risk-detail-record-heading"
 				>
 					<div slot="action" class="risk-detail-action">
@@ -461,6 +467,18 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 						))}
 					</div>
 
+					<section class="risk-action-rationale" aria-labelledby="risk-action-rationale-heading" data-risk-action-state-rationale>
+						<div>
+							<p class="eyebrow">Action state rationale</p>
+							<h3 id="risk-action-rationale-heading">Why this needs attention</h3>
+						</div>
+						<ul>
+							{actionStateDrivers.map((driver) => (
+								<li data-risk-action-driver={driver.tone}>{driver.message}</li>
+							))}
+						</ul>
+					</section>
+
 					<section class="risk-comments-section" aria-labelledby="risk-comments-heading" data-risk-comments-section>
 						<div class="risk-comments-section__heading">
 							<h3 id="risk-comments-heading">Comments</h3>
@@ -620,6 +638,15 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		gap: 0.8rem;
 	}
 
+	.risk-action-state-summary {
+		margin: 0.75rem 0 0;
+		color: var(--muted-strong);
+	}
+
+	.risk-action-state-summary strong {
+		color: var(--text);
+	}
+
 	.risk-detail-summary-strip {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
@@ -749,6 +776,33 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		color: var(--accent-strong);
 		font-size: 0.88rem;
 		font-weight: 850;
+	}
+
+	.risk-action-rationale {
+		display: grid;
+		gap: 0.75rem;
+		margin-top: 1rem;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 8px;
+		padding: 0.95rem;
+		background: rgba(4, 12, 24, 0.24);
+	}
+
+	.risk-action-rationale h3 {
+		margin: 0.15rem 0 0;
+		font-size: 1rem;
+	}
+
+	.risk-action-rationale ul {
+		display: grid;
+		gap: 0.45rem;
+		margin: 0;
+		padding-left: 1.1rem;
+		color: var(--muted-strong);
+	}
+
+	.risk-action-rationale li::marker {
+		color: var(--accent-strong);
 	}
 
 	.risk-action-dialog {
