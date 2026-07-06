@@ -221,6 +221,7 @@ test('Project list action-state scope uses area signals and defers user-specific
 	assert.match(listSource, /\.from\('project_dates'\)/);
 	assert.match(listSource, /\.from\('project_people'\)/);
 	assert.match(listSource, /\.from\('project_risks'\)/);
+	assert.match(listSource, /next_review_date, review_cadence, governance_route/);
 	assert.match(listSource, /Promise\.resolve\(\{ data: \[\], error: null \}\)/);
 	assert.match(listSource, /buildProjectDateCards\(projectDatesByProjectId\.get\(project\.id\) \?\? \[\], project, new Date\(\)\)/);
 	assert.doesNotMatch(listSource, /getUnseenProjectNarrativeCount|markProjectNarrativeViewed|project_narrative_read_states/);
@@ -837,7 +838,7 @@ test('Project list uses shared authenticated page patterns without changing rout
 	assert.doesNotMatch(listSource, /<td><a class="text-link" href=\{buildProjectPath\(workspaceSlug, project\.slug\)\}>Open project<\/a><\/td>/);
 	assert.match(listSource, /<td class="projects-table__name"><a href=\{buildProjectPath\(workspaceSlug, project\.slug\)\} aria-label=\{`Open \$\{project\.name\}`\}>\{project\.name\}<\/a><\/td>/);
 	assert.match(listSource, /buildProjectPath\(workspaceSlug, project\.slug\)/);
-	assert.match(listSource, /\.select\('id, name, project_ref, slug, status, health, description, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, governance_route, escalation_route, updated_at'\)/);
+	assert.match(listSource, /\.select\('id, name, project_ref, slug, status, health, description, project_type, delivery_method, priority, criticality, start_date, target_end_date, next_review_date, review_cadence, governance_route, escalation_route, updated_at'\)/);
 	assert.match(listSource, /projectDateCards: projectDatesError \? null : buildProjectDateCards\(projectDatesByProjectId\.get\(project\.id\) \?\? \[\], project, new Date\(\)\)/);
 	assert.match(listSource, /projectPeople: projectPeopleError \? null : projectPeopleByProjectId\.get\(project\.id\) \?\? \[\]/);
 	assert.match(listSource, /risks: risksResult\.error \? null : risksByProjectId\.get\(project\.id\) \?\? \[\]/);
