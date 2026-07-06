@@ -9,13 +9,14 @@ import RagReferencePill from '../../../../../../components/app/RagReferencePill.
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import { can } from '../../../../../../lib/permissions';
 import {
+	deriveRiskExposureTone,
 	deriveRiskReferenceTone,
-	isActiveRiskStatus,
-	isClosedRiskStatus,
-	isDraftRiskStatus,
 	listProjectRisks,
 	riskDisplayLabel,
+	riskExposureToneLabel,
+	riskLifecycleCategory,
 	riskLifecycleLabel,
+	riskProfileName,
 	riskReferenceStatusLabel,
 } from '../../../../../../lib/projectRisks';
 import { buildProjectNewRiskPath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
@@ -38,7 +39,49 @@ const formatDate = (value, fallback = 'Not available') => value
 const formatDateTime = (value, fallback = 'Not available') => value
 	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
 	: fallback;
-
+const startOfUtcDay = (date) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+const parseReviewDate = (value) => {
+	if (!value || typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+	const date = new Date(`${value}T00:00:00Z`);
+	return Number.isNaN(date.getTime()) ? null : date;
+};
+const reviewDueState = (risk, now = new Date()) => {
+	const category = riskLifecycleCategory(risk.status);
+	const date = parseReviewDate(risk.review_date);
+	if (!date) return {
+		tone: category === 'active' ? 'amber' : 'neutral',
+		label: 'No review date',
+		statusLabel: category === 'active' ? 'Missing' : '',
+	};
+	if (category === 'active' && date < startOfUtcDay(now)) return {
+		tone: 'red',
+		label: formatDate(risk.review_date),
+		statusLabel: 'Overdue',
+	};
+	return {
+		tone: 'neutral',
+		label: formatDate(risk.review_date),
+		statusLabel: '',
+	};
+};
+const actionStateFor = (risk) => {
+	if (riskLifecycleCategory(risk.status) !== 'active') return {
+		tone: 'neutral',
+		label: 'Not active',
+		statusLabel: riskLifecycleLabel(risk.status),
+	};
+	return {
+		tone: deriveRiskReferenceTone(risk),
+		label: riskReferenceStatusLabel(risk),
+		statusLabel: 'Action state',
+	};
+};
+const lifecycleRank = (risk) => {
+	const category = riskLifecycleCategory(risk.status);
+	if (category === 'active') return 0;
+	if (category === 'draft') return 1;
+	return 2;
+};
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
 	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug ?? '', accessToken);
@@ -88,9 +131,12 @@ try {
 }
 
 const canCreateRisk = can(workspaceRole, 'risk.create');
-const activeRisks = risks.filter((risk) => isActiveRiskStatus(risk.status));
-const draftRisks = risks.filter((risk) => isDraftRiskStatus(risk.status));
-const closedRisks = risks.filter((risk) => isClosedRiskStatus(risk.status));
+const orderedRisks = [...risks].sort((a, b) => (
+	lifecycleRank(a) - lifecycleRank(b)
+	|| (a.risk_sequence ?? 0) - (b.risk_sequence ?? 0)
+	|| String(a.risk_ref ?? '').localeCompare(String(b.risk_ref ?? ''))
+	|| new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime()
+));
 ---
 <AuthenticatedLayout title={project ? `Risk Register — ${project.name} | WatchTower` : 'Risk Register | WatchTower'}>
 	<section class="risk-register-page" data-risk-management-route data-risk-register-route data-feature-state={featureAccess.state}>
@@ -110,8 +156,8 @@ const closedRisks = risks.filter((risk) => isClosedRiskStatus(risk.status));
 				</ProjectControlPanel>
 
 				<ProjectContentPanel
-					title="Active risks"
-					helper="Review the active Risk Register first. Draft and closed risks remain visible separately without driving active assurance."
+					title="Risk Register"
+					helper="Scan all project risks in one register. Exposure, action state and lifecycle/status are shown separately."
 					headingId="risk-register-table-heading"
 				>
 					<div slot="action" class="risk-register-action">
@@ -146,150 +192,93 @@ const closedRisks = risks.filter((risk) => isClosedRiskStatus(risk.status));
 						</EmptyState>
 					) : risks.length === 0 ? (
 						<EmptyState title="No risks have been recorded for this project yet." data-risk-empty-state>
-							<p>When risks are recorded, this register will show the project’s source-of-truth risk reference, title, status, review date and latest update.</p>
+							<p>When risks are recorded, this register will show the project’s source-of-truth risk reference, exposure, action state, lifecycle, owner, review due date and latest update.</p>
 							<p>{canCreateRisk ? 'Create the first risk when there is a delivery concern to manage.' : 'Viewer access is read-only, so risk creation is unavailable for your role.'}</p>
 						</EmptyState>
 					) : (
-						<div class="risk-lifecycle-sections">
-							<section class="risk-lifecycle-section" data-active-risks-section aria-labelledby="active-risks-heading">
-								<h3 id="active-risks-heading">Active risks</h3>
-								{activeRisks.length > 0 ? (
-									<div class="risk-register-table-scroll">
-										<table class="simple-table risk-register-table" data-active-risk-register>
-											<thead>
-												<tr>
-													<th scope="col">Ref</th>
-													<th scope="col">Risk</th>
-													<th scope="col">Lifecycle</th>
-													<th scope="col">Status</th>
-													<th scope="col">Review date</th>
-													<th scope="col">Updated</th>
-												</tr>
-											</thead>
-											<tbody>
-												{activeRisks.map((risk) => {
-													const referenceTone = deriveRiskReferenceTone(risk);
-													const referenceStatus = riskReferenceStatusLabel(risk);
-													return (
-														<tr data-risk-lifecycle="active">
-															<td>
-																<a
-																	class="risk-reference-link"
-																	href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
-																	aria-label={`Open ${risk.risk_ref}, ${referenceStatus} action state`}
-																>
-																	<RagReferencePill
-																		tone={referenceTone}
-																		label={risk.risk_ref}
-																		statusLabel={referenceStatus}
-																	/>
-																</a>
-															</td>
-															<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
-															<td>{riskLifecycleLabel(risk.status)}</td>
-															<td>{riskDisplayLabel(risk.status)}</td>
-															<td>{formatDate(risk.review_date, 'No review date')}</td>
-															<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
-														</tr>
-													);
-												})}
-											</tbody>
-										</table>
-									</div>
-								) : (
-									<EmptyState title="No active risks currently require management." data-active-risk-empty-state>
-										<p>Draft and closed risks remain available below when they exist.</p>
-									</EmptyState>
-								)}
-							</section>
-
-							{draftRisks.length > 0 && (
-								<section class="risk-lifecycle-section risk-lifecycle-section--neutral" data-draft-risks-section aria-labelledby="draft-risks-heading">
-									<h3 id="draft-risks-heading">Draft risks</h3>
-									<div class="risk-register-table-scroll">
-										<table class="simple-table risk-register-table" data-draft-risk-register>
-											<thead>
-												<tr>
-													<th scope="col">Ref</th>
-													<th scope="col">Risk</th>
-													<th scope="col">Lifecycle</th>
-													<th scope="col">Status</th>
-													<th scope="col">Review date</th>
-													<th scope="col">Updated</th>
-												</tr>
-											</thead>
-											<tbody>
-												{draftRisks.map((risk) => (
-													<tr data-risk-lifecycle="draft">
-														<td>
-															<a
-																class="risk-reference-link"
-																href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
-																aria-label={`Open ${risk.risk_ref}, Draft risk`}
-															>
-																<RagReferencePill
-																	tone="neutral"
-																	label={risk.risk_ref}
-																	statusLabel="Draft"
-																/>
-															</a>
-														</td>
-														<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
-														<td>{riskLifecycleLabel(risk.status)}</td>
-														<td>{riskDisplayLabel(risk.status)}</td>
-														<td>{formatDate(risk.review_date, 'No review date')}</td>
-														<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
-													</tr>
-												))}
-											</tbody>
-										</table>
-									</div>
-								</section>
-							)}
-
-							{closedRisks.length > 0 && (
-								<details class="risk-lifecycle-section risk-lifecycle-section--neutral" data-closed-risks-section>
-									<summary id="closed-risks-heading">Closed risks</summary>
-									<div class="risk-register-table-scroll">
-										<table class="simple-table risk-register-table" data-closed-risk-register>
-											<thead>
-												<tr>
-													<th scope="col">Ref</th>
-													<th scope="col">Risk</th>
-													<th scope="col">Lifecycle</th>
-													<th scope="col">Status</th>
-													<th scope="col">Review date</th>
-													<th scope="col">Updated</th>
-												</tr>
-											</thead>
-											<tbody>
-												{closedRisks.map((risk) => (
-													<tr data-risk-lifecycle="closed">
-														<td>
-															<a
-																class="risk-reference-link"
-																href={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
-																aria-label={`Open ${risk.risk_ref}, Closed risk`}
-															>
-																<RagReferencePill
-																	tone="neutral"
-																	label={risk.risk_ref}
-																	statusLabel="Closed"
-																/>
-															</a>
-														</td>
-														<td class="risk-register-table__risk"><strong>{risk.title}</strong></td>
-														<td>{riskLifecycleLabel(risk.status)}</td>
-														<td>{riskDisplayLabel(risk.status)}</td>
-														<td>{formatDate(risk.review_date, 'No review date')}</td>
-														<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
-													</tr>
-												))}
-											</tbody>
-										</table>
-									</div>
-								</details>
-							)}
+						<div class="risk-register-table-scroll">
+							<table class="simple-table risk-register-table" data-risk-register-table>
+								<thead>
+									<tr>
+										<th scope="col">Ref</th>
+										<th scope="col">Risk</th>
+										<th scope="col">Exposure</th>
+										<th scope="col">Action state</th>
+										<th scope="col">Lifecycle / Status</th>
+										<th scope="col">Owner</th>
+										<th scope="col">Review due</th>
+										<th scope="col">Updated</th>
+										<th scope="col">Actions</th>
+									</tr>
+								</thead>
+								<tbody>
+									{orderedRisks.map((risk) => {
+										const exposureTone = deriveRiskExposureTone(risk.probability, risk.impact);
+										const exposureLabel = riskExposureToneLabel(exposureTone);
+										const actionState = actionStateFor(risk);
+										const reviewDue = reviewDueState(risk);
+										const ownerLabel = riskProfileName(risk.owner, 'Unassigned');
+										const riskHref = buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id);
+										const lifecycle = riskLifecycleLabel(risk.status);
+										return (
+											<tr data-risk-lifecycle={riskLifecycleCategory(risk.status)}>
+												<td>
+													<a
+														class="risk-reference-link"
+														href={riskHref}
+														aria-label={`Open ${risk.risk_ref}`}
+													>
+														<RagReferencePill
+															tone="blue"
+															label={risk.risk_ref}
+														/>
+													</a>
+												</td>
+												<td class="risk-register-table__risk">
+													<strong title={risk.title}>{risk.title}</strong>
+												</td>
+												<td>
+													<RagReferencePill
+														tone={exposureTone}
+														label={exposureLabel}
+														statusLabel="Exposure"
+														ariaLabel={`${risk.risk_ref} exposure: ${exposureLabel}`}
+													/>
+												</td>
+												<td>
+													<RagReferencePill
+														tone={actionState.tone}
+														label={actionState.label}
+														statusLabel={actionState.statusLabel}
+														ariaLabel={`${risk.risk_ref} action state: ${actionState.label}`}
+													/>
+												</td>
+												<td>
+													<span class="risk-register-table__status">
+														<strong>{lifecycle}</strong>
+														<span>{riskDisplayLabel(risk.status)}</span>
+													</span>
+												</td>
+												<td>
+													<span class={`risk-register-table__owner${risk.owner_id ? '' : ' risk-register-table__owner--missing'}`}>
+														{ownerLabel}
+													</span>
+												</td>
+												<td>
+													<span class={`risk-register-table__review risk-register-table__review--${reviewDue.tone}`}>
+														{reviewDue.statusLabel && <span>{reviewDue.statusLabel}</span>}
+														<span>{reviewDue.label}</span>
+													</span>
+												</td>
+												<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
+												<td>
+													<a class="text-link risk-register-table__open" href={riskHref} aria-label={`Open ${risk.risk_ref} detail`}>Open</a>
+												</td>
+											</tr>
+										);
+									})}
+								</tbody>
+							</table>
 						</div>
 					)}
 					<a class="text-link risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
@@ -336,47 +325,48 @@ const closedRisks = risks.filter((risk) => isClosedRiskStatus(risk.status));
 		overflow-x: auto;
 	}
 
-	.risk-lifecycle-sections {
-		display: grid;
-		gap: 1rem;
-	}
-
-	.risk-lifecycle-section {
-		display: grid;
-		gap: 0.7rem;
-	}
-
-	.risk-lifecycle-section h3,
-	.risk-lifecycle-section summary {
-		color: var(--text);
-		font-size: 1rem;
-		font-weight: 800;
-		letter-spacing: 0;
-	}
-
-	.risk-lifecycle-section summary {
-		cursor: pointer;
-	}
-
-	.risk-lifecycle-section--neutral {
-		border-left: 0.35rem solid var(--rag-neutral-accent);
-		padding-left: 0.85rem;
-	}
-
 	.risk-register-table {
-		min-width: 54rem;
+		min-width: 78rem;
+		table-layout: fixed;
 	}
 
 	.risk-register-table th:first-child {
-		width: 12rem;
+		width: 10.5rem;
 	}
 
 	.risk-register-table th:nth-child(2) {
-		min-width: 22rem;
+		width: 20rem;
+	}
+
+	.risk-register-table th:nth-child(3),
+	.risk-register-table th:nth-child(4) {
+		width: 9.25rem;
+	}
+
+	.risk-register-table th:nth-child(5) {
+		width: 10rem;
+	}
+
+	.risk-register-table th:nth-child(6) {
+		width: 10rem;
+	}
+
+	.risk-register-table th:nth-child(7) {
+		width: 9rem;
+	}
+
+	.risk-register-table th:nth-child(8) {
+		width: 11rem;
+	}
+
+	.risk-register-table th:nth-child(9) {
+		width: 5rem;
 	}
 
 	.risk-register-table td {
-		vertical-align: top;
+		vertical-align: middle;
+		padding-top: 0.62rem;
+		padding-bottom: 0.62rem;
 	}
 
 	.risk-reference-link {
@@ -396,16 +386,48 @@ const closedRisks = risks.filter((risk) => isClosedRiskStatus(risk.status));
 	}
 
 	.risk-register-table__risk {
-		max-width: 32rem;
-		overflow-wrap: anywhere;
+		min-width: 0;
 	}
 
 	.risk-register-table__risk strong {
-		display: block;
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		overflow: hidden;
+		line-height: 1.35;
 	}
 
-	.risk-register-table__risk strong + span {
-		margin-top: 0.25rem;
+	.risk-register-table__status,
+	.risk-register-table__review {
+		display: grid;
+		gap: 0.18rem;
+	}
+
+	.risk-register-table__status strong,
+	.risk-register-table__review span:first-child {
+		color: var(--text);
+		font-weight: 850;
+	}
+
+	.risk-register-table__status span,
+	.risk-register-table__review span:last-child,
+	.risk-register-table__owner {
+		color: var(--muted-strong);
+	}
+
+	.risk-register-table__owner--missing,
+	.risk-register-table__review--amber span:first-child {
+		color: var(--rag-amber-accent);
+		font-weight: 850;
+	}
+
+	.risk-register-table__review--red span:first-child {
+		color: var(--rag-red-accent);
+		font-weight: 850;
+	}
+
+	.risk-register-table__open {
+		font-weight: 850;
 	}
 
 	.risk-register-back-link {

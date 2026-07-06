@@ -1332,42 +1332,59 @@ test('Expired risk create/edit sessions fail before mutation', async () => {
 	assert.ok(!updateClient.calls.some((call) => call[0] === 'update'));
 });
 
-test('Risk Register route renders a cleaned scoped table and create access state', async () => {
+test('Risk Register route renders a table-led scoped register and create access state', async () => {
 	const route = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
 
 	assert.match(route, /data-risk-register-route/);
 	assert.match(route, /ProjectPageHero/);
 	assert.match(route, /title="Risk Register"/);
+	assert.match(route, /helper="Scan all project risks in one register\. Exposure, action state and lifecycle\/status are shown separately\."/);
 	assert.match(route, /listProjectRisks\(organisation\.id, data\.id, workspace\.role, serverSupabase\)/);
 	assert.match(route, /\.eq\('slug', projectSlug\)/);
 	assert.match(route, /\.eq\('organisation_id', organisation\.id\)/);
 	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
-	for (const heading of ['Ref', 'Risk', 'Lifecycle', 'Status', 'Review date', 'Updated']) {
+	assert.match(route, /data-risk-register-table/);
+	for (const heading of ['Ref', 'Risk', 'Exposure', 'Action state', 'Lifecycle / Status', 'Owner', 'Review due', 'Updated', 'Actions']) {
 		assert.match(route, new RegExp(`<th scope="col">${heading}</th>`));
 	}
-	for (const removedHeading of ['RAG', 'Owner', 'Actioner']) {
+	for (const removedHeading of ['RAG', 'Actioner']) {
 		assert.doesNotMatch(route, new RegExp(`<th scope="col">${removedHeading}</th>`));
 	}
 	assert.match(route, /No risks have been recorded for this project yet\./);
 	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
-	assert.match(route, /activeRisks = risks\.filter\(\(risk\) => isActiveRiskStatus\(risk\.status\)\)/);
-	assert.match(route, /draftRisks = risks\.filter\(\(risk\) => isDraftRiskStatus\(risk\.status\)\)/);
-	assert.match(route, /closedRisks = risks\.filter\(\(risk\) => isClosedRiskStatus\(risk\.status\)\)/);
-	assert.match(route, /data-active-risk-register/);
-	assert.match(route, /data-draft-risk-register/);
-	assert.match(route, /data-closed-risk-register/);
-	assert.match(route, /<details class="risk-lifecycle-section risk-lifecycle-section--neutral" data-closed-risks-section>/);
+	assert.match(route, /orderedRisks = \[\.\.\.risks\]\.sort/);
+	assert.match(route, /riskLifecycleCategory\(risk\.status\)/);
+	assert.match(route, /data-risk-lifecycle=\{riskLifecycleCategory\(risk\.status\)\}/);
+	assert.match(route, /lifecycleRank\(a\) - lifecycleRank\(b\)/);
+	assert.doesNotMatch(route, /activeRisks = risks\.filter/);
+	assert.doesNotMatch(route, /draftRisks = risks\.filter/);
+	assert.doesNotMatch(route, /closedRisks = risks\.filter/);
+	assert.doesNotMatch(route, /data-active-risk-register/);
+	assert.doesNotMatch(route, /data-draft-risk-register/);
+	assert.doesNotMatch(route, /data-closed-risk-register/);
+	assert.doesNotMatch(route, /data-closed-risks-section/);
+	assert.match(route, /deriveRiskExposureTone\(risk\.probability, risk\.impact\)/);
+	assert.match(route, /riskExposureToneLabel\(exposureTone\)/);
+	assert.match(route, /statusLabel="Exposure"/);
+	assert.match(route, /actionStateFor\(risk\)/);
 	assert.match(route, /deriveRiskReferenceTone\(risk\)/);
 	assert.match(route, /riskReferenceStatusLabel\(risk\)/);
+	assert.match(route, /label: 'Not active'/);
+	assert.match(route, /statusLabel: riskLifecycleLabel\(risk\.status\)/);
+	assert.match(route, /riskProfileName\(risk\.owner, 'Unassigned'\)/);
+	assert.match(route, /risk-register-table__owner--missing/);
+	assert.match(route, /reviewDueState\(risk\)/);
+	assert.match(route, /No review date/);
+	assert.match(route, /Overdue/);
+	assert.match(route, /ariaLabel=\{`\$\{risk\.risk_ref\} exposure: \$\{exposureLabel\}`\}/);
+	assert.match(route, /ariaLabel=\{`\$\{risk\.risk_ref\} action state: \$\{actionState\.label\}`\}/);
 	assert.match(route, /buildProjectNewRiskPath\(workspaceSlug \?\? '', project\.slug\)/);
-	assert.match(route, /<td class="risk-register-table__risk"><strong>\{risk\.title\}<\/strong><\/td>/);
-	assert.match(route, /tone=\{referenceTone\}/);
-	assert.match(route, /statusLabel=\{referenceStatus\}/);
-	assert.match(route, /statusLabel="Draft"/);
-	assert.match(route, /statusLabel="Closed"/);
+	assert.match(route, /<strong title=\{risk\.title\}>\{risk\.title\}<\/strong>/);
+	assert.match(route, /aria-label=\{`Open \$\{risk\.risk_ref\} detail`\}>Open<\/a>/);
 	assert.match(route, /action state/);
 	assert.doesNotMatch(route, /riskRagTone/);
 	assert.doesNotMatch(route, /risk\.description && <span>/);
+	assert.doesNotMatch(route, /Needs action|Exposure distribution|Help me identify risks|Search risks|More filters|pagination/i);
 	assert.match(route, /data-risk-create-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-create-disabled/);
 	assert.match(route, /Viewer access is read-only, so risk creation is unavailable for your role\./);
