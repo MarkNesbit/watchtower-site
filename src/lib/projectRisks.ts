@@ -23,6 +23,19 @@ export type RiskAssuranceTone = 'green' | 'amber' | 'red' | 'neutral';
 export type RiskActionStateTone = 'green' | 'amber' | 'red';
 export type RiskDashboardAssuranceTone = RiskAssuranceTone;
 export type RiskDisplayTone = RiskAssuranceTone | RiskExposureTone;
+export const RISK_REGISTER_VIEW_TABS = ['all', 'need-action', 'draft', 'closed'] as const;
+export type RiskRegisterViewTab = (typeof RISK_REGISTER_VIEW_TABS)[number];
+export const RISK_REGISTER_SORTS = ['highest-exposure', 'action-needed', 'review-due', 'recently-updated'] as const;
+export type RiskRegisterSort = (typeof RISK_REGISTER_SORTS)[number];
+export type RiskRegisterFilters = {
+	view?: RiskRegisterViewTab | string | null;
+	search?: string | null;
+	exposure?: RiskExposure | string | null;
+	actionState?: RiskActionStateTone | string | null;
+	ownerId?: string | null;
+	lifecycle?: RiskLifecycleCategory | string | null;
+	sort?: RiskRegisterSort | string | null;
+};
 
 const RISK_SEQUENCE_CONSTRAINT = 'project_risks_project_sequence_key';
 const RISK_REF_CONSTRAINT = 'project_risks_project_ref_key';
@@ -335,6 +348,156 @@ export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
 		.filter(Boolean)
 		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
 		.join(' ');
+}
+
+export function normaliseRiskRegisterViewTab(value: unknown): RiskRegisterViewTab {
+	return RISK_REGISTER_VIEW_TABS.includes(value as RiskRegisterViewTab) ? value as RiskRegisterViewTab : 'all';
+}
+
+export function normaliseRiskRegisterSort(value: unknown): RiskRegisterSort {
+	return RISK_REGISTER_SORTS.includes(value as RiskRegisterSort) ? value as RiskRegisterSort : 'highest-exposure';
+}
+
+export function normaliseRiskRegisterSearch(value: unknown): string {
+	return trimmedText(value).toLowerCase();
+}
+
+export function riskMatchesRegisterSearch(risk: Pick<ProjectRisk, 'risk_ref' | 'title'>, search: unknown): boolean {
+	const query = normaliseRiskRegisterSearch(search);
+	if (!query) return true;
+	return normaliseRiskRegisterSearch(risk.risk_ref).includes(query)
+		|| normaliseRiskRegisterSearch(risk.title).includes(query);
+}
+
+export function riskMatchesRegisterView(
+	risk: Pick<ProjectRisk,
+		'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+	>,
+	view: unknown,
+	now = new Date(),
+): boolean {
+	const tab = normaliseRiskRegisterViewTab(view);
+	if (tab === 'all') return true;
+	if (tab === 'draft') return riskLifecycleCategory(risk.status) === 'draft';
+	if (tab === 'closed') return riskLifecycleCategory(risk.status) === 'closed';
+	return deriveRiskReferenceTone(risk, now) === 'red' || deriveRiskReferenceTone(risk, now) === 'amber';
+}
+
+function normalisedExposureFilter(value: unknown): RiskExposure | '' {
+	return RISK_EXPOSURES.includes(value as RiskExposure) ? value as RiskExposure : '';
+}
+
+function normalisedActionStateFilter(value: unknown): RiskActionStateTone | '' {
+	return value === 'red' || value === 'amber' || value === 'green' ? value : '';
+}
+
+function normalisedLifecycleFilter(value: unknown): RiskLifecycleCategory | '' {
+	return value === 'draft' || value === 'active' || value === 'closed' ? value : '';
+}
+
+export function riskMatchesRegisterFilters(
+	risk: Pick<ProjectRisk,
+		'status' | 'risk_ref' | 'title' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+	>,
+	filters: RiskRegisterFilters = {},
+	now = new Date(),
+): boolean {
+	if (!riskMatchesRegisterView(risk, filters.view, now)) return false;
+	if (!riskMatchesRegisterSearch(risk, filters.search)) return false;
+
+	const exposure = normalisedExposureFilter(filters.exposure);
+	if (exposure && deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact) !== exposure) return false;
+
+	const actionState = normalisedActionStateFilter(filters.actionState);
+	if (actionState && deriveRiskReferenceTone(risk, now) !== actionState) return false;
+
+	const ownerId = trimmedText(filters.ownerId);
+	if (ownerId === 'unassigned' && risk.owner_id) return false;
+	if (ownerId && ownerId !== 'unassigned' && risk.owner_id !== ownerId) return false;
+
+	const lifecycle = normalisedLifecycleFilter(filters.lifecycle);
+	if (lifecycle && riskLifecycleCategory(risk.status) !== lifecycle) return false;
+
+	return true;
+}
+
+function riskExposureSortRank(risk: Pick<ProjectRisk, 'probability' | 'impact'>): number {
+	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
+	if (exposure === 'critical') return 0;
+	if (exposure === 'high') return 1;
+	if (exposure === 'medium') return 2;
+	if (exposure === 'low') return 3;
+	return 4;
+}
+
+function riskActionStateSortRank(risk: Pick<ProjectRisk,
+	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+>, now: Date): number {
+	const actionState = deriveRiskReferenceTone(risk, now);
+	if (actionState === 'red') return 0;
+	if (actionState === 'amber') return 1;
+	if (actionState === 'green') return 2;
+	return 3;
+}
+
+function riskReviewDateSortRank(risk: Pick<ProjectRisk, 'status' | 'review_date'>, now: Date): number {
+	const lifecycle = riskLifecycleCategory(risk.status);
+	if (lifecycle === 'closed') return 3;
+	const date = parseUtcDate(risk.review_date);
+	if (!date) return 2;
+	return date < startOfUtcDay(now) ? 0 : 1;
+}
+
+function compareRiskReviewDate(a: Pick<ProjectRisk, 'status' | 'review_date'>, b: Pick<ProjectRisk, 'status' | 'review_date'>, now: Date): number {
+	const rank = riskReviewDateSortRank(a, now) - riskReviewDateSortRank(b, now);
+	if (rank) return rank;
+	const aDate = parseUtcDate(a.review_date)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+	const bDate = parseUtcDate(b.review_date)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+	return aDate - bDate;
+}
+
+function compareRiskUpdated(a: Pick<ProjectRisk, 'updated_at'>, b: Pick<ProjectRisk, 'updated_at'>): number {
+	return new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime();
+}
+
+function compareRiskStable(a: Pick<ProjectRisk, 'risk_sequence' | 'risk_ref'>, b: Pick<ProjectRisk, 'risk_sequence' | 'risk_ref'>): number {
+	return (a.risk_sequence ?? 0) - (b.risk_sequence ?? 0)
+		|| String(a.risk_ref ?? '').localeCompare(String(b.risk_ref ?? ''));
+}
+
+export function compareRisksForRegister(a: ProjectRisk, b: ProjectRisk, sort: unknown = 'highest-exposure', now = new Date()): number {
+	const selectedSort = normaliseRiskRegisterSort(sort);
+	if (selectedSort === 'action-needed') {
+		return riskActionStateSortRank(a, now) - riskActionStateSortRank(b, now)
+			|| riskExposureSortRank(a) - riskExposureSortRank(b)
+			|| compareRiskReviewDate(a, b, now)
+			|| compareRiskUpdated(a, b)
+			|| compareRiskStable(a, b);
+	}
+	if (selectedSort === 'review-due') {
+		return compareRiskReviewDate(a, b, now)
+			|| riskActionStateSortRank(a, now) - riskActionStateSortRank(b, now)
+			|| riskExposureSortRank(a) - riskExposureSortRank(b)
+			|| compareRiskUpdated(a, b)
+			|| compareRiskStable(a, b);
+	}
+	if (selectedSort === 'recently-updated') {
+		return compareRiskUpdated(a, b)
+			|| riskExposureSortRank(a) - riskExposureSortRank(b)
+			|| riskActionStateSortRank(a, now) - riskActionStateSortRank(b, now)
+			|| compareRiskStable(a, b);
+	}
+	return riskExposureSortRank(a) - riskExposureSortRank(b)
+		|| riskActionStateSortRank(a, now) - riskActionStateSortRank(b, now)
+		|| compareRiskReviewDate(a, b, now)
+		|| compareRiskUpdated(a, b)
+		|| compareRiskStable(a, b);
+}
+
+export function filterAndSortRisksForRegister(risks: ProjectRisk[], filters: RiskRegisterFilters = {}, now = new Date()): ProjectRisk[] {
+	return risks
+		.filter((risk) => riskMatchesRegisterFilters(risk, filters, now))
+		.sort((a, b) => compareRisksForRegister(a, b, filters.sort, now));
 }
 
 function isRedRiskActionState(value: unknown): boolean {
