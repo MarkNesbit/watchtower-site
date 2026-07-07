@@ -4,6 +4,9 @@ import test from 'node:test';
 import {
 	buildRiskReference,
 	compareRisksForRegister,
+	countDraftRisks,
+	countOpenRisks,
+	countRisksNeedingAction,
 	createProjectRiskComment,
 	createProjectRisk,
 	deriveRiskActionStateTone,
@@ -15,6 +18,7 @@ import {
 	deriveWatchtowerDefaultRiskExposureTone,
 	filterAndSortRisksForRegister,
 	getRiskActionStateDrivers,
+	getHighestActiveExposure,
 	getProjectRisk,
 	getRiskAssuranceBlocks,
 	isActiveRiskStatus,
@@ -28,6 +32,7 @@ import {
 	normaliseRiskRegisterSort,
 	normaliseRiskRegisterViewTab,
 	riskDisplayLabel,
+	riskExposureTone,
 	riskExposureToneLabel,
 	riskLifecycleCategory,
 	riskLifecycleLabel,
@@ -37,6 +42,7 @@ import {
 	riskProfileName,
 	riskReferenceStatusLabel,
 	riskRagTone,
+	summarizeRiskRegister,
 	transitionProjectRiskLifecycle,
 	updateProjectRisk,
 	validateRiskFormInput,
@@ -747,6 +753,145 @@ test('Risk Register sort options prioritise exposure action state review date an
 		'Risk-HHH-005',
 	]);
 	assert.equal(filterAndSortRisksForRegister([closedOverdue, lowGreenRecent], { sort: 'review-due' }, now)[0].risk_ref, 'Risk-HHH-006');
+});
+
+test('Risk Register summary helpers count lifecycle action state and exposure separately', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const highGreen = registerRisk({
+		risk_ref: 'Risk-HHH-001',
+		title: 'High exposure controlled risk',
+		probability: 'high',
+		impact: 'medium',
+	});
+	const lowRed = registerRisk({
+		risk_id: 'risk-2',
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		title: 'Low exposure missing owner',
+		owner_id: null,
+		owner: null,
+	});
+	const mediumAmber = registerRisk({
+		risk_id: 'risk-3',
+		risk_ref: 'Risk-HHH-003',
+		risk_sequence: 3,
+		title: 'Medium exposure missing due date',
+		probability: 'medium',
+		impact: 'medium',
+		due_date: null,
+	});
+	const draftCritical = registerRisk({
+		risk_id: 'risk-4',
+		risk_ref: 'Risk-HHH-004',
+		risk_sequence: 4,
+		title: 'Draft unassessed risk',
+		status: 'draft',
+		probability: '',
+		impact: '',
+	});
+	const closedCriticalRed = registerRisk({
+		risk_id: 'risk-5',
+		risk_ref: 'Risk-HHH-005',
+		risk_sequence: 5,
+		title: 'Closed critical historical risk',
+		status: 'closed',
+		probability: 'high',
+		impact: 'high',
+		owner_id: null,
+		owner: null,
+		review_date: '2026-01-01',
+	});
+	const risks = [highGreen, lowRed, mediumAmber, draftCritical, closedCriticalRed];
+
+	assert.equal(countOpenRisks(risks), 3);
+	assert.equal(countDraftRisks(risks), 1);
+	assert.equal(countRisksNeedingAction(risks, now), 2);
+	assert.equal(deriveRiskReferenceTone(highGreen, now), 'green');
+	assert.equal(deriveRiskReferenceTone(lowRed, now), 'red');
+	assert.equal(deriveRiskReferenceTone(mediumAmber, now), 'amber');
+	assert.equal(getHighestActiveExposure(risks), 'high');
+	assert.equal(getHighestActiveExposure([draftCritical, closedCriticalRed]), null);
+	assert.deepEqual(summarizeRiskRegister(risks, now), {
+		openRisks: 3,
+		needAction: 2,
+		highestExposure: 'high',
+		draftRisks: 1,
+	});
+});
+
+test('Risk Register summary handles empty closed-only and Low-highest scenarios without using health', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const closed = registerRisk({
+		status: 'resolved',
+		probability: 'high',
+		impact: 'high',
+		owner_id: null,
+		owner: null,
+	});
+	const lowOnly = registerRisk({
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		title: 'Low exposure active risk',
+		probability: 'low',
+		impact: 'low',
+	});
+
+	assert.deepEqual(summarizeRiskRegister([], now), {
+		openRisks: 0,
+		needAction: 0,
+		highestExposure: null,
+		draftRisks: 0,
+	});
+	assert.deepEqual(summarizeRiskRegister([closed], now), {
+		openRisks: 0,
+		needAction: 0,
+		highestExposure: null,
+		draftRisks: 0,
+	});
+	assert.deepEqual(summarizeRiskRegister([lowOnly], now), {
+		openRisks: 1,
+		needAction: 0,
+		highestExposure: 'low',
+		draftRisks: 0,
+	});
+	assert.equal(riskExposureTone('low'), 'risk-low');
+	assert.equal(riskExposureToneLabel(riskExposureTone('low')), 'Low');
+});
+
+test('Risk Register summary remains an overall project summary while table filters narrow rows', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const risks = [
+		registerRisk({
+			risk_ref: 'Risk-HHH-001',
+			title: 'High controlled risk',
+			probability: 'high',
+			impact: 'medium',
+		}),
+		registerRisk({
+			risk_id: 'risk-2',
+			risk_ref: 'Risk-HHH-002',
+			risk_sequence: 2,
+			title: 'Low missing owner',
+			owner_id: null,
+			owner: null,
+		}),
+		registerRisk({
+			risk_id: 'risk-3',
+			risk_ref: 'Risk-HHH-003',
+			risk_sequence: 3,
+			title: 'Draft risk',
+			status: 'draft',
+		}),
+	];
+
+	const filtered = filterAndSortRisksForRegister(risks, { view: 'need-action', exposure: 'low' }, now);
+	assert.deepEqual(filtered.map((risk) => risk.risk_ref), ['Risk-HHH-002']);
+	assert.deepEqual(summarizeRiskRegister(risks, now), {
+		openRisks: 2,
+		needAction: 1,
+		highestExposure: 'high',
+		draftRisks: 1,
+	});
 });
 
 test('Risk create/edit validation covers references, required fields and dates', () => {
@@ -1637,6 +1782,7 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /data-risk-lifecycle=\{riskLifecycleCategory\(risk\.status\)\}/);
 	assert.match(route, /normaliseRiskRegisterViewTab\(registerParams\.get\('view'\)\)/);
 	assert.match(route, /normaliseRiskRegisterSort\(registerParams\.get\('sort'\)\)/);
+	assert.match(route, /summarizeRiskRegister\(risks, registerNow\)/);
 	assert.doesNotMatch(route, /activeRisks = risks\.filter/);
 	assert.doesNotMatch(route, /draftRisks = risks\.filter/);
 	assert.doesNotMatch(route, /closedRisks = risks\.filter/);
@@ -1660,6 +1806,15 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /ariaLabel=\{`\$\{risk\.risk_ref\} exposure: \$\{exposureLabel\}`\}/);
 	assert.match(route, /ariaLabel=\{`\$\{risk\.risk_ref\} action state: \$\{actionState\.label\}`\}/);
 	assert.match(route, /buildProjectNewRiskPath\(workspaceSlug \?\? '', project\.slug\)/);
+	assert.match(route, /data-risk-register-summary/);
+	for (const card of ['Open risks', 'Need action', 'Highest exposure', 'Draft risks']) {
+		assert.match(route, new RegExp(card));
+	}
+	for (const helper of ['Active project risks', 'Red or Amber action state', 'Across active risks', 'Need completion']) {
+		assert.match(route, new RegExp(helper));
+	}
+	assert.match(route, /highestExposureLabel = registerSummary\.highestExposure \? riskDisplayLabel\(registerSummary\.highestExposure\) : 'Not assessed'/);
+	assert.match(route, /risk-register-summary-card--risk-low/);
 	assert.match(route, /data-risk-register-tabs/);
 	assert.match(route, /data-risk-register-controls/);
 	for (const tab of ['All risks', 'Need action', 'Draft', 'Closed']) {

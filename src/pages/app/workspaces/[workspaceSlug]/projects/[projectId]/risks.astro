@@ -19,12 +19,14 @@ import {
 	RISK_REGISTER_SORTS,
 	RISK_REGISTER_VIEW_TABS,
 	riskDisplayLabel,
+	riskExposureTone,
 	riskExposureToneLabel,
 	riskLifecycleCategory,
 	riskLifecycleLabel,
 	riskProfileName,
 	riskMatchesRegisterView,
 	riskReferenceStatusLabel,
+	summarizeRiskRegister,
 } from '../../../../../../lib/projectRisks';
 import { buildProjectNewRiskPath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
@@ -166,6 +168,7 @@ const registerFilters = {
 	sort: selectedSort,
 };
 const filteredRisks = filterAndSortRisksForRegister(risks, registerFilters, registerNow);
+const registerSummary = summarizeRiskRegister(risks, registerNow);
 const tabLabels = {
 	all: 'All risks',
 	'need-action': 'Need action',
@@ -234,6 +237,34 @@ const filteredEmptyTitle = hasNarrowedFilters
 			: selectedView === 'closed'
 				? 'No closed risks.'
 				: 'No risks match the current filters.';
+const highestExposureTone = registerSummary.highestExposure ? riskExposureTone(registerSummary.highestExposure) : 'neutral';
+const highestExposureLabel = registerSummary.highestExposure ? riskDisplayLabel(registerSummary.highestExposure) : 'Not assessed';
+const summaryCards = [
+	{
+		label: 'Open risks',
+		value: String(registerSummary.openRisks),
+		helper: 'Active project risks',
+		tone: 'blue',
+	},
+	{
+		label: 'Need action',
+		value: String(registerSummary.needAction),
+		helper: 'Red or Amber action state',
+		tone: registerSummary.needAction > 0 ? 'attention' : 'neutral',
+	},
+	{
+		label: 'Highest exposure',
+		value: highestExposureLabel,
+		helper: 'Across active risks',
+		tone: highestExposureTone,
+	},
+	{
+		label: 'Draft risks',
+		value: String(registerSummary.draftRisks),
+		helper: 'Need completion',
+		tone: 'neutral',
+	},
+];
 ---
 <AuthenticatedLayout title={project ? `Risk Register — ${project.name} | WatchTower` : 'Risk Register | WatchTower'}>
 	<section class="risk-register-page" data-risk-management-route data-risk-register-route data-feature-state={featureAccess.state}>
@@ -281,6 +312,18 @@ const filteredEmptyTitle = hasNarrowedFilters
 							disabledText="Viewer access is read-only. Risk creation is unavailable."
 						/>
 					</div>
+
+					{!risksLoadError && (
+						<section class="risk-register-summary" aria-label="Risk Register summary" data-risk-register-summary>
+							{summaryCards.map((card) => (
+								<article class={`risk-register-summary-card risk-register-summary-card--${card.tone}`}>
+									<span class="risk-register-summary-card__label">{card.label}</span>
+									<strong class="risk-register-summary-card__value">{card.value}</strong>
+									<span class="risk-register-summary-card__helper">{card.helper}</span>
+								</article>
+							))}
+						</section>
+					)}
 
 					{risksLoadError ? (
 						<EmptyState title="The Risk Register could not be loaded." tone="error" data-risk-list-error role="alert">
@@ -508,6 +551,87 @@ const filteredEmptyTitle = hasNarrowedFilters
 	.risk-register-action [disabled] {
 		opacity: 0.68;
 		cursor: not-allowed;
+	}
+
+	.risk-register-summary {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0.65rem;
+		margin-bottom: 0.85rem;
+	}
+
+	.risk-register-summary-card {
+		--summary-accent: var(--rag-neutral-accent);
+		--summary-border: var(--rag-neutral-border);
+		--summary-background: var(--rag-neutral-background);
+		display: grid;
+		gap: 0.22rem;
+		min-height: 6rem;
+		padding: 0.82rem 0.9rem;
+		border: 1px solid var(--summary-border);
+		border-left: 3px solid var(--summary-accent);
+		border-radius: 8px;
+		background:
+			linear-gradient(135deg, var(--summary-background), rgba(8, 13, 23, 0.42)),
+			rgba(8, 13, 23, 0.56);
+	}
+
+	.risk-register-summary-card--blue {
+		--summary-accent: var(--rag-reference);
+		--summary-border: var(--rag-reference-border);
+		--summary-background: var(--rag-reference-background);
+	}
+
+	.risk-register-summary-card--attention {
+		--summary-accent: var(--rag-red-accent);
+		--summary-border: color-mix(in srgb, var(--rag-red-border) 58%, var(--rag-amber-border));
+		--summary-background: color-mix(in srgb, var(--rag-red-background) 58%, var(--rag-amber-background));
+	}
+
+	.risk-register-summary-card--risk-critical {
+		--summary-accent: var(--risk-exposure-critical-accent);
+		--summary-border: var(--risk-exposure-critical-border);
+		--summary-background: var(--risk-exposure-critical-background);
+	}
+
+	.risk-register-summary-card--risk-high {
+		--summary-accent: var(--risk-exposure-high-accent);
+		--summary-border: var(--risk-exposure-high-border);
+		--summary-background: var(--risk-exposure-high-background);
+	}
+
+	.risk-register-summary-card--risk-medium {
+		--summary-accent: var(--risk-exposure-medium-accent);
+		--summary-border: var(--risk-exposure-medium-border);
+		--summary-background: var(--risk-exposure-medium-background);
+	}
+
+	.risk-register-summary-card--risk-low {
+		--summary-accent: var(--risk-exposure-low-accent);
+		--summary-border: var(--risk-exposure-low-border);
+		--summary-background: var(--risk-exposure-low-background);
+	}
+
+	.risk-register-summary-card__label,
+	.risk-register-summary-card__helper {
+		color: var(--muted-strong);
+		font-size: 0.84rem;
+		font-weight: 800;
+		line-height: 1.25;
+	}
+
+	.risk-register-summary-card__value {
+		color: var(--text);
+		font-size: clamp(1.42rem, 2vw, 1.9rem);
+		font-weight: 900;
+		line-height: 1.1;
+	}
+
+	.risk-register-summary-card--risk-critical .risk-register-summary-card__value,
+	.risk-register-summary-card--risk-high .risk-register-summary-card__value,
+	.risk-register-summary-card--risk-medium .risk-register-summary-card__value,
+	.risk-register-summary-card--risk-low .risk-register-summary-card__value {
+		color: var(--summary-accent);
 	}
 
 	.risk-register-tabs {
@@ -745,6 +869,10 @@ const filteredEmptyTitle = hasNarrowedFilters
 	}
 
 	@media (max-width: 1180px) {
+		.risk-register-summary {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
 		.risk-register-toolbar {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
@@ -758,6 +886,10 @@ const filteredEmptyTitle = hasNarrowedFilters
 	@media (max-width: 760px) {
 		.risk-register-action {
 			justify-items: stretch;
+		}
+
+		.risk-register-summary {
+			grid-template-columns: 1fr;
 		}
 
 		.risk-register-toolbar {

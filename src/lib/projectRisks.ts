@@ -36,6 +36,12 @@ export type RiskRegisterFilters = {
 	lifecycle?: RiskLifecycleCategory | string | null;
 	sort?: RiskRegisterSort | string | null;
 };
+export type RiskRegisterSummary = {
+	openRisks: number;
+	needAction: number;
+	highestExposure: RiskExposure | null;
+	draftRisks: number;
+};
 
 const RISK_SEQUENCE_CONSTRAINT = 'project_risks_project_sequence_key';
 const RISK_REF_CONSTRAINT = 'project_risks_project_ref_key';
@@ -498,6 +504,41 @@ export function filterAndSortRisksForRegister(risks: ProjectRisk[], filters: Ris
 	return risks
 		.filter((risk) => riskMatchesRegisterFilters(risk, filters, now))
 		.sort((a, b) => compareRisksForRegister(a, b, filters.sort, now));
+}
+
+export function countOpenRisks(risks: Array<Pick<ProjectRisk, 'status'>>): number {
+	return risks.filter((risk) => riskLifecycleCategory(risk.status) === 'active').length;
+}
+
+export function countDraftRisks(risks: Array<Pick<ProjectRisk, 'status'>>): number {
+	return risks.filter((risk) => riskLifecycleCategory(risk.status) === 'draft').length;
+}
+
+export function countRisksNeedingAction(risks: Array<Pick<ProjectRisk,
+	'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+>>, now = new Date()): number {
+	return risks.filter((risk) => {
+		if (riskLifecycleCategory(risk.status) !== 'active') return false;
+		const actionState = deriveRiskReferenceTone(risk, now);
+		return actionState === 'red' || actionState === 'amber';
+	}).length;
+}
+
+export function getHighestActiveExposure(risks: Array<Pick<ProjectRisk, 'status' | 'probability' | 'impact'>>): RiskExposure | null {
+	const activeRisks = risks.filter((risk) => riskLifecycleCategory(risk.status) === 'active');
+	if (activeRisks.length === 0) return null;
+	return activeRisks
+		.map((risk) => deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact))
+		.sort((a, b) => RISK_EXPOSURES.indexOf(b) - RISK_EXPOSURES.indexOf(a))[0] ?? null;
+}
+
+export function summarizeRiskRegister(risks: ProjectRisk[], now = new Date()): RiskRegisterSummary {
+	return {
+		openRisks: countOpenRisks(risks),
+		needAction: countRisksNeedingAction(risks, now),
+		highestExposure: getHighestActiveExposure(risks),
+		draftRisks: countDraftRisks(risks),
+	};
 }
 
 function isRedRiskActionState(value: unknown): boolean {
