@@ -17,14 +17,18 @@ import {
 	deriveRiskReferenceTone,
 	deriveWatchtowerDefaultRiskExposureTone,
 	filterAndSortRisksForRegister,
+	getProjectRiskActionItems,
+	getRiskActionItems,
 	getRiskActionStateDrivers,
 	getHighestActiveExposure,
 	getProjectRisk,
 	getRiskAssuranceBlocks,
+	getTopRiskActionItems,
 	isActiveRiskStatus,
 	isClosedRiskStatus,
 	isDraftRiskStatus,
 	isRiskReviewDate,
+	isRiskEligibleForActionPanel,
 	listProjectRiskComments,
 	listProjectRisksByIds,
 	listProjectRisks,
@@ -42,6 +46,7 @@ import {
 	riskProfileName,
 	riskReferenceStatusLabel,
 	riskRagTone,
+	rankRiskActionItems,
 	summarizeRiskRegister,
 	transitionProjectRiskLifecycle,
 	updateProjectRisk,
@@ -892,6 +897,194 @@ test('Risk Register summary remains an overall project summary while table filte
 		highestExposure: 'high',
 		draftRisks: 1,
 	});
+});
+
+test('Risk Register Needs Action helper only derives items for active risks', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const activeMissingOwner = registerRisk({
+		owner_id: null,
+		owner: null,
+	});
+	const draftMissingOwner = registerRisk({
+		risk_id: 'risk-2',
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		status: 'draft',
+		owner_id: null,
+		owner: null,
+	});
+	const closedOverdue = registerRisk({
+		risk_id: 'risk-3',
+		risk_ref: 'Risk-HHH-003',
+		risk_sequence: 3,
+		status: 'closed',
+		review_date: '2026-01-01',
+		owner_id: null,
+		owner: null,
+	});
+	const resolvedCritical = registerRisk({
+		risk_id: 'risk-4',
+		risk_ref: 'Risk-HHH-004',
+		risk_sequence: 4,
+		status: 'resolved',
+		probability: 'high',
+		impact: 'high',
+		mitigation_plan: '',
+	});
+
+	assert.equal(isRiskEligibleForActionPanel(activeMissingOwner), true);
+	assert.equal(isRiskEligibleForActionPanel(draftMissingOwner), false);
+	assert.equal(isRiskEligibleForActionPanel(closedOverdue), false);
+	for (const terminalStatus of ['accepted', 'resolved', 'passed', 'retired', 'cancelled', 'rejected']) {
+		assert.equal(isRiskEligibleForActionPanel({ status: terminalStatus }), false);
+		assert.deepEqual(getRiskActionItems({ ...closedOverdue, status: terminalStatus }, now), []);
+	}
+	assert.equal(getRiskActionItems(activeMissingOwner, now).some((item) => item.type === 'assign-owner'), true);
+	assert.deepEqual(getRiskActionItems(draftMissingOwner, now), []);
+	assert.deepEqual(getRiskActionItems(closedOverdue, now), []);
+	assert.deepEqual(getRiskActionItems(resolvedCritical, now), []);
+	assert.equal(getRiskActionItems({ ...activeMissingOwner, status: 'closed' }, now).length, 0);
+	assert.equal(getRiskActionItems({ ...draftMissingOwner, status: 'open' }, now).some((item) => item.type === 'assign-owner'), true);
+});
+
+test('Risk Register Needs Action helper derives specific actions rather than exposure-only labels', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const incomplete = registerRisk({
+		probability: '',
+		impact: '',
+		owner_id: null,
+		owner: null,
+		actioner_id: null,
+		actioner: null,
+		mitigation_plan: '',
+		contingency_plan: '',
+		review_date: null,
+		due_date: null,
+	});
+	const completeCritical = registerRisk({
+		risk_id: 'risk-2',
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		title: 'Critical but well managed',
+		probability: 'high',
+		impact: 'high',
+	});
+	const lowMissingOwner = registerRisk({
+		risk_id: 'risk-3',
+		risk_ref: 'Risk-HHH-003',
+		risk_sequence: 3,
+		title: 'Low exposure unmanaged',
+		owner_id: null,
+		owner: null,
+	});
+
+	const itemTypes = getRiskActionItems(incomplete, now).map((item) => item.type);
+	for (const expected of ['assign-owner', 'assign-actioner', 'add-mitigation', 'add-contingency', 'assess-exposure', 'set-review-date', 'set-due-date']) {
+		assert.equal(itemTypes.includes(expected), true);
+	}
+	assert.deepEqual(getRiskActionItems(completeCritical, now), []);
+	assert.equal(getRiskActionItems(lowMissingOwner, now).some((item) => item.type === 'assign-owner'), true);
+	assert.equal(countRisksNeedingAction([incomplete], now), 1);
+	assert.equal(getRiskActionItems(incomplete, now).length > countRisksNeedingAction([incomplete], now), true);
+});
+
+test('Risk Register Needs Action priority is deterministic and uses exposure as a tie-breaker', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const overdue = registerRisk({
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		title: 'Overdue review',
+		review_date: '2026-06-01',
+	});
+	const highMissingOwner = registerRisk({
+		risk_id: 'risk-2',
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		title: 'High missing owner',
+		probability: 'high',
+		impact: 'medium',
+		owner_id: null,
+		owner: null,
+	});
+	const lowMissingOwner = registerRisk({
+		risk_id: 'risk-3',
+		risk_ref: 'Risk-HHH-003',
+		risk_sequence: 3,
+		title: 'Low missing owner',
+		owner_id: null,
+		owner: null,
+	});
+	const dueSoon = registerRisk({
+		risk_id: 'risk-4',
+		risk_ref: 'Risk-HHH-004',
+		risk_sequence: 4,
+		title: 'Review due soon',
+		review_date: '2026-07-02',
+	});
+	const highMissingMitigation = registerRisk({
+		risk_id: 'risk-5',
+		risk_ref: 'Risk-HHH-005',
+		risk_sequence: 5,
+		title: 'High missing mitigation',
+		probability: 'high',
+		impact: 'medium',
+		mitigation_plan: '',
+	});
+	const ranked = getProjectRiskActionItems([dueSoon, highMissingMitigation, lowMissingOwner, highMissingOwner, overdue], now);
+
+	assert.deepEqual(ranked.slice(0, 5).map((item) => `${item.riskReference}:${item.type}`), [
+		'Risk-HHH-001:review-overdue',
+		'Risk-HHH-002:assign-owner',
+		'Risk-HHH-003:assign-owner',
+		'Risk-HHH-004:review-due-soon',
+		'Risk-HHH-005:add-mitigation',
+	]);
+	assert.equal(ranked.findIndex((item) => item.riskReference === 'Risk-HHH-002'), 1);
+	assert.equal(ranked.findIndex((item) => item.riskReference === 'Risk-HHH-003'), 2);
+	assert.deepEqual(getTopRiskActionItems([dueSoon, highMissingMitigation, lowMissingOwner, highMissingOwner, overdue], 2, now).map((item) => item.riskReference), [
+		'Risk-HHH-001',
+		'Risk-HHH-002',
+	]);
+	assert.deepEqual(rankRiskActionItems([ranked[3], ranked[0], ranked[1]]).map((item) => item.riskReference), [
+		'Risk-HHH-001',
+		'Risk-HHH-002',
+		'Risk-HHH-004',
+	]);
+});
+
+test('Risk Register Needs Action panel remains an overall project queue while table filters narrow rows', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const risks = [
+		registerRisk({
+			risk_ref: 'Risk-HHH-001',
+			title: 'High controlled risk',
+			probability: 'high',
+			impact: 'medium',
+		}),
+		registerRisk({
+			risk_id: 'risk-2',
+			risk_ref: 'Risk-HHH-002',
+			risk_sequence: 2,
+			title: 'Low missing owner',
+			owner_id: null,
+			owner: null,
+		}),
+		registerRisk({
+			risk_id: 'risk-3',
+			risk_ref: 'Risk-HHH-003',
+			risk_sequence: 3,
+			title: 'Draft missing owner',
+			status: 'draft',
+			owner_id: null,
+			owner: null,
+		}),
+	];
+	const filtered = filterAndSortRisksForRegister(risks, { search: 'High controlled risk' }, now);
+	const queue = getProjectRiskActionItems(risks, now);
+
+	assert.deepEqual(filtered.map((risk) => risk.risk_ref), ['Risk-HHH-001']);
+	assert.deepEqual(queue.map((item) => `${item.riskReference}:${item.type}`), ['Risk-HHH-002:assign-owner']);
+	assert.equal(getTopRiskActionItems([risks[0]], 4, now).length, 0);
 });
 
 test('Risk create/edit validation covers references, required fields and dates', () => {
@@ -1783,6 +1976,15 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /normaliseRiskRegisterViewTab\(registerParams\.get\('view'\)\)/);
 	assert.match(route, /normaliseRiskRegisterSort\(registerParams\.get\('sort'\)\)/);
 	assert.match(route, /summarizeRiskRegister\(risks, registerNow\)/);
+	assert.match(route, /getTopRiskActionItems\(risks, 4, registerNow\)/);
+	assert.match(route, /data-risk-needs-action-panel/);
+	assert.match(route, /Highest-priority risk work/);
+	assert.match(route, /No active risk work currently needs attention\./);
+	assert.match(route, /data-risk-needs-action-view-all/);
+	assert.match(route, /view: 'need-action'/);
+	assert.match(route, /sort: 'action-needed'/);
+	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, item\.riskId\)/);
+	assert.match(route, /aria-label=\{`\$\{item\.label\} for \$\{item\.riskReference\}: \$\{item\.riskTitle\}`\}/);
 	assert.doesNotMatch(route, /activeRisks = risks\.filter/);
 	assert.doesNotMatch(route, /draftRisks = risks\.filter/);
 	assert.doesNotMatch(route, /closedRisks = risks\.filter/);
@@ -1837,7 +2039,7 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /action state/);
 	assert.doesNotMatch(route, /riskRagTone/);
 	assert.doesNotMatch(route, /risk\.description && <span>/);
-	assert.doesNotMatch(route, /Exposure distribution|Help me identify risks|More filters|pagination/i);
+	assert.doesNotMatch(route, /Exposure distribution|Help me identify risks|More filters|pagination|acknowledge|dismiss|notification controls/i);
 	assert.match(route, /data-risk-create-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-create-disabled/);
 	assert.match(route, /Viewer access is read-only, so risk creation is unavailable for your role\./);
