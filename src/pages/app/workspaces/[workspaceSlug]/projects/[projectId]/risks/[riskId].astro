@@ -163,11 +163,31 @@ const blockValue = (block) => {
 	if (block.id === 'updated') return formatDateTime(risk?.updated_at, block.value);
 	return block.value;
 };
-const longTextBlockIds = new Set(['description', 'mitigation', 'contingency']);
+const longTextBlockConfigs = {
+	description: {
+		fieldLabel: 'Risk description',
+		triggerLabel: 'View full description',
+		source: () => risk?.description ?? '',
+	},
+	mitigation: {
+		fieldLabel: 'Mitigation plan',
+		triggerLabel: 'View full mitigation plan',
+		source: () => risk?.mitigation_plan ?? '',
+	},
+	contingency: {
+		fieldLabel: 'Contingency plan',
+		triggerLabel: 'View full contingency plan',
+		source: () => risk?.contingency_plan ?? '',
+	},
+};
 const LONG_TEXT_PREVIEW_THRESHOLD = 180;
-const supportsLongTextPreview = (block) => longTextBlockIds.has(block.id);
+const normaliseLongText = (value) => String(value ?? '').trim();
+const supportsLongTextPreview = (block) => Boolean(longTextBlockConfigs[block.id]);
+const longTextConfig = (block) => longTextBlockConfigs[block.id] ?? null;
+const longTextSourceValue = (block) => normaliseLongText(longTextConfig(block)?.source());
+const getLongTextModalId = (block) => `risk-full-text-dialog-${block.id}`;
 const shouldShowFullTextDialog = (block, value) => supportsLongTextPreview(block) && value.length > LONG_TEXT_PREVIEW_THRESHOLD;
-const viewFullLabel = (block) => `View full ${block.title.toLowerCase()}`;
+const viewFullLabel = (block) => longTextConfig(block)?.triggerLabel ?? `View full ${block.title.toLowerCase()}`;
 const riskFormFields = risk ? {
 	title: risk.title ?? '',
 	description: risk.description ?? '',
@@ -317,7 +337,10 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 						{assuranceBlocks.map((block) => {
 							const value = blockValue(block);
 							const isLongTextBlock = supportsLongTextPreview(block);
-							const hasFullTextDialog = shouldShowFullTextDialog(block, value);
+							const fullTextValue = isLongTextBlock ? longTextSourceValue(block) : '';
+							const displayValue = fullTextValue || value;
+							const longTextFieldLabel = longTextConfig(block)?.fieldLabel ?? block.title;
+							const hasFullTextDialog = shouldShowFullTextDialog(block, fullTextValue);
 							return (
 								<article class={`risk-assurance-block risk-assurance-block--${block.tone} rag-card rag-card--${block.tone}`} data-risk-assurance-block={block.id} data-assurance-tone={block.tone}>
 									{hasModalConfig(block.id) ? (
@@ -327,28 +350,28 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 													<span class="risk-assurance-block__title">{block.title}</span>
 													<RagReferencePill tone={block.tone} label={block.statusLabel} />
 												</span>
-												<span class={`risk-assurance-block__value${isLongTextBlock ? ' risk-assurance-block__value--long-text' : ''}`} data-risk-long-text-preview={isLongTextBlock ? block.id : undefined}>{value}</span>
+												<span class={`risk-assurance-block__value${fullTextValue ? ' risk-assurance-block__value--long-text' : ''}`} data-risk-long-text-preview={fullTextValue ? block.id : undefined}>{displayValue}</span>
 												{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
 											</button>
 
 											{hasFullTextDialog && (
 												<>
-													<button class="risk-assurance-block__full-text" type="button" data-risk-dialog-open={`risk-full-text-dialog-${block.id}`} data-risk-full-text-trigger={block.id}>
+													<button class="risk-assurance-block__full-text" type="button" data-risk-dialog-open={getLongTextModalId(block)} data-risk-full-text-trigger={block.id} aria-label={`${viewFullLabel(block)} for ${risk.risk_ref}`}>
 														{viewFullLabel(block)}
 													</button>
 
-													<dialog class="risk-full-text-dialog" id={`risk-full-text-dialog-${block.id}`} aria-labelledby={`risk-full-text-dialog-${block.id}-title`} data-risk-full-text-dialog data-risk-modal-backdrop-blur>
+													<dialog class="risk-full-text-dialog" id={getLongTextModalId(block)} aria-labelledby={`${getLongTextModalId(block)}-title`} data-risk-full-text-dialog data-risk-modal-backdrop-blur>
 														<div class="risk-action-dialog__header">
 															<div>
 																<p class="eyebrow">{risk.risk_ref} — {risk.title}</p>
-																<h3 id={`risk-full-text-dialog-${block.id}-title`}>{block.title}</h3>
+																<h3 id={`${getLongTextModalId(block)}-title`} tabindex="-1" data-risk-dialog-focus>{longTextFieldLabel}</h3>
 															</div>
 															<form method="dialog">
 																<button class="risk-action-dialog__close" type="submit" aria-label="Close">x</button>
 															</form>
 														</div>
 														<div class="risk-full-text-dialog__content" data-risk-full-text-content={block.id}>
-															<p>{value}</p>
+															<p>{fullTextValue}</p>
 														</div>
 														<form class="risk-full-text-dialog__actions" method="dialog">
 															<button class="button button--secondary" type="submit" data-risk-full-text-close>Close</button>
@@ -494,7 +517,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 												<span class="risk-assurance-block__title">{block.title}</span>
 												<RagReferencePill tone={block.tone} label={block.statusLabel} />
 											</span>
-											<span class={`risk-assurance-block__value${isLongTextBlock ? ' risk-assurance-block__value--long-text' : ''}`} data-risk-long-text-preview={isLongTextBlock ? block.id : undefined}>{value}</span>
+											<span class={`risk-assurance-block__value${fullTextValue ? ' risk-assurance-block__value--long-text' : ''}`} data-risk-long-text-preview={fullTextValue ? block.id : undefined}>{displayValue}</span>
 											{block.prompt && <span class="risk-assurance-block__prompt">{block.prompt}</span>}
 										</div>
 									)}
@@ -602,8 +625,13 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 			if (!(button instanceof HTMLElement)) return;
 			const dialog = document.getElementById(button.dataset.riskDialogOpen || '');
 			if (dialog instanceof HTMLDialogElement) {
+				document.querySelectorAll('dialog[open]').forEach((openDialog) => {
+					if (openDialog !== dialog && openDialog instanceof HTMLDialogElement) openDialog.close();
+				});
 				activeDialogTrigger = button;
 				dialog.showModal();
+				const focusTarget = dialog.querySelector('[data-risk-dialog-focus], [data-risk-dialog-cancel], button, input, select, textarea');
+				if (focusTarget instanceof HTMLElement) focusTarget.focus();
 			}
 		});
 	});
@@ -894,11 +922,13 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 
 	.risk-full-text-dialog {
 		width: min(46rem, calc(100vw - 2rem));
+		max-height: min(88vh, 46rem);
 		border: 1px solid var(--border);
 		border-radius: 0.5rem;
 		padding: 1rem;
 		background: #07111d;
 		color: var(--text);
+		overflow: hidden;
 	}
 
 	.risk-action-dialog::backdrop,

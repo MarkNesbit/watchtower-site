@@ -336,7 +336,7 @@ Owner/actioner inactivity assurance remains future-ready only. The schema includ
 
 The Risk detail page no longer shows a second "overall concern" block that repeats the top reference pill. It shows exposure in Current Risk Detail, then shows an action-state rationale block with explanation bullets such as missing owner, missing actioner, overdue review date, missing mitigation for the exposure level or stale update data. Project health remains separate and Unknown until a formal health model is implemented.
 
-Current Risk Detail overview cards show previews for populated long free-text fields such as summary, mitigation plan and contingency plan. Full text is available through a read-only modal from the card area, while missing fields continue to show their existing prompts and action-state impact in the overview. This truncation is a UX presentation change only and does not alter exposure calculation, action-state rules, project health or stored risk values.
+Current Risk Detail overview cards show bounded previews for populated long free-text fields such as risk description, mitigation plan and contingency plan. Full text is available through a read-only dialog from the card area, with line breaks preserved and focus returned to the opening control when the dialog closes, while missing fields continue to show their existing prompts and action-state impact in the overview. This truncation is a UX presentation change only and does not alter exposure calculation, action-state rules, lifecycle, project health, edit authority or stored risk values.
 
 WT-RISK-NARRATIVE-001 depends on this derived action-state model for the "risk became Red" trigger. It does not use the legacy stored `rag_status` value as a user-selected trigger source.
 
