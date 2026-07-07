@@ -27,6 +27,9 @@ export const RISK_REGISTER_VIEW_TABS = ['all', 'need-action', 'draft', 'closed']
 export type RiskRegisterViewTab = (typeof RISK_REGISTER_VIEW_TABS)[number];
 export const RISK_REGISTER_SORTS = ['highest-exposure', 'action-needed', 'review-due', 'recently-updated'] as const;
 export type RiskRegisterSort = (typeof RISK_REGISTER_SORTS)[number];
+export const RISK_REGISTER_PAGE_SIZES = [10, 25, 50] as const;
+export const DEFAULT_RISK_REGISTER_PAGE_SIZE = 25;
+export type RiskRegisterPageSize = (typeof RISK_REGISTER_PAGE_SIZES)[number];
 export type RiskRegisterFilters = {
 	view?: RiskRegisterViewTab | string | null;
 	search?: string | null;
@@ -35,6 +38,18 @@ export type RiskRegisterFilters = {
 	ownerId?: string | null;
 	lifecycle?: RiskLifecycleCategory | string | null;
 	sort?: RiskRegisterSort | string | null;
+};
+export type RiskRegisterPagination = {
+	page: number;
+	pageSize: RiskRegisterPageSize;
+	totalItems: number;
+	totalPages: number;
+	startIndex: number;
+	endIndex: number;
+	startItem: number;
+	endItem: number;
+	hasPrevious: boolean;
+	hasNext: boolean;
 };
 export type RiskRegisterSummary = {
 	openRisks: number;
@@ -391,6 +406,27 @@ export function normaliseRiskRegisterSort(value: unknown): RiskRegisterSort {
 	return RISK_REGISTER_SORTS.includes(value as RiskRegisterSort) ? value as RiskRegisterSort : 'highest-exposure';
 }
 
+export function parseRiskRegisterPage(value: unknown): number {
+	const rawValue = typeof value === 'number' ? String(value) : trimmedText(value);
+	const parsed = /^\d+$/.test(rawValue) ? Number(rawValue) : Number.NaN;
+	return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+export function parseRiskRegisterPageSize(value: unknown): RiskRegisterPageSize {
+	const rawValue = typeof value === 'number' ? String(value) : trimmedText(value);
+	const parsed = /^\d+$/.test(rawValue) ? Number(rawValue) : Number.NaN;
+	return RISK_REGISTER_PAGE_SIZES.includes(parsed as RiskRegisterPageSize)
+		? parsed as RiskRegisterPageSize
+		: DEFAULT_RISK_REGISTER_PAGE_SIZE;
+}
+
+export function normaliseRiskRegisterPage(value: unknown, totalPages = 1): number {
+	const page = parseRiskRegisterPage(value);
+	const parsedTotalPages = Math.floor(Number(totalPages) || 1);
+	const lastPage = Math.max(1, parsedTotalPages);
+	return Math.min(page, lastPage);
+}
+
 export function normaliseRiskRegisterSearch(value: unknown): string {
 	return trimmedText(value).toLowerCase();
 }
@@ -531,6 +567,45 @@ export function filterAndSortRisksForRegister(risks: ProjectRisk[], filters: Ris
 	return risks
 		.filter((risk) => riskMatchesRegisterFilters(risk, filters, now))
 		.sort((a, b) => compareRisksForRegister(a, b, filters.sort, now));
+}
+
+export function getRiskRegisterPaginationRange(totalItems: number, requestedPage: unknown = 1, requestedPageSize: unknown = DEFAULT_RISK_REGISTER_PAGE_SIZE): RiskRegisterPagination {
+	const safeTotal = Math.max(0, Math.floor(Number(totalItems) || 0));
+	const pageSize = parseRiskRegisterPageSize(requestedPageSize);
+	const totalPages = Math.max(1, Math.ceil(safeTotal / pageSize));
+	const page = normaliseRiskRegisterPage(requestedPage, totalPages);
+	const startIndex = safeTotal === 0 ? 0 : (page - 1) * pageSize;
+	const endIndex = safeTotal === 0 ? 0 : Math.min(startIndex + pageSize, safeTotal);
+
+	return {
+		page,
+		pageSize,
+		totalItems: safeTotal,
+		totalPages,
+		startIndex,
+		endIndex,
+		startItem: safeTotal === 0 ? 0 : startIndex + 1,
+		endItem: endIndex,
+		hasPrevious: page > 1,
+		hasNext: page < totalPages,
+	};
+}
+
+export function paginateRisksForRegister(risks: ProjectRisk[], requestedPage: unknown = 1, requestedPageSize: unknown = DEFAULT_RISK_REGISTER_PAGE_SIZE) {
+	const pagination = getRiskRegisterPaginationRange(risks.length, requestedPage, requestedPageSize);
+	return {
+		items: risks.slice(pagination.startIndex, pagination.endIndex),
+		pagination,
+	};
+}
+
+export function getRiskRegisterPageNumbers(currentPage: number, totalPages: number, maxVisible = 5): number[] {
+	const safeTotal = Math.max(1, Math.floor(Number(totalPages) || 1));
+	const safeCurrent = normaliseRiskRegisterPage(currentPage, safeTotal);
+	const safeVisible = Math.max(1, Math.floor(Number(maxVisible) || 1));
+	const count = Math.min(safeVisible, safeTotal);
+	const start = Math.min(Math.max(1, safeCurrent - Math.floor(count / 2)), safeTotal - count + 1);
+	return Array.from({ length: count }, (_, index) => start + index);
 }
 
 export function countOpenRisks(risks: Array<Pick<ProjectRisk, 'status'>>): number {
