@@ -51,6 +51,20 @@ export type RiskRegisterPagination = {
 	hasPrevious: boolean;
 	hasNext: boolean;
 };
+export type RiskExposureDistributionSegment = {
+	exposure: RiskExposure;
+	label: string;
+	tone: RiskExposureTone;
+	count: number;
+	percentage: number;
+};
+export type RiskExposureDistribution = {
+	totalActiveRisks: number;
+	assessedActiveRisks: number;
+	unassessedActiveRisks: number;
+	segments: RiskExposureDistributionSegment[];
+	summary: string;
+};
 export type RiskRegisterSummary = {
 	openRisks: number;
 	needAction: number;
@@ -626,12 +640,59 @@ export function countRisksNeedingAction(risks: Array<Pick<ProjectRisk,
 	}).length;
 }
 
+export function hasAssessedRiskExposure(risk: Pick<ProjectRisk, 'probability' | 'impact'>): boolean {
+	return RISK_LEVELS.includes(risk.probability as RiskLevel) && RISK_LEVELS.includes(risk.impact as RiskLevel);
+}
+
 export function getHighestActiveExposure(risks: Array<Pick<ProjectRisk, 'status' | 'probability' | 'impact'>>): RiskExposure | null {
-	const activeRisks = risks.filter((risk) => riskLifecycleCategory(risk.status) === 'active');
-	if (activeRisks.length === 0) return null;
-	return activeRisks
+	const assessedActiveRisks = risks.filter((risk) => riskLifecycleCategory(risk.status) === 'active' && hasAssessedRiskExposure(risk));
+	if (assessedActiveRisks.length === 0) return null;
+	return assessedActiveRisks
 		.map((risk) => deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact))
 		.sort((a, b) => RISK_EXPOSURES.indexOf(b) - RISK_EXPOSURES.indexOf(a))[0] ?? null;
+}
+
+export function getExposurePercentage(count: number, total: number): number {
+	if (!Number.isFinite(count) || !Number.isFinite(total) || total <= 0 || count <= 0) return 0;
+	return Math.round((count / total) * 100);
+}
+
+export function getActiveRiskExposureCounts(risks: Array<Pick<ProjectRisk, 'status' | 'probability' | 'impact'>>): Record<RiskExposure, number> {
+	const counts = Object.fromEntries(RISK_EXPOSURES.map((exposure) => [exposure, 0])) as Record<RiskExposure, number>;
+	for (const risk of risks) {
+		if (riskLifecycleCategory(risk.status) !== 'active' || !hasAssessedRiskExposure(risk)) continue;
+		counts[deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact)] += 1;
+	}
+	return counts;
+}
+
+export function getExposureDistribution(risks: Array<Pick<ProjectRisk, 'status' | 'probability' | 'impact'>>): RiskExposureDistribution {
+	const activeRisks = risks.filter((risk) => riskLifecycleCategory(risk.status) === 'active');
+	const counts = getActiveRiskExposureCounts(activeRisks);
+	const assessedActiveRisks = activeRisks.filter((risk) => hasAssessedRiskExposure(risk)).length;
+	const segments = [...RISK_EXPOSURES].reverse().map((exposure) => ({
+		exposure,
+		label: riskExposureLabel(exposure),
+		tone: riskExposureTone(exposure),
+		count: counts[exposure],
+		percentage: getExposurePercentage(counts[exposure], assessedActiveRisks),
+	}));
+	return {
+		totalActiveRisks: activeRisks.length,
+		assessedActiveRisks,
+		unassessedActiveRisks: activeRisks.length - assessedActiveRisks,
+		segments,
+		summary: getExposureChartSummary(segments, activeRisks.length - assessedActiveRisks),
+	};
+}
+
+export function getExposureChartSummary(segments: RiskExposureDistributionSegment[], unassessedActiveRisks = 0): string {
+	const assessedParts = segments
+		.filter((segment) => segment.count > 0)
+		.map((segment) => `${segment.count} ${segment.label}`);
+	const unassessedPart = unassessedActiveRisks > 0 ? `${unassessedActiveRisks} unassessed` : '';
+	const parts = [...assessedParts, unassessedPart].filter(Boolean);
+	return parts.length > 0 ? `Active risk exposure: ${parts.join(', ')}.` : 'No active risks to chart.';
 }
 
 export function summarizeRiskRegister(risks: ProjectRisk[], now = new Date()): RiskRegisterSummary {
@@ -645,10 +706,6 @@ export function summarizeRiskRegister(risks: ProjectRisk[], now = new Date()): R
 
 export function isRiskEligibleForActionPanel(risk: Pick<ProjectRisk, 'status'>): boolean {
 	return riskLifecycleCategory(risk.status) === 'active';
-}
-
-function hasAssessedExposure(risk: Pick<ProjectRisk, 'probability' | 'impact'>): boolean {
-	return RISK_LEVELS.includes(risk.probability as RiskLevel) && RISK_LEVELS.includes(risk.impact as RiskLevel);
 }
 
 function riskActionItemBase(risk: ProjectRisk, now: Date) {
@@ -716,7 +773,7 @@ export function getRiskActionItems(risk: ProjectRisk, now = new Date()): RiskReg
 	if (!contingency) {
 		items.push(riskActionItem(risk, now, 'add-contingency', 40, 'red', 'Add contingency plan', 'Missing contingency'));
 	}
-	if (!hasAssessedExposure(risk)) {
+	if (!hasAssessedRiskExposure(risk)) {
 		items.push(riskActionItem(risk, now, 'assess-exposure', 50, 'red', 'Assess risk exposure', 'Probability or impact missing'));
 	}
 	if (due.tone === 'red') {

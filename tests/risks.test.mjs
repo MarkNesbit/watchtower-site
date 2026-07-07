@@ -17,6 +17,10 @@ import {
 	deriveRiskReferenceTone,
 	deriveWatchtowerDefaultRiskExposureTone,
 	filterAndSortRisksForRegister,
+	getActiveRiskExposureCounts,
+	getExposureChartSummary,
+	getExposureDistribution,
+	getExposurePercentage,
 	getRiskRegisterPageNumbers,
 	getRiskRegisterPaginationRange,
 	getProjectRiskActionItems,
@@ -987,6 +991,190 @@ test('Risk Register summary handles empty closed-only and Low-highest scenarios 
 	});
 	assert.equal(riskExposureTone('low'), 'risk-low');
 	assert.equal(riskExposureToneLabel(riskExposureTone('low')), 'Low');
+});
+
+test('Risk Register exposure distribution counts assessed active risks only', () => {
+	const risks = [
+		registerRisk({
+			risk_ref: 'Risk-HHH-001',
+			risk_sequence: 1,
+			title: 'Critical active risk',
+			probability: 'high',
+			impact: 'high',
+		}),
+		registerRisk({
+			risk_id: 'risk-2',
+			risk_ref: 'Risk-HHH-002',
+			risk_sequence: 2,
+			title: 'High active risk',
+			probability: 'high',
+			impact: 'medium',
+		}),
+		registerRisk({
+			risk_id: 'risk-3',
+			risk_ref: 'Risk-HHH-003',
+			risk_sequence: 3,
+			title: 'Medium active risk',
+			probability: 'medium',
+			impact: 'medium',
+		}),
+		registerRisk({
+			risk_id: 'risk-4',
+			risk_ref: 'Risk-HHH-004',
+			risk_sequence: 4,
+			title: 'Low active risk',
+			probability: 'low',
+			impact: 'low',
+		}),
+		registerRisk({
+			risk_id: 'risk-5',
+			risk_ref: 'Risk-HHH-005',
+			risk_sequence: 5,
+			title: 'Unassessed active risk',
+			probability: '',
+			impact: 'low',
+		}),
+		registerRisk({
+			risk_id: 'risk-6',
+			risk_ref: 'Risk-HHH-006',
+			risk_sequence: 6,
+			title: 'Draft critical risk',
+			status: 'draft',
+			probability: 'high',
+			impact: 'high',
+		}),
+		registerRisk({
+			risk_id: 'risk-7',
+			risk_ref: 'Risk-HHH-007',
+			risk_sequence: 7,
+			title: 'Resolved critical risk',
+			status: 'resolved',
+			probability: 'high',
+			impact: 'high',
+		}),
+		registerRisk({
+			risk_id: 'risk-8',
+			risk_ref: 'Risk-HHH-008',
+			risk_sequence: 8,
+			title: 'Retired high risk',
+			status: 'retired',
+			probability: 'high',
+			impact: 'medium',
+		}),
+	];
+
+	const counts = getActiveRiskExposureCounts(risks);
+	const distribution = getExposureDistribution(risks);
+
+	assert.deepEqual(counts, {
+		low: 1,
+		medium: 1,
+		high: 1,
+		critical: 1,
+	});
+	assert.equal(distribution.totalActiveRisks, 5);
+	assert.equal(distribution.assessedActiveRisks, 4);
+	assert.equal(distribution.unassessedActiveRisks, 1);
+	assert.deepEqual(distribution.segments.map(({ exposure, label, tone, count, percentage }) => ({
+		exposure,
+		label,
+		tone,
+		count,
+		percentage,
+	})), [
+		{ exposure: 'critical', label: 'Critical', tone: 'risk-critical', count: 1, percentage: 25 },
+		{ exposure: 'high', label: 'High', tone: 'risk-high', count: 1, percentage: 25 },
+		{ exposure: 'medium', label: 'Medium', tone: 'risk-medium', count: 1, percentage: 25 },
+		{ exposure: 'low', label: 'Low', tone: 'risk-low', count: 1, percentage: 25 },
+	]);
+	assert.match(distribution.summary, /1 Critical/);
+	assert.match(distribution.summary, /1 unassessed/);
+	assert.equal(getHighestActiveExposure(risks), 'critical');
+	assert.equal(summarizeRiskRegister(risks).highestExposure, 'critical');
+	assert.equal(riskExposureTone('low'), 'risk-low');
+	assert.notEqual(riskExposureTone('low'), 'green');
+});
+
+test('Risk Register exposure distribution handles lifecycle transitions and unassessed states honestly', () => {
+	const activeMedium = registerRisk({
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		title: 'Active medium risk',
+		probability: 'medium',
+		impact: 'medium',
+	});
+	const closedMedium = { ...activeMedium, status: 'closed' };
+	const draftHigh = registerRisk({
+		risk_id: 'risk-2',
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		title: 'Draft high risk',
+		status: 'draft',
+		probability: 'high',
+		impact: 'medium',
+	});
+	const openedHigh = { ...draftHigh, status: 'open' };
+	const unassessedActive = registerRisk({
+		risk_id: 'risk-3',
+		risk_ref: 'Risk-HHH-003',
+		risk_sequence: 3,
+		title: 'Unassessed active risk',
+		probability: '',
+		impact: '',
+	});
+
+	assert.equal(getExposureDistribution([activeMedium]).segments.find((segment) => segment.exposure === 'medium')?.count, 1);
+	assert.equal(getExposureDistribution([closedMedium]).assessedActiveRisks, 0);
+	assert.equal(getExposureDistribution([draftHigh]).assessedActiveRisks, 0);
+	assert.equal(getExposureDistribution([openedHigh]).segments.find((segment) => segment.exposure === 'high')?.count, 1);
+	assert.equal(getExposureDistribution([unassessedActive]).totalActiveRisks, 1);
+	assert.equal(getExposureDistribution([unassessedActive]).assessedActiveRisks, 0);
+	assert.equal(getExposureDistribution([unassessedActive]).unassessedActiveRisks, 1);
+	assert.deepEqual(getActiveRiskExposureCounts([unassessedActive]), {
+		low: 0,
+		medium: 0,
+		high: 0,
+		critical: 0,
+	});
+	assert.equal(getHighestActiveExposure([unassessedActive]), null);
+	assert.equal(getExposureChartSummary([], 0), 'No active risks to chart.');
+});
+
+test('Risk Register exposure distribution percentages and summaries remain project-level', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const risks = Array.from({ length: 12 }, (_, index) => {
+		const sequence = index + 1;
+		const exposureFacts = sequence <= 2
+			? { probability: 'high', impact: 'high' }
+			: sequence <= 5
+				? { probability: 'high', impact: 'medium' }
+				: sequence <= 10
+					? { probability: 'medium', impact: 'medium' }
+					: { probability: 'low', impact: 'low' };
+		return registerRisk({
+			risk_id: `risk-${sequence}`,
+			risk_ref: `Risk-HHH-${String(sequence).padStart(3, '0')}`,
+			risk_sequence: sequence,
+			title: sequence % 2 === 0 ? `Payment risk ${sequence}` : `Delivery risk ${sequence}`,
+			...exposureFacts,
+		});
+	});
+	const distribution = getExposureDistribution(risks);
+	const filtered = filterAndSortRisksForRegister(risks, { search: 'Payment', exposure: 'low' }, now);
+	const paginated = paginateRisksForRegister(filtered, 1, 10);
+
+	assert.equal(getExposurePercentage(1, 3), 33);
+	assert.deepEqual(distribution.segments.map(({ exposure, count, percentage }) => ({ exposure, count, percentage })), [
+		{ exposure: 'critical', count: 2, percentage: 17 },
+		{ exposure: 'high', count: 3, percentage: 25 },
+		{ exposure: 'medium', count: 5, percentage: 42 },
+		{ exposure: 'low', count: 2, percentage: 17 },
+	]);
+	assert.equal(filtered.length, 1);
+	assert.equal(paginated.items.length, 1);
+	assert.deepEqual(getExposureDistribution(risks), distribution);
+	assert.equal(summarizeRiskRegister(risks, now).highestExposure, 'critical');
+	assert.notDeepEqual(getExposureDistribution(filtered), distribution);
 });
 
 test('Risk Register summary remains an overall project summary while table filters narrow rows', () => {
@@ -2108,6 +2296,7 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /getRiskRegisterPageNumbers\(pagination\.page, pagination\.totalPages\)/);
 	assert.match(route, /summarizeRiskRegister\(risks, registerNow\)/);
 	assert.match(route, /getTopRiskActionItems\(risks, 4, registerNow\)/);
+	assert.match(route, /getExposureDistribution\(risks\)/);
 	assert.match(route, /data-risk-needs-action-panel/);
 	assert.match(route, /Highest-priority risk work/);
 	assert.match(route, /No active risk work currently needs attention\./);
@@ -2179,10 +2368,27 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /aria-label="Go to previous Risk Register page"/);
 	assert.match(route, /aria-label="Go to next Risk Register page"/);
 	assert.match(route, /page: 1/);
+	assert.match(route, /data-risk-exposure-distribution/);
+	assert.match(route, /Exposure distribution/);
+	assert.match(route, /Active risks by current exposure/);
+	assert.match(route, /data-risk-exposure-chart-summary/);
+	assert.match(route, /No active risks to chart\./);
+	assert.match(route, /Exposure distribution will appear when active risks are assessed\./);
+	assert.match(route, /excluded from percentages/);
+	assert.match(route, /risk-register-exposure-chart__segment--critical/);
+	assert.match(route, /risk-register-exposure-chart__segment--high/);
+	assert.match(route, /risk-register-exposure-chart__segment--medium/);
+	assert.match(route, /risk-register-exposure-chart__segment--low/);
+	assert.match(route, /risk-register-exposure-chart__legend-item--critical/);
+	assert.match(route, /risk-register-exposure-chart__legend-item--low/);
+	assert.match(route, /risk-register-exposure-chart__swatch/);
+	assert.match(route, /aria-hidden="true"/);
+	assert.match(route, /focusable="false"/);
+	assert.match(route, /assessed/);
 	assert.match(route, /action state/);
 	assert.doesNotMatch(route, /riskRagTone/);
 	assert.doesNotMatch(route, /risk\.description && <span>/);
-	assert.doesNotMatch(route, /Exposure distribution|Help me identify risks|More filters|acknowledge|dismiss|notification controls/i);
+	assert.doesNotMatch(route, /Help me identify risks|More filters|acknowledge|dismiss|notification controls|new Chart\(|Chart\.js|\brecharts\b/i);
 	assert.match(route, /data-risk-create-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-create-disabled/);
 	assert.match(route, /Viewer access is read-only, so risk creation is unavailable for your role\./);

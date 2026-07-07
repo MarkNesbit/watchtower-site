@@ -13,6 +13,7 @@ import {
 	deriveRiskReferenceTone,
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
 	filterAndSortRisksForRegister,
+	getExposureDistribution,
 	getRiskRegisterPageNumbers,
 	getTopRiskActionItems,
 	listProjectRisks,
@@ -183,6 +184,24 @@ const pagination = paginatedRegister.pagination;
 const pageNumbers = getRiskRegisterPageNumbers(pagination.page, pagination.totalPages);
 const registerSummary = summarizeRiskRegister(risks, registerNow);
 const needsActionItems = getTopRiskActionItems(risks, 4, registerNow);
+const exposureDistribution = getExposureDistribution(risks);
+const exposureChartRadius = 54;
+const exposureChartCircumference = 2 * Math.PI * exposureChartRadius;
+const exposureChartGap = exposureDistribution.segments.filter((segment) => segment.count > 0).length > 1 ? 2 : 0;
+let exposureChartOffset = 0;
+const exposureChartSegments = exposureDistribution.segments
+	.filter((segment) => segment.count > 0 && exposureDistribution.assessedActiveRisks > 0)
+	.map((segment) => {
+		const arcLength = (segment.count / exposureDistribution.assessedActiveRisks) * exposureChartCircumference;
+		const visibleArcLength = Math.max(0.75, arcLength - exposureChartGap);
+		const chartSegment = {
+			...segment,
+			dashArray: `${visibleArcLength} ${exposureChartCircumference - visibleArcLength}`,
+			dashOffset: -(exposureChartOffset + exposureChartGap / 2),
+		};
+		exposureChartOffset += arcLength;
+		return chartSegment;
+	});
 const tabLabels = {
 	all: 'All risks',
 	'need-action': 'Need action',
@@ -598,34 +617,85 @@ const summaryCards = [
 								)}
 							</div>
 
-							<aside class="risk-register-needs-action" aria-labelledby="risk-register-needs-action-heading" data-risk-needs-action-panel>
-								<div class="risk-register-needs-action__heading">
-									<div>
-										<h3 id="risk-register-needs-action-heading">Needs action</h3>
-										<p>Highest-priority risk work</p>
+							<div class="risk-register-side-panels">
+								<aside class="risk-register-needs-action" aria-labelledby="risk-register-needs-action-heading" data-risk-needs-action-panel>
+									<div class="risk-register-needs-action__heading">
+										<div>
+											<h3 id="risk-register-needs-action-heading">Needs action</h3>
+											<p>Highest-priority risk work</p>
+										</div>
+										<span class="risk-register-needs-action__count" aria-label={`${needsActionItems.length} visible needs action items`}>{needsActionItems.length}</span>
 									</div>
-									<span class="risk-register-needs-action__count" aria-label={`${needsActionItems.length} visible needs action items`}>{needsActionItems.length}</span>
-								</div>
-								{needsActionItems.length === 0 ? (
-									<p class="risk-register-needs-action__empty" data-risk-needs-action-empty>No active risk work currently needs attention.</p>
-								) : (
-									<ul class="risk-register-needs-action__list">
-										{needsActionItems.map((item) => {
-											const riskHref = buildProjectRiskPath(workspaceSlug ?? '', project.slug, item.riskId);
-											return (
-												<li class={`risk-register-needs-action__item risk-register-needs-action__item--${item.tone}`}>
-													<a href={riskHref} aria-label={`${item.label} for ${item.riskReference}: ${item.riskTitle}`}>
-														<span class="risk-register-needs-action__item-label">{item.label}</span>
-														<span class="risk-register-needs-action__risk">{item.riskReference} · {item.riskTitle}</span>
-														<span class="risk-register-needs-action__reason">{item.reason}</span>
-													</a>
-												</li>
-											);
-										})}
-									</ul>
-								)}
-								<a class="text-link risk-register-needs-action__all" href={needsActionHref} data-risk-needs-action-view-all>View all need action items</a>
-							</aside>
+									{needsActionItems.length === 0 ? (
+										<p class="risk-register-needs-action__empty" data-risk-needs-action-empty>No active risk work currently needs attention.</p>
+									) : (
+										<ul class="risk-register-needs-action__list">
+											{needsActionItems.map((item) => {
+												const riskHref = buildProjectRiskPath(workspaceSlug ?? '', project.slug, item.riskId);
+												return (
+													<li class={`risk-register-needs-action__item risk-register-needs-action__item--${item.tone}`}>
+														<a href={riskHref} aria-label={`${item.label} for ${item.riskReference}: ${item.riskTitle}`}>
+															<span class="risk-register-needs-action__item-label">{item.label}</span>
+															<span class="risk-register-needs-action__risk">{item.riskReference} · {item.riskTitle}</span>
+															<span class="risk-register-needs-action__reason">{item.reason}</span>
+														</a>
+													</li>
+												);
+											})}
+										</ul>
+									)}
+									<a class="text-link risk-register-needs-action__all" href={needsActionHref} data-risk-needs-action-view-all>View all need action items</a>
+								</aside>
+
+								<aside class="risk-register-exposure-chart" aria-labelledby="risk-register-exposure-chart-heading" data-risk-exposure-distribution>
+									<div class="risk-register-exposure-chart__heading">
+										<h3 id="risk-register-exposure-chart-heading">Exposure distribution</h3>
+										<p>Active risks by current exposure</p>
+									</div>
+									<p class="visually-hidden" data-risk-exposure-chart-summary>{exposureDistribution.summary}</p>
+									{exposureDistribution.totalActiveRisks === 0 ? (
+										<p class="risk-register-exposure-chart__empty" data-risk-exposure-chart-empty>No active risks to chart.</p>
+									) : exposureDistribution.assessedActiveRisks === 0 ? (
+										<p class="risk-register-exposure-chart__empty" data-risk-exposure-chart-unassessed>Exposure distribution will appear when active risks are assessed. {exposureDistribution.unassessedActiveRisks} active {exposureDistribution.unassessedActiveRisks === 1 ? 'risk needs' : 'risks need'} exposure assessment.</p>
+									) : (
+										<div class="risk-register-exposure-chart__body">
+											<div class="risk-register-exposure-chart__donut" aria-hidden="true">
+												<svg viewBox="0 0 140 140" role="presentation" focusable="false">
+													<circle class="risk-register-exposure-chart__track" cx="70" cy="70" r={exposureChartRadius}></circle>
+													{exposureChartSegments.map((segment) => (
+														<circle
+															class={`risk-register-exposure-chart__segment risk-register-exposure-chart__segment--${segment.exposure}`}
+															cx="70"
+															cy="70"
+															r={exposureChartRadius}
+															stroke-dasharray={segment.dashArray}
+															stroke-dashoffset={segment.dashOffset}
+														></circle>
+													))}
+												</svg>
+												<div class="risk-register-exposure-chart__total">
+													<strong>{exposureDistribution.assessedActiveRisks}</strong>
+													<span>assessed</span>
+												</div>
+											</div>
+											<ul class="risk-register-exposure-chart__legend">
+												{exposureDistribution.segments.map((segment) => (
+													<li class={`risk-register-exposure-chart__legend-item risk-register-exposure-chart__legend-item--${segment.exposure}`}>
+														<span class="risk-register-exposure-chart__legend-label">
+															<span class="risk-register-exposure-chart__swatch" aria-hidden="true"></span>
+															<span>{segment.label}</span>
+														</span>
+														<span class="risk-register-exposure-chart__legend-value">{segment.count} <span>{segment.percentage}%</span></span>
+													</li>
+												))}
+											</ul>
+										</div>
+									)}
+									{exposureDistribution.unassessedActiveRisks > 0 && exposureDistribution.assessedActiveRisks > 0 && (
+										<p class="risk-register-exposure-chart__note">{exposureDistribution.unassessedActiveRisks} active {exposureDistribution.unassessedActiveRisks === 1 ? 'risk is' : 'risks are'} not assessed and excluded from percentages.</p>
+									)}
+								</aside>
+							</div>
 						</div>
 					)}
 					<a class="text-link risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
@@ -763,6 +833,12 @@ const summaryCards = [
 		overflow: hidden;
 	}
 
+	.risk-register-side-panels {
+		display: grid;
+		gap: 1rem;
+		min-width: 0;
+	}
+
 	.risk-register-needs-action {
 		display: grid;
 		gap: 0.78rem;
@@ -888,6 +964,180 @@ const summaryCards = [
 	.risk-register-needs-action__all {
 		justify-self: start;
 		font-weight: 850;
+	}
+
+	.risk-register-exposure-chart {
+		display: grid;
+		gap: 0.78rem;
+		padding: 0.9rem;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 8px;
+		background:
+			linear-gradient(135deg, rgba(255, 159, 28, 0.08), rgba(8, 13, 23, 0.32)),
+			rgba(8, 13, 23, 0.58);
+	}
+
+	.risk-register-exposure-chart__heading h3 {
+		margin: 0;
+		font-size: 1rem;
+		line-height: 1.2;
+	}
+
+	.risk-register-exposure-chart__heading p,
+	.risk-register-exposure-chart__note,
+	.risk-register-exposure-chart__empty {
+		margin: 0;
+		color: var(--muted-strong);
+		font-size: 0.84rem;
+		font-weight: 750;
+		line-height: 1.35;
+	}
+
+	.risk-register-exposure-chart__body {
+		display: grid;
+		grid-template-columns: minmax(7.4rem, 0.85fr) minmax(0, 1fr);
+		gap: 0.8rem;
+		align-items: center;
+	}
+
+	.risk-register-exposure-chart__donut {
+		position: relative;
+		display: grid;
+		place-items: center;
+		aspect-ratio: 1;
+		min-width: 0;
+	}
+
+	.risk-register-exposure-chart__donut svg {
+		display: block;
+		width: min(100%, 8.8rem);
+		height: auto;
+		overflow: visible;
+	}
+
+	.risk-register-exposure-chart__track,
+	.risk-register-exposure-chart__segment {
+		fill: none;
+		stroke-width: 18;
+		transform: rotate(-90deg);
+		transform-origin: 70px 70px;
+	}
+
+	.risk-register-exposure-chart__track {
+		stroke: rgba(51, 65, 85, 0.68);
+	}
+
+	.risk-register-exposure-chart__segment--critical {
+		stroke: var(--risk-exposure-critical-accent);
+	}
+
+	.risk-register-exposure-chart__segment--high {
+		stroke: var(--risk-exposure-high-accent);
+	}
+
+	.risk-register-exposure-chart__segment--medium {
+		stroke: var(--risk-exposure-medium-accent);
+	}
+
+	.risk-register-exposure-chart__segment--low {
+		stroke: var(--risk-exposure-low-accent);
+	}
+
+	.risk-register-exposure-chart__total {
+		position: absolute;
+		inset: 50% auto auto 50%;
+		display: grid;
+		gap: 0.08rem;
+		justify-items: center;
+		transform: translate(-50%, -50%);
+		text-align: center;
+	}
+
+	.risk-register-exposure-chart__total strong {
+		color: var(--text);
+		font-size: 1.35rem;
+		font-weight: 950;
+		line-height: 1;
+	}
+
+	.risk-register-exposure-chart__total span {
+		color: var(--muted-strong);
+		font-size: 0.72rem;
+		font-weight: 850;
+		line-height: 1;
+		text-transform: uppercase;
+	}
+
+	.risk-register-exposure-chart__legend {
+		display: grid;
+		gap: 0.42rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.risk-register-exposure-chart__legend-item {
+		--exposure-accent: var(--risk-exposure-low-accent);
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.6rem;
+		color: var(--muted-strong);
+		font-size: 0.82rem;
+		font-weight: 800;
+		line-height: 1.2;
+	}
+
+	.risk-register-exposure-chart__legend-item--critical {
+		--exposure-accent: var(--risk-exposure-critical-accent);
+	}
+
+	.risk-register-exposure-chart__legend-item--high {
+		--exposure-accent: var(--risk-exposure-high-accent);
+	}
+
+	.risk-register-exposure-chart__legend-item--medium {
+		--exposure-accent: var(--risk-exposure-medium-accent);
+	}
+
+	.risk-register-exposure-chart__legend-item--low {
+		--exposure-accent: var(--risk-exposure-low-accent);
+	}
+
+	.risk-register-exposure-chart__legend-label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.42rem;
+		min-width: 0;
+	}
+
+	.risk-register-exposure-chart__swatch {
+		width: 0.72rem;
+		height: 0.72rem;
+		border: 1px solid color-mix(in srgb, var(--exposure-accent) 72%, white);
+		border-radius: 3px;
+		background: var(--exposure-accent);
+		box-shadow: inset 0 0 0 1px rgba(8, 13, 23, 0.28);
+	}
+
+	.risk-register-exposure-chart__legend-value {
+		display: inline-flex;
+		gap: 0.28rem;
+		color: var(--text);
+		font-weight: 900;
+		white-space: nowrap;
+	}
+
+	.risk-register-exposure-chart__legend-value span {
+		color: var(--muted-strong);
+	}
+
+	.risk-register-exposure-chart__empty,
+	.risk-register-exposure-chart__note {
+		padding: 0.72rem;
+		border: 1px solid rgba(148, 163, 184, 0.18);
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.28);
 	}
 
 	.risk-register-tabs {
@@ -1272,6 +1522,15 @@ const summaryCards = [
 
 		.risk-register-toolbar {
 			grid-template-columns: 1fr;
+		}
+
+		.risk-register-exposure-chart__body {
+			grid-template-columns: 1fr;
+		}
+
+		.risk-register-exposure-chart__donut {
+			justify-self: center;
+			width: min(100%, 11rem);
 		}
 
 		.risk-register-toolbar__actions {
