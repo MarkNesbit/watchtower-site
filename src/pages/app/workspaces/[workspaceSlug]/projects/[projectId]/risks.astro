@@ -11,12 +11,18 @@ import { can } from '../../../../../../lib/permissions';
 import {
 	deriveRiskExposureTone,
 	deriveRiskReferenceTone,
+	DEFAULT_RISK_REGISTER_PAGE_SIZE,
 	filterAndSortRisksForRegister,
+	getRiskRegisterPageNumbers,
 	getTopRiskActionItems,
 	listProjectRisks,
 	normaliseRiskRegisterSort,
 	normaliseRiskRegisterViewTab,
+	paginateRisksForRegister,
+	parseRiskRegisterPage,
+	parseRiskRegisterPageSize,
 	RISK_EXPOSURES,
+	RISK_REGISTER_PAGE_SIZES,
 	RISK_REGISTER_SORTS,
 	RISK_REGISTER_VIEW_TABS,
 	riskDisplayLabel,
@@ -141,6 +147,8 @@ const registerParams = registerUrl.searchParams;
 const registerNow = new Date();
 const selectedView = normaliseRiskRegisterViewTab(registerParams.get('view'));
 const selectedSort = normaliseRiskRegisterSort(registerParams.get('sort'));
+const requestedPage = parseRiskRegisterPage(registerParams.get('page'));
+const selectedPageSize = parseRiskRegisterPageSize(registerParams.get('pageSize'));
 const selectedSearch = (registerParams.get('q') ?? '').trim().slice(0, 120);
 const requestedExposure = registerParams.get('exposure') ?? '';
 const requestedActionState = registerParams.get('actionState') ?? '';
@@ -169,6 +177,10 @@ const registerFilters = {
 	sort: selectedSort,
 };
 const filteredRisks = filterAndSortRisksForRegister(risks, registerFilters, registerNow);
+const paginatedRegister = paginateRisksForRegister(filteredRisks, requestedPage, selectedPageSize);
+const pagedRisks = paginatedRegister.items;
+const pagination = paginatedRegister.pagination;
+const pageNumbers = getRiskRegisterPageNumbers(pagination.page, pagination.totalPages);
 const registerSummary = summarizeRiskRegister(risks, registerNow);
 const needsActionItems = getTopRiskActionItems(risks, 4, registerNow);
 const tabLabels = {
@@ -197,6 +209,8 @@ const buildRegisterPath = (overrides = {}) => {
 		owner: selectedOwnerId,
 		lifecycle: selectedLifecycle,
 		sort: selectedSort,
+		page: pagination.page,
+		pageSize: selectedPageSize,
 		...overrides,
 	};
 	const params = new URLSearchParams();
@@ -207,6 +221,8 @@ const buildRegisterPath = (overrides = {}) => {
 	if (next.owner) params.set('owner', next.owner);
 	if (next.lifecycle) params.set('lifecycle', next.lifecycle);
 	if (next.sort && next.sort !== 'highest-exposure') params.set('sort', next.sort);
+	if (next.page && Number(next.page) > 1) params.set('page', String(next.page));
+	if (next.pageSize && Number(next.pageSize) !== DEFAULT_RISK_REGISTER_PAGE_SIZE) params.set('pageSize', String(next.pageSize));
 	const query = params.toString();
 	return query ? `${registerPath}?${query}` : registerPath;
 };
@@ -218,14 +234,25 @@ const needsActionHref = buildRegisterPath({
 	owner: '',
 	lifecycle: '',
 	sort: 'action-needed',
+	page: 1,
 });
 const tabItems = RISK_REGISTER_VIEW_TABS.map((tab) => ({
 	id: tab,
 	label: tabLabels[tab],
 	count: risks.filter((risk) => riskMatchesRegisterView(risk, tab, registerNow)).length,
-	href: buildRegisterPath({ view: tab }),
+	href: buildRegisterPath({ view: tab, page: 1 }),
 	active: selectedView === tab,
 }));
+const pageSizeHiddenFields = [
+	['view', selectedView !== 'all' ? selectedView : ''],
+	['q', selectedSearch],
+	['exposure', selectedExposure],
+	['actionState', selectedActionState],
+	['owner', selectedOwnerId],
+	['lifecycle', selectedLifecycle],
+	['sort', selectedSort !== 'highest-exposure' ? selectedSort : ''],
+	['page', '1'],
+].filter(([, value]) => Boolean(value));
 const ownerFilterLabel = selectedOwnerId === 'unassigned'
 	? 'Unassigned'
 	: ownerOptions.find(([ownerId]) => ownerId === selectedOwnerId)?.[1] ?? '';
@@ -367,6 +394,7 @@ const summaryCards = [
 
 										<form class="risk-register-toolbar" method="get" action={registerPath} data-risk-register-controls>
 											<input type="hidden" name="view" value={selectedView} />
+											<input type="hidden" name="pageSize" value={selectedPageSize} />
 											<label class="risk-register-field risk-register-field--search">
 												<span>Search risks</span>
 												<input type="search" name="q" value={selectedSearch} placeholder="Search risks..." autocomplete="off" />
@@ -440,90 +468,131 @@ const summaryCards = [
 												<a class="button button--secondary" href={registerPath}>Reset filters</a>
 											</EmptyState>
 										) : (
-											<div class="risk-register-table-scroll">
-												<table class="simple-table risk-register-table" data-risk-register-table>
-													<thead>
-														<tr>
-															<th scope="col">Ref</th>
-															<th scope="col">Risk</th>
-															<th scope="col">Exposure</th>
-															<th scope="col">Action state</th>
-															<th scope="col">Lifecycle / Status</th>
-															<th scope="col">Owner</th>
-															<th scope="col">Review due</th>
-															<th scope="col">Updated</th>
-															<th scope="col">Actions</th>
-														</tr>
-													</thead>
-													<tbody>
-														{filteredRisks.map((risk) => {
-															const exposureTone = deriveRiskExposureTone(risk.probability, risk.impact);
-															const exposureLabel = riskExposureToneLabel(exposureTone);
-															const actionState = actionStateFor(risk);
-															const reviewDue = reviewDueState(risk);
-															const ownerLabel = riskProfileName(risk.owner, 'Unassigned');
-															const riskHref = buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id);
-															const lifecycle = riskLifecycleLabel(risk.status);
-															return (
-																<tr data-risk-lifecycle={riskLifecycleCategory(risk.status)}>
-																	<td>
-																		<a
-																			class="risk-reference-link"
-																			href={riskHref}
-																			aria-label={`Open ${risk.risk_ref}`}
-																		>
+											<>
+												<div class="risk-register-table-scroll">
+													<table class="simple-table risk-register-table" data-risk-register-table>
+														<thead>
+															<tr>
+																<th scope="col">Ref</th>
+																<th scope="col">Risk</th>
+																<th scope="col">Exposure</th>
+																<th scope="col">Action state</th>
+																<th scope="col">Lifecycle / Status</th>
+																<th scope="col">Owner</th>
+																<th scope="col">Review due</th>
+																<th scope="col">Updated</th>
+																<th scope="col">Actions</th>
+															</tr>
+														</thead>
+														<tbody>
+															{pagedRisks.map((risk) => {
+																const exposureTone = deriveRiskExposureTone(risk.probability, risk.impact);
+																const exposureLabel = riskExposureToneLabel(exposureTone);
+																const actionState = actionStateFor(risk);
+																const reviewDue = reviewDueState(risk);
+																const ownerLabel = riskProfileName(risk.owner, 'Unassigned');
+																const riskHref = buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id);
+																const lifecycle = riskLifecycleLabel(risk.status);
+																return (
+																	<tr data-risk-lifecycle={riskLifecycleCategory(risk.status)}>
+																		<td>
+																			<a
+																				class="risk-reference-link"
+																				href={riskHref}
+																				aria-label={`Open ${risk.risk_ref}`}
+																			>
+																				<RagReferencePill
+																					tone="blue"
+																					label={risk.risk_ref}
+																				/>
+																			</a>
+																		</td>
+																		<td class="risk-register-table__risk">
+																			<strong title={risk.title}>{risk.title}</strong>
+																		</td>
+																		<td>
 																			<RagReferencePill
-																				tone="blue"
-																				label={risk.risk_ref}
+																				tone={exposureTone}
+																				label={exposureLabel}
+																				statusLabel="Exposure"
+																				ariaLabel={`${risk.risk_ref} exposure: ${exposureLabel}`}
 																			/>
-																		</a>
-																	</td>
-																	<td class="risk-register-table__risk">
-																		<strong title={risk.title}>{risk.title}</strong>
-																	</td>
-																	<td>
-																		<RagReferencePill
-																			tone={exposureTone}
-																			label={exposureLabel}
-																			statusLabel="Exposure"
-																			ariaLabel={`${risk.risk_ref} exposure: ${exposureLabel}`}
-																		/>
-																	</td>
-																	<td>
-																		<RagReferencePill
-																			tone={actionState.tone}
-																			label={actionState.label}
-																			statusLabel={actionState.statusLabel}
-																			ariaLabel={`${risk.risk_ref} action state: ${actionState.label}`}
-																		/>
-																	</td>
-																	<td>
-																		<span class="risk-register-table__status">
-																			<strong>{lifecycle}</strong>
-																			<span>{riskDisplayLabel(risk.status)}</span>
-																		</span>
-																	</td>
-																	<td>
-																		<span class={`risk-register-table__owner${risk.owner_id ? '' : ' risk-register-table__owner--missing'}`}>
-																			{ownerLabel}
-																		</span>
-																	</td>
-																	<td>
-																		<span class={`risk-register-table__review risk-register-table__review--${reviewDue.tone}`}>
-																			{reviewDue.statusLabel && <span>{reviewDue.statusLabel}</span>}
-																			<span>{reviewDue.label}</span>
-																		</span>
-																	</td>
-																	<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
-																	<td>
-																		<a class="text-link risk-register-table__open" href={riskHref} aria-label={`Open ${risk.risk_ref} detail`}>Open</a>
-																	</td>
-																</tr>
-															);
-														})}
-													</tbody>
-												</table>
-											</div>
+																		</td>
+																		<td>
+																			<RagReferencePill
+																				tone={actionState.tone}
+																				label={actionState.label}
+																				statusLabel={actionState.statusLabel}
+																				ariaLabel={`${risk.risk_ref} action state: ${actionState.label}`}
+																			/>
+																		</td>
+																		<td>
+																			<span class="risk-register-table__status">
+																				<strong>{lifecycle}</strong>
+																				<span>{riskDisplayLabel(risk.status)}</span>
+																			</span>
+																		</td>
+																		<td>
+																			<span class={`risk-register-table__owner${risk.owner_id ? '' : ' risk-register-table__owner--missing'}`}>
+																				{ownerLabel}
+																			</span>
+																		</td>
+																		<td>
+																			<span class={`risk-register-table__review risk-register-table__review--${reviewDue.tone}`}>
+																				{reviewDue.statusLabel && <span>{reviewDue.statusLabel}</span>}
+																				<span>{reviewDue.label}</span>
+																			</span>
+																		</td>
+																		<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
+																		<td>
+																			<a class="text-link risk-register-table__open" href={riskHref} aria-label={`Open ${risk.risk_ref} detail`}>Open</a>
+																		</td>
+																	</tr>
+																);
+															})}
+														</tbody>
+													</table>
+												</div>
+												<div class="risk-register-pagination" aria-label="Risk Register pagination" data-risk-register-pagination>
+													<form class="risk-register-page-size" method="get" action={registerPath} data-risk-register-page-size>
+														{pageSizeHiddenFields.map(([name, value]) => <input type="hidden" name={name} value={value} />)}
+														<label>
+															<span>Show</span>
+															<select name="pageSize" aria-label="Risks per page">
+																{RISK_REGISTER_PAGE_SIZES.map((size) => (
+																	<option value={size} selected={pagination.pageSize === size}>{size}</option>
+																))}
+															</select>
+														</label>
+														<button class="button button--secondary" type="submit">Apply</button>
+														<span class="risk-register-pagination__range" data-risk-register-result-range>
+															{pagination.startItem}–{pagination.endItem} of {pagination.totalItems} risks
+														</span>
+													</form>
+													<nav class="risk-register-pagination__nav" aria-label="Risk Register pages">
+														{pagination.hasPrevious ? (
+															<a class="risk-register-page-link" href={buildRegisterPath({ page: pagination.page - 1 })} rel="prev" aria-label="Go to previous Risk Register page">Previous</a>
+														) : (
+															<button class="risk-register-page-link" type="button" disabled aria-label="Previous Risk Register page unavailable">Previous</button>
+														)}
+														<span class="risk-register-pagination__pages" aria-label={`Page ${pagination.page} of ${pagination.totalPages}`}>
+															{pageNumbers.map((pageNumber) => (
+																pageNumber === pagination.page ? (
+																	<span class="risk-register-page-link risk-register-page-link--current" aria-current="page">{pageNumber}</span>
+																) : (
+																	<a class="risk-register-page-link" href={buildRegisterPath({ page: pageNumber })} aria-label={`Go to Risk Register page ${pageNumber}`}>{pageNumber}</a>
+																)
+															))}
+														</span>
+														<span class="risk-register-pagination__summary">Page {pagination.page} of {pagination.totalPages}</span>
+														{pagination.hasNext ? (
+															<a class="risk-register-page-link" href={buildRegisterPath({ page: pagination.page + 1 })} rel="next" aria-label="Go to next Risk Register page">Next</a>
+														) : (
+															<button class="risk-register-page-link" type="button" disabled aria-label="Next Risk Register page unavailable">Next</button>
+														)}
+													</nav>
+												</div>
+											</>
 										)}
 									</>
 								)}
@@ -989,8 +1058,8 @@ const summaryCards = [
 
 	.risk-register-table td {
 		vertical-align: middle;
-		padding-top: 0.62rem;
-		padding-bottom: 0.62rem;
+		padding-top: 0.48rem;
+		padding-bottom: 0.48rem;
 	}
 
 	.risk-reference-link {
@@ -1014,10 +1083,10 @@ const summaryCards = [
 	}
 
 	.risk-register-table__risk strong {
-		display: -webkit-box;
-		-webkit-box-orient: vertical;
-		-webkit-line-clamp: 2;
+		display: block;
 		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 		line-height: 1.35;
 	}
 
@@ -1054,6 +1123,102 @@ const summaryCards = [
 		font-weight: 850;
 	}
 
+	.risk-register-pagination {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin-top: 0.78rem;
+		padding-top: 0.72rem;
+		border-top: 1px solid rgba(148, 163, 184, 0.18);
+	}
+
+	.risk-register-page-size,
+	.risk-register-page-size label,
+	.risk-register-pagination__nav,
+	.risk-register-pagination__pages {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+	}
+
+	.risk-register-page-size {
+		flex-wrap: wrap;
+		color: var(--muted-strong);
+		font-size: 0.86rem;
+		font-weight: 800;
+	}
+
+	.risk-register-page-size select {
+		min-height: 2.15rem;
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		border-radius: 8px;
+		background: rgba(8, 13, 23, 0.72);
+		color: var(--text);
+		font: inherit;
+		font-weight: 800;
+		padding: 0.35rem 0.58rem;
+	}
+
+	.risk-register-page-size .button {
+		min-height: 2.15rem;
+		padding: 0.35rem 0.75rem;
+	}
+
+	.risk-register-pagination__range,
+	.risk-register-pagination__summary {
+		color: var(--muted-strong);
+		font-size: 0.86rem;
+		font-weight: 800;
+	}
+
+	.risk-register-pagination__nav {
+		flex-wrap: wrap;
+		justify-content: flex-end;
+	}
+
+	.risk-register-page-link {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 2.15rem;
+		min-height: 2.15rem;
+		padding: 0.35rem 0.65rem;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 8px;
+		background: rgba(8, 13, 23, 0.48);
+		color: var(--muted-strong);
+		font: inherit;
+		font-size: 0.86rem;
+		font-weight: 850;
+		line-height: 1;
+		text-decoration: none;
+	}
+
+	.risk-register-page-link:hover,
+	.risk-register-page-link:focus-visible {
+		border-color: rgba(56, 189, 248, 0.5);
+		background: rgba(14, 165, 233, 0.14);
+		color: var(--text);
+	}
+
+	.risk-register-page-link:focus-visible {
+		outline: 3px solid rgba(56, 189, 248, 0.34);
+		outline-offset: 3px;
+	}
+
+	.risk-register-page-link--current {
+		border-color: rgba(56, 189, 248, 0.58);
+		background: rgba(14, 165, 233, 0.18);
+		color: var(--text);
+		box-shadow: inset 0 -2px 0 var(--accent-strong);
+	}
+
+	.risk-register-page-link[disabled] {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
 	.risk-register-back-link {
 		justify-self: start;
 	}
@@ -1065,6 +1230,15 @@ const summaryCards = [
 
 		.risk-register-toolbar__actions {
 			grid-column: 1 / -1;
+		}
+
+		.risk-register-pagination {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.risk-register-pagination__nav {
+			justify-content: flex-start;
 		}
 	}
 
@@ -1104,6 +1278,16 @@ const summaryCards = [
 			align-items: flex-start;
 			flex-direction: column;
 			white-space: normal;
+		}
+
+		.risk-register-page-size,
+		.risk-register-pagination__nav {
+			align-items: flex-start;
+			flex-direction: column;
+		}
+
+		.risk-register-pagination__pages {
+			flex-wrap: wrap;
 		}
 	}
 </style>

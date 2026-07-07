@@ -17,6 +17,8 @@ import {
 	deriveRiskReferenceTone,
 	deriveWatchtowerDefaultRiskExposureTone,
 	filterAndSortRisksForRegister,
+	getRiskRegisterPageNumbers,
+	getRiskRegisterPaginationRange,
 	getProjectRiskActionItems,
 	getRiskActionItems,
 	getRiskActionStateDrivers,
@@ -35,6 +37,11 @@ import {
 	normaliseRiskRegisterSearch,
 	normaliseRiskRegisterSort,
 	normaliseRiskRegisterViewTab,
+	paginateRisksForRegister,
+	parseRiskRegisterPage,
+	parseRiskRegisterPageSize,
+	DEFAULT_RISK_REGISTER_PAGE_SIZE,
+	RISK_REGISTER_PAGE_SIZES,
 	riskDisplayLabel,
 	riskExposureTone,
 	riskExposureToneLabel,
@@ -758,6 +765,125 @@ test('Risk Register sort options prioritise exposure action state review date an
 		'Risk-HHH-005',
 	]);
 	assert.equal(filterAndSortRisksForRegister([closedOverdue, lowGreenRecent], { sort: 'review-due' }, now)[0].risk_ref, 'Risk-HHH-006');
+});
+
+test('Risk Register pagination helpers normalise page state and ranges safely', () => {
+	assert.equal(DEFAULT_RISK_REGISTER_PAGE_SIZE, 25);
+	assert.deepEqual([...RISK_REGISTER_PAGE_SIZES], [10, 25, 50]);
+	assert.equal(parseRiskRegisterPage(null), 1);
+	assert.equal(parseRiskRegisterPage('0'), 1);
+	assert.equal(parseRiskRegisterPage('-2'), 1);
+	assert.equal(parseRiskRegisterPage('abc'), 1);
+	assert.equal(parseRiskRegisterPage('2abc'), 1);
+	assert.equal(parseRiskRegisterPage('3'), 3);
+	assert.equal(parseRiskRegisterPageSize('10'), 10);
+	assert.equal(parseRiskRegisterPageSize('25'), 25);
+	assert.equal(parseRiskRegisterPageSize('50'), 50);
+	assert.equal(parseRiskRegisterPageSize('7'), 25);
+	assert.equal(parseRiskRegisterPageSize('abc'), 25);
+	assert.equal(parseRiskRegisterPageSize('50px'), 25);
+
+	assert.deepEqual(getRiskRegisterPaginationRange(68, 1, 25), {
+		page: 1,
+		pageSize: 25,
+		totalItems: 68,
+		totalPages: 3,
+		startIndex: 0,
+		endIndex: 25,
+		startItem: 1,
+		endItem: 25,
+		hasPrevious: false,
+		hasNext: true,
+	});
+	assert.deepEqual(getRiskRegisterPaginationRange(68, 2, 25), {
+		page: 2,
+		pageSize: 25,
+		totalItems: 68,
+		totalPages: 3,
+		startIndex: 25,
+		endIndex: 50,
+		startItem: 26,
+		endItem: 50,
+		hasPrevious: true,
+		hasNext: true,
+	});
+	assert.deepEqual(getRiskRegisterPaginationRange(68, 99, 25), {
+		page: 3,
+		pageSize: 25,
+		totalItems: 68,
+		totalPages: 3,
+		startIndex: 50,
+		endIndex: 68,
+		startItem: 51,
+		endItem: 68,
+		hasPrevious: true,
+		hasNext: false,
+	});
+	assert.deepEqual(getRiskRegisterPaginationRange(0, 4, 25), {
+		page: 1,
+		pageSize: 25,
+		totalItems: 0,
+		totalPages: 1,
+		startIndex: 0,
+		endIndex: 0,
+		startItem: 0,
+		endItem: 0,
+		hasPrevious: false,
+		hasNext: false,
+	});
+	assert.deepEqual(getRiskRegisterPageNumbers(6, 10, 5), [4, 5, 6, 7, 8]);
+	assert.deepEqual(getRiskRegisterPageNumbers(1, 3, 5), [1, 2, 3]);
+	assert.deepEqual(getRiskRegisterPageNumbers(4, Number.NaN, Number.NaN), [1]);
+});
+
+test('Risk Register pagination applies after filtering and deterministic sorting', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const risks = Array.from({ length: 32 }, (_, index) => {
+		const sequence = index + 1;
+		return registerRisk({
+			risk_id: `risk-${sequence}`,
+			risk_ref: `Risk-HHH-${String(sequence).padStart(3, '0')}`,
+			risk_sequence: sequence,
+			title: sequence % 2 === 0 ? `Payment search risk ${sequence}` : `Other risk ${sequence}`,
+			probability: sequence % 3 === 0 ? 'high' : 'low',
+			impact: sequence % 3 === 0 ? 'medium' : 'low',
+			updated_at: new Date(Date.UTC(2026, 5, sequence, 10, 0, 0)).toISOString(),
+		});
+	});
+	const filtered = filterAndSortRisksForRegister(risks, { search: 'payment search', sort: 'recently-updated' }, now);
+	const firstPage = paginateRisksForRegister(filtered, 1, 10);
+	const secondPage = paginateRisksForRegister(filtered, 2, 10);
+	const lastPage = paginateRisksForRegister(filtered, 9, 10);
+	const summary = summarizeRiskRegister(risks, now);
+	const needsActionItems = getProjectRiskActionItems(risks, now);
+
+	assert.equal(filtered.length, 16);
+	assert.deepEqual(firstPage.items.map((risk) => risk.risk_ref), [
+		'Risk-HHH-032',
+		'Risk-HHH-030',
+		'Risk-HHH-028',
+		'Risk-HHH-026',
+		'Risk-HHH-024',
+		'Risk-HHH-022',
+		'Risk-HHH-020',
+		'Risk-HHH-018',
+		'Risk-HHH-016',
+		'Risk-HHH-014',
+	]);
+	assert.deepEqual(secondPage.items.map((risk) => risk.risk_ref), [
+		'Risk-HHH-012',
+		'Risk-HHH-010',
+		'Risk-HHH-008',
+		'Risk-HHH-006',
+		'Risk-HHH-004',
+		'Risk-HHH-002',
+	]);
+	assert.equal(lastPage.pagination.page, 2);
+	assert.equal(lastPage.pagination.totalPages, 2);
+	assert.equal(secondPage.pagination.startItem, 11);
+	assert.equal(secondPage.pagination.endItem, 16);
+	assert.deepEqual(summarizeRiskRegister(risks, now), summary);
+	assert.deepEqual(getProjectRiskActionItems(risks, now), needsActionItems);
 });
 
 test('Risk Register summary helpers count lifecycle action state and exposure separately', () => {
@@ -1975,6 +2101,11 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /data-risk-lifecycle=\{riskLifecycleCategory\(risk\.status\)\}/);
 	assert.match(route, /normaliseRiskRegisterViewTab\(registerParams\.get\('view'\)\)/);
 	assert.match(route, /normaliseRiskRegisterSort\(registerParams\.get\('sort'\)\)/);
+	assert.match(route, /parseRiskRegisterPage\(registerParams\.get\('page'\)\)/);
+	assert.match(route, /parseRiskRegisterPageSize\(registerParams\.get\('pageSize'\)\)/);
+	assert.match(route, /paginateRisksForRegister\(filteredRisks, requestedPage, selectedPageSize\)/);
+	assert.match(route, /const pagedRisks = paginatedRegister\.items/);
+	assert.match(route, /getRiskRegisterPageNumbers\(pagination\.page, pagination\.totalPages\)/);
 	assert.match(route, /summarizeRiskRegister\(risks, registerNow\)/);
 	assert.match(route, /getTopRiskActionItems\(risks, 4, registerNow\)/);
 	assert.match(route, /data-risk-needs-action-panel/);
@@ -2036,10 +2167,22 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /No closed risks\./);
 	assert.match(route, /<strong title=\{risk\.title\}>\{risk\.title\}<\/strong>/);
 	assert.match(route, /aria-label=\{`Open \$\{risk\.risk_ref\} detail`\}>Open<\/a>/);
+	assert.match(route, /pagedRisks\.map\(\(risk\) =>/);
+	assert.match(route, /data-risk-register-pagination/);
+	assert.match(route, /data-risk-register-page-size/);
+	assert.match(route, /data-risk-register-result-range/);
+	assert.match(route, /RISK_REGISTER_PAGE_SIZES\.map/);
+	assert.match(route, /name="pageSize"/);
+	assert.match(route, /Previous/);
+	assert.match(route, /Next/);
+	assert.match(route, /aria-current="page"/);
+	assert.match(route, /aria-label="Go to previous Risk Register page"/);
+	assert.match(route, /aria-label="Go to next Risk Register page"/);
+	assert.match(route, /page: 1/);
 	assert.match(route, /action state/);
 	assert.doesNotMatch(route, /riskRagTone/);
 	assert.doesNotMatch(route, /risk\.description && <span>/);
-	assert.doesNotMatch(route, /Exposure distribution|Help me identify risks|More filters|pagination|acknowledge|dismiss|notification controls/i);
+	assert.doesNotMatch(route, /Exposure distribution|Help me identify risks|More filters|acknowledge|dismiss|notification controls/i);
 	assert.match(route, /data-risk-create-action/);
 	assert.match(route, /disabled[\s\S]*data-risk-create-disabled/);
 	assert.match(route, /Viewer access is read-only, so risk creation is unavailable for your role\./);
