@@ -6,7 +6,7 @@ export const RISK_STATUSES = ['draft', 'open', 'monitoring', 'mitigating', 'esca
 export type RiskStatus = (typeof RISK_STATUSES)[number];
 export const DRAFT_RISK_STATUSES = ['draft'] as const;
 export const ACTIVE_RISK_STATUSES = ['open', 'monitoring', 'mitigating', 'escalated', 'materialised'] as const;
-export const CLOSED_RISK_STATUSES = ['accepted', 'closed', 'resolved'] as const;
+export const CLOSED_RISK_STATUSES = ['accepted', 'closed', 'resolved', 'passed', 'retired', 'cancelled', 'rejected'] as const;
 export const DASHBOARD_ACTIVE_RISK_STATUSES = ACTIVE_RISK_STATUSES;
 export type RiskLifecycleCategory = 'draft' | 'active' | 'closed';
 export type RiskLifecycleTone = 'green' | 'neutral';
@@ -41,6 +41,33 @@ export type RiskRegisterSummary = {
 	needAction: number;
 	highestExposure: RiskExposure | null;
 	draftRisks: number;
+};
+export type RiskActionItemType =
+	| 'review-overdue'
+	| 'assign-owner'
+	| 'add-mitigation'
+	| 'assign-actioner'
+	| 'add-contingency'
+	| 'assess-exposure'
+	| 'due-date-overdue'
+	| 'set-review-date'
+	| 'review-due-soon'
+	| 'set-due-date'
+	| 'update-stale-risk';
+export type RiskRegisterActionItem = {
+	type: RiskActionItemType;
+	priority: number;
+	tone: RiskActionStateTone;
+	label: string;
+	reason: string;
+	riskId: string;
+	riskReference: string;
+	riskTitle: string;
+	lifecycle: RiskLifecycleCategory;
+	actionState: RiskRagStatus | 'neutral';
+	exposure: RiskExposure;
+	reviewDate?: string | null;
+	updatedAt?: string | null;
 };
 
 const RISK_SEQUENCE_CONSTRAINT = 'project_risks_project_sequence_key';
@@ -539,6 +566,136 @@ export function summarizeRiskRegister(risks: ProjectRisk[], now = new Date()): R
 		highestExposure: getHighestActiveExposure(risks),
 		draftRisks: countDraftRisks(risks),
 	};
+}
+
+export function isRiskEligibleForActionPanel(risk: Pick<ProjectRisk, 'status'>): boolean {
+	return riskLifecycleCategory(risk.status) === 'active';
+}
+
+function hasAssessedExposure(risk: Pick<ProjectRisk, 'probability' | 'impact'>): boolean {
+	return RISK_LEVELS.includes(risk.probability as RiskLevel) && RISK_LEVELS.includes(risk.impact as RiskLevel);
+}
+
+function riskActionItemBase(risk: ProjectRisk, now: Date) {
+	return {
+		riskId: risk.risk_id,
+		riskReference: risk.risk_ref,
+		riskTitle: risk.title,
+		lifecycle: riskLifecycleCategory(risk.status),
+		actionState: deriveRiskReferenceTone(risk, now),
+		exposure: deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact),
+		reviewDate: risk.review_date,
+		updatedAt: risk.updated_at,
+	};
+}
+
+function daysUntilUtcDate(value: unknown, now: Date): number | null {
+	const date = parseUtcDate(value);
+	if (!date) return null;
+	return Math.ceil((date.getTime() - startOfUtcDay(now).getTime()) / 86_400_000);
+}
+
+function riskActionItem(
+	risk: ProjectRisk,
+	now: Date,
+	type: RiskActionItemType,
+	priority: number,
+	tone: RiskActionStateTone,
+	label: string,
+	reason: string,
+): RiskRegisterActionItem {
+	return {
+		type,
+		priority,
+		tone,
+		label,
+		reason,
+		...riskActionItemBase(risk, now),
+	};
+}
+
+export function getRiskActionItems(risk: ProjectRisk, now = new Date()): RiskRegisterActionItem[] {
+	if (!isRiskEligibleForActionPanel(risk)) return [];
+
+	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
+	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
+	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
+	const mitigation = trimmedText(risk.mitigation_plan);
+	const contingency = trimmedText(risk.contingency_plan);
+	const updated = staleUpdateTone(risk.updated_at, now);
+	const reviewDays = daysUntilUtcDate(risk.review_date, now);
+	const items: RiskRegisterActionItem[] = [];
+
+	if (review.tone === 'red') {
+		items.push(riskActionItem(risk, now, 'review-overdue', 0, 'red', 'Review overdue risk', 'Overdue'));
+	}
+	if (!risk.owner_id) {
+		items.push(riskActionItem(risk, now, 'assign-owner', 10, 'red', 'Assign owner', 'Missing owner'));
+	}
+	if (!mitigation && exposure === 'critical') {
+		items.push(riskActionItem(risk, now, 'add-mitigation', 20, 'red', 'Add mitigation plan', 'Missing mitigation for Critical exposure'));
+	}
+	if (actionerTone(risk.status, risk.actioner_id) === 'red') {
+		items.push(riskActionItem(risk, now, 'assign-actioner', 30, 'red', 'Assign actioner', 'Missing actioner'));
+	}
+	if (!contingency) {
+		items.push(riskActionItem(risk, now, 'add-contingency', 40, 'red', 'Add contingency plan', 'Missing contingency'));
+	}
+	if (!hasAssessedExposure(risk)) {
+		items.push(riskActionItem(risk, now, 'assess-exposure', 50, 'red', 'Assess risk exposure', 'Probability or impact missing'));
+	}
+	if (due.tone === 'red') {
+		items.push(riskActionItem(risk, now, 'due-date-overdue', 60, 'red', 'Review overdue due date', 'Due date overdue'));
+	}
+	if (review.tone === 'amber') {
+		items.push(riskActionItem(risk, now, 'set-review-date', 70, 'amber', 'Set review date', 'Missing review date'));
+	} else if (reviewDays !== null && reviewDays >= 0 && reviewDays <= 7) {
+		items.push(riskActionItem(
+			risk,
+			now,
+			'review-due-soon',
+			80,
+			'amber',
+			reviewDays === 0 ? 'Review risk today' : 'Review risk soon',
+			reviewDays === 0 ? 'Due today' : `Due in ${reviewDays} day${reviewDays === 1 ? '' : 's'}`,
+		));
+	}
+	if (due.tone === 'amber') {
+		items.push(riskActionItem(risk, now, 'set-due-date', 90, 'amber', 'Set due date', 'Missing due date'));
+	}
+	if (updated === 'red') {
+		items.push(riskActionItem(risk, now, 'update-stale-risk', 100, 'red', 'Update stale risk', 'Update overdue'));
+	}
+	if (updated === 'amber') {
+		items.push(riskActionItem(risk, now, 'update-stale-risk', 110, 'amber', 'Update stale risk', 'Update getting stale'));
+	}
+	if (!mitigation && (exposure === 'high' || exposure === 'medium')) {
+		items.push(riskActionItem(risk, now, 'add-mitigation', 120, 'amber', 'Add mitigation plan', `Missing mitigation for ${riskExposureLabel(exposure)} exposure`));
+	}
+
+	return items;
+}
+
+function compareRiskActionItems(a: RiskRegisterActionItem, b: RiskRegisterActionItem): number {
+	return (a.tone === 'red' ? 0 : 1) - (b.tone === 'red' ? 0 : 1)
+		|| a.priority - b.priority
+		|| RISK_EXPOSURES.indexOf(b.exposure) - RISK_EXPOSURES.indexOf(a.exposure)
+		|| (parseUtcDate(a.reviewDate)?.getTime() ?? Number.MAX_SAFE_INTEGER) - (parseUtcDate(b.reviewDate)?.getTime() ?? Number.MAX_SAFE_INTEGER)
+		|| new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime()
+		|| a.riskReference.localeCompare(b.riskReference)
+		|| a.type.localeCompare(b.type);
+}
+
+export function rankRiskActionItems(items: RiskRegisterActionItem[]): RiskRegisterActionItem[] {
+	return [...items].sort(compareRiskActionItems);
+}
+
+export function getProjectRiskActionItems(risks: ProjectRisk[], now = new Date()): RiskRegisterActionItem[] {
+	return rankRiskActionItems(risks.flatMap((risk) => getRiskActionItems(risk, now)));
+}
+
+export function getTopRiskActionItems(risks: ProjectRisk[], limit = 4, now = new Date()): RiskRegisterActionItem[] {
+	return getProjectRiskActionItems(risks, now).slice(0, Math.max(0, limit));
 }
 
 function isRedRiskActionState(value: unknown): boolean {
