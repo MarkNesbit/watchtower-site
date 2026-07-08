@@ -85,12 +85,10 @@ const actionStateFor = (risk) => {
 	if (riskLifecycleCategory(risk.status) !== 'active') return {
 		tone: 'neutral',
 		label: 'Not active',
-		statusLabel: riskLifecycleLabel(risk.status),
 	};
 	return {
 		tone: deriveRiskReferenceTone(risk),
 		label: riskReferenceStatusLabel(risk),
-		statusLabel: 'Action state',
 	};
 };
 try {
@@ -190,9 +188,9 @@ const exposureChartCircumference = 2 * Math.PI * exposureChartRadius;
 const exposureChartGap = exposureDistribution.segments.filter((segment) => segment.count > 0).length > 1 ? 2 : 0;
 let exposureChartOffset = 0;
 const exposureChartSegments = exposureDistribution.segments
-	.filter((segment) => segment.count > 0 && exposureDistribution.assessedActiveRisks > 0)
+	.filter((segment) => segment.count > 0 && exposureDistribution.chartedRisks > 0)
 	.map((segment) => {
-		const arcLength = (segment.count / exposureDistribution.assessedActiveRisks) * exposureChartCircumference;
+		const arcLength = (segment.count / exposureDistribution.chartedRisks) * exposureChartCircumference;
 		const visibleArcLength = Math.max(0.75, arcLength - exposureChartGap);
 		const chartSegment = {
 			...segment,
@@ -219,6 +217,7 @@ const lifecycleFilterLabels = {
 	active: 'Active / Open',
 	closed: 'Closed / Resolved',
 };
+const draftTabTone = (count) => count > 5 ? 'red' : count > 0 ? 'amber' : 'neutral';
 const buildRegisterPath = (overrides = {}) => {
 	const next = {
 		view: selectedView,
@@ -255,13 +254,17 @@ const needsActionHref = buildRegisterPath({
 	sort: 'action-needed',
 	page: 1,
 });
-const tabItems = RISK_REGISTER_VIEW_TABS.map((tab) => ({
-	id: tab,
-	label: tabLabels[tab],
-	count: risks.filter((risk) => riskMatchesRegisterView(risk, tab, registerNow)).length,
-	href: buildRegisterPath({ view: tab, page: 1 }),
-	active: selectedView === tab,
-}));
+const tabItems = RISK_REGISTER_VIEW_TABS.map((tab) => {
+	const count = risks.filter((risk) => riskMatchesRegisterView(risk, tab, registerNow)).length;
+	return {
+		id: tab,
+		label: tabLabels[tab],
+		count,
+		href: buildRegisterPath({ view: tab, page: 1 }),
+		active: selectedView === tab,
+		countTone: tab === 'draft' ? draftTabTone(count) : 'neutral',
+	};
+});
 const pageSizeHiddenFields = [
 	['view', selectedView !== 'all' ? selectedView : ''],
 	['q', selectedSearch],
@@ -302,24 +305,21 @@ const summaryCards = [
 		value: String(registerSummary.openRisks),
 		helper: 'Active project risks',
 		tone: 'blue',
+		icon: '!',
 	},
 	{
 		label: 'Need action',
 		value: String(registerSummary.needAction),
 		helper: 'Red or Amber action state',
 		tone: registerSummary.needAction > 0 ? 'attention' : 'neutral',
+		icon: '!',
 	},
 	{
 		label: 'Highest exposure',
 		value: highestExposureLabel,
 		helper: 'Across active risks',
 		tone: highestExposureTone,
-	},
-	{
-		label: 'Draft risks',
-		value: String(registerSummary.draftRisks),
-		helper: 'Need completion',
-		tone: 'neutral',
+		icon: '^',
 	},
 ];
 ---
@@ -374,9 +374,12 @@ const summaryCards = [
 						<section class="risk-register-summary" aria-label="Risk Register summary" data-risk-register-summary>
 							{summaryCards.map((card) => (
 								<article class={`risk-register-summary-card risk-register-summary-card--${card.tone}`}>
-									<span class="risk-register-summary-card__label">{card.label}</span>
-									<strong class="risk-register-summary-card__value">{card.value}</strong>
-									<span class="risk-register-summary-card__helper">{card.helper}</span>
+									<span class="risk-register-summary-card__icon" aria-hidden="true">{card.icon}</span>
+									<span class="risk-register-summary-card__body">
+										<span class="risk-register-summary-card__label">{card.label}</span>
+										<strong class="risk-register-summary-card__value">{card.value}</strong>
+										<span class="risk-register-summary-card__helper">{card.helper}</span>
+									</span>
 								</article>
 							))}
 						</section>
@@ -392,7 +395,7 @@ const summaryCards = [
 							<div class="risk-register-main">
 								{risks.length === 0 ? (
 									<EmptyState title="No risks have been recorded for this project yet." data-risk-empty-state>
-										<p>When risks are recorded, this register will show the project’s source-of-truth risk reference, exposure, action state, lifecycle, owner, review due date and latest update.</p>
+										<p>When risks are recorded, this register will show the project’s source-of-truth risk reference, action state, exposure, lifecycle, owner, review due date and latest update.</p>
 										<p>{canCreateRisk ? 'Create the first risk when there is a delivery concern to manage.' : 'Viewer access is read-only, so risk creation is unavailable for your role.'}</p>
 									</EmptyState>
 								) : (
@@ -406,7 +409,7 @@ const summaryCards = [
 													data-risk-register-tab={tab.id}
 												>
 													<span>{tab.label}</span>
-													<span class="risk-register-tab__count" aria-label={`${tab.count} ${tab.label.toLowerCase()}`}>{tab.count}</span>
+													<span class={`risk-register-tab__count risk-register-tab__count--${tab.countTone}`} aria-label={`${tab.count} ${tab.label.toLowerCase()}`}>{tab.count}</span>
 												</a>
 											))}
 										</nav>
@@ -495,12 +498,10 @@ const summaryCards = [
 																<th scope="col">Ref</th>
 																<th scope="col">Risk</th>
 																<th scope="col">Exposure</th>
-																<th scope="col">Action state</th>
 																<th scope="col">Lifecycle / Status</th>
 																<th scope="col">Owner</th>
 																<th scope="col">Review due</th>
 																<th scope="col">Updated</th>
-																<th scope="col">Actions</th>
 															</tr>
 														</thead>
 														<tbody>
@@ -521,8 +522,10 @@ const summaryCards = [
 																				aria-label={`Open ${risk.risk_ref}`}
 																			>
 																				<RagReferencePill
-																					tone="blue"
+																					tone={actionState.tone}
 																					label={risk.risk_ref}
+																					statusLabel={actionState.label}
+																					ariaLabel={`Open ${risk.risk_ref} detail, action state: ${actionState.label}`}
 																				/>
 																			</a>
 																		</td>
@@ -533,16 +536,7 @@ const summaryCards = [
 																			<RagReferencePill
 																				tone={exposureTone}
 																				label={exposureLabel}
-																				statusLabel="Exposure"
 																				ariaLabel={`${risk.risk_ref} exposure: ${exposureLabel}`}
-																			/>
-																		</td>
-																		<td>
-																			<RagReferencePill
-																				tone={actionState.tone}
-																				label={actionState.label}
-																				statusLabel={actionState.statusLabel}
-																				ariaLabel={`${risk.risk_ref} action state: ${actionState.label}`}
 																			/>
 																		</td>
 																		<td>
@@ -563,9 +557,6 @@ const summaryCards = [
 																			</span>
 																		</td>
 																		<td><time datetime={risk.updated_at}>{formatDateTime(risk.updated_at)}</time></td>
-																		<td>
-																			<a class="text-link risk-register-table__open" href={riskHref} aria-label={`Open ${risk.risk_ref} detail`}>Open</a>
-																		</td>
 																	</tr>
 																);
 															})}
@@ -650,12 +641,12 @@ const summaryCards = [
 								<aside class="risk-register-exposure-chart" aria-labelledby="risk-register-exposure-chart-heading" data-risk-exposure-distribution>
 									<div class="risk-register-exposure-chart__heading">
 										<h3 id="risk-register-exposure-chart-heading">Exposure distribution</h3>
-										<p>Active risks by current exposure</p>
+										<p>Active exposure and closed risks</p>
 									</div>
 									<p class="visually-hidden" data-risk-exposure-chart-summary>{exposureDistribution.summary}</p>
-									{exposureDistribution.totalActiveRisks === 0 ? (
-										<p class="risk-register-exposure-chart__empty" data-risk-exposure-chart-empty>No active risks to chart.</p>
-									) : exposureDistribution.assessedActiveRisks === 0 ? (
+									{exposureDistribution.totalActiveRisks === 0 && exposureDistribution.closedRisks === 0 ? (
+										<p class="risk-register-exposure-chart__empty" data-risk-exposure-chart-empty>No active or closed risks to chart.</p>
+									) : exposureDistribution.chartedRisks === 0 ? (
 										<p class="risk-register-exposure-chart__empty" data-risk-exposure-chart-unassessed>Exposure distribution will appear when active risks are assessed. {exposureDistribution.unassessedActiveRisks} active {exposureDistribution.unassessedActiveRisks === 1 ? 'risk needs' : 'risks need'} exposure assessment.</p>
 									) : (
 										<div class="risk-register-exposure-chart__body">
@@ -674,8 +665,8 @@ const summaryCards = [
 													))}
 												</svg>
 												<div class="risk-register-exposure-chart__total">
-													<strong>{exposureDistribution.assessedActiveRisks}</strong>
-													<span>assessed</span>
+													<strong>{exposureDistribution.chartedRisks}</strong>
+													<span>charted</span>
 												</div>
 											</div>
 											<ul class="risk-register-exposure-chart__legend">
@@ -742,7 +733,7 @@ const summaryCards = [
 
 	.risk-register-summary {
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 0.65rem;
 		margin-bottom: 0.85rem;
 	}
@@ -752,15 +743,38 @@ const summaryCards = [
 		--summary-border: var(--rag-neutral-border);
 		--summary-background: var(--rag-neutral-background);
 		display: grid;
-		gap: 0.22rem;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: center;
+		gap: 0.8rem;
 		min-height: 6rem;
 		padding: 0.82rem 0.9rem;
 		border: 1px solid var(--summary-border);
-		border-left: 3px solid var(--summary-accent);
 		border-radius: 8px;
 		background:
 			linear-gradient(135deg, var(--summary-background), rgba(8, 13, 23, 0.42)),
 			rgba(8, 13, 23, 0.56);
+	}
+
+	.risk-register-summary-card__icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.7rem;
+		height: 2.7rem;
+		border: 1px solid var(--summary-border);
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--summary-background) 78%, rgba(4, 12, 24, 0.58));
+		color: var(--summary-accent);
+		font-size: 1.25rem;
+		font-weight: 950;
+		line-height: 1;
+		box-shadow: 0 0 0 0.45rem color-mix(in srgb, var(--summary-background) 42%, transparent);
+	}
+
+	.risk-register-summary-card__body {
+		display: grid;
+		gap: 0.22rem;
+		min-width: 0;
 	}
 
 	.risk-register-summary-card--blue {
@@ -1043,6 +1057,10 @@ const summaryCards = [
 		stroke: var(--risk-exposure-low-accent);
 	}
 
+	.risk-register-exposure-chart__segment--closed {
+		stroke: var(--rag-neutral-accent);
+	}
+
 	.risk-register-exposure-chart__total {
 		position: absolute;
 		inset: 50% auto auto 50%;
@@ -1102,6 +1120,10 @@ const summaryCards = [
 
 	.risk-register-exposure-chart__legend-item--low {
 		--exposure-accent: var(--risk-exposure-low-accent);
+	}
+
+	.risk-register-exposure-chart__legend-item--closed {
+		--exposure-accent: var(--rag-neutral-accent);
 	}
 
 	.risk-register-exposure-chart__legend-label {
@@ -1191,6 +1213,18 @@ const summaryCards = [
 		line-height: 1.1;
 	}
 
+	.risk-register-tab__count--amber {
+		border-color: var(--rag-amber-border);
+		background: var(--rag-amber-background);
+		color: var(--rag-amber-accent);
+	}
+
+	.risk-register-tab__count--red {
+		border-color: var(--rag-red-border);
+		background: var(--rag-red-background);
+		color: var(--rag-red-accent);
+	}
+
 	.risk-register-toolbar {
 		display: grid;
 		grid-template-columns: minmax(13rem, 1.35fr) repeat(5, minmax(8.5rem, 1fr)) auto;
@@ -1269,21 +1303,24 @@ const summaryCards = [
 	}
 
 	.risk-register-table {
-		min-width: 78rem;
+		min-width: 66rem;
 		table-layout: fixed;
 	}
 
 	.risk-register-table th:first-child {
-		width: 10.5rem;
+		width: 12.5rem;
 	}
 
 	.risk-register-table th:nth-child(2) {
-		width: 20rem;
+		width: 22rem;
 	}
 
-	.risk-register-table th:nth-child(3),
-	.risk-register-table th:nth-child(4) {
+	.risk-register-table th:nth-child(3) {
 		width: 9.25rem;
+	}
+
+	.risk-register-table th:nth-child(4) {
+		width: 10rem;
 	}
 
 	.risk-register-table th:nth-child(5) {
@@ -1291,19 +1328,11 @@ const summaryCards = [
 	}
 
 	.risk-register-table th:nth-child(6) {
-		width: 10rem;
-	}
-
-	.risk-register-table th:nth-child(7) {
 		width: 9rem;
 	}
 
-	.risk-register-table th:nth-child(8) {
+	.risk-register-table th:nth-child(7) {
 		width: 11rem;
-	}
-
-	.risk-register-table th:nth-child(9) {
-		width: 5rem;
 	}
 
 	.risk-register-table td {
@@ -1366,10 +1395,6 @@ const summaryCards = [
 
 	.risk-register-table__review--red span:first-child {
 		color: var(--rag-red-accent);
-		font-weight: 850;
-	}
-
-	.risk-register-table__open {
 		font-weight: 850;
 	}
 
