@@ -2282,7 +2282,12 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /data-risk-register-route/);
 	assert.match(route, /ProjectPageHero/);
 	assert.match(route, /title="Risk Register"/);
+	assert.match(route, /title="Project risks"/);
 	assert.match(route, /helper="Scan all project risks in one register\. Exposure, action state and lifecycle\/status are shown separately\."/);
+	assert.doesNotMatch(route, /ProjectControlPanel/);
+	assert.doesNotMatch(route, /Risk controls/);
+	assert.doesNotMatch(route, /Create and edit enabled/);
+	assert.doesNotMatch(route, /Create a new project risk\./);
 	assert.match(route, /listProjectRisks\(organisation\.id, data\.id, workspace\.role, serverSupabase\)/);
 	assert.match(route, /\.eq\('slug', projectSlug\)/);
 	assert.match(route, /\.eq\('organisation_id', organisation\.id\)/);

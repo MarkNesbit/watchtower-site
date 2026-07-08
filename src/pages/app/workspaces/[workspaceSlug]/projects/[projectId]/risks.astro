@@ -3,7 +3,6 @@ import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.a
 import DisabledActionHint from '../../../../../../components/app/DisabledActionHint.astro';
 import EmptyState from '../../../../../../components/app/EmptyState.astro';
 import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
-import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
@@ -336,12 +335,8 @@ const summaryCards = [
 					headingId="risk-register-heading"
 				/>
 
-				<ProjectControlPanel title="Risk controls" status="Create and edit enabled" headingId="risk-register-controls-heading">
-					<p class="risk-register-controls__copy">Create and update project-level source-of-truth risks. Routine edit narratives, attention items, notifications and health scoring remain outside this slice.</p>
-				</ProjectControlPanel>
-
 				<ProjectContentPanel
-					title="Risk Register"
+					title="Project risks"
 					helper="Scan all project risks in one register. Exposure, action state and lifecycle/status are shown separately."
 					headingId="risk-register-table-heading"
 				>
@@ -362,28 +357,15 @@ const summaryCards = [
 								data-viewer-read-only
 							>New Risk</button>
 						)}
-						<DisabledActionHint
-							id="risk-create-unavailable"
-							allowed={canCreateRisk}
-							allowedText="Create a new project risk."
-							disabledText="Viewer access is read-only. Risk creation is unavailable."
-						/>
+						{!canCreateRisk && (
+							<DisabledActionHint
+								id="risk-create-unavailable"
+								allowed={false}
+								allowedText=""
+								disabledText="Viewer access is read-only. Risk creation is unavailable."
+							/>
+						)}
 					</div>
-
-					{!risksLoadError && (
-						<section class="risk-register-summary" aria-label="Risk Register summary" data-risk-register-summary>
-							{summaryCards.map((card) => (
-								<article class={`risk-register-summary-card risk-register-summary-card--${card.tone}`}>
-									<span class="risk-register-summary-card__icon" aria-hidden="true">{card.icon}</span>
-									<span class="risk-register-summary-card__body">
-										<span class="risk-register-summary-card__label">{card.label}</span>
-										<strong class="risk-register-summary-card__value">{card.value}</strong>
-										<span class="risk-register-summary-card__helper">{card.helper}</span>
-									</span>
-								</article>
-							))}
-						</section>
-					)}
 
 					{risksLoadError ? (
 						<EmptyState title="The Risk Register could not be loaded." tone="error" data-risk-list-error role="alert">
@@ -393,6 +375,19 @@ const summaryCards = [
 					) : (
 						<div class="risk-register-layout">
 							<div class="risk-register-main">
+								<section class="risk-register-summary" aria-label="Risk Register summary" data-risk-register-summary>
+									{summaryCards.map((card) => (
+										<article class={`risk-register-summary-card risk-register-summary-card--${card.tone}`}>
+											<span class="risk-register-summary-card__icon" aria-hidden="true">{card.icon}</span>
+											<span class="risk-register-summary-card__body">
+												<span class="risk-register-summary-card__label">{card.label}</span>
+												<strong class="risk-register-summary-card__value">{card.value}</strong>
+												<span class="risk-register-summary-card__helper">{card.helper}</span>
+											</span>
+										</article>
+									))}
+								</section>
+
 								{risks.length === 0 ? (
 									<EmptyState title="No risks have been recorded for this project yet." data-risk-empty-state>
 										<p>When risks are recorded, this register will show the project’s source-of-truth risk reference, action state, exposure, lifecycle, owner, review due date and latest update.</p>
@@ -715,11 +710,6 @@ const summaryCards = [
 		font-size: clamp(1.45rem, 2.4vw, 2rem);
 	}
 
-	.risk-register-controls__copy {
-		margin: 0.7rem 0 0;
-		color: var(--muted-strong);
-	}
-
 	.risk-register-action {
 		display: grid;
 		justify-items: end;
@@ -734,8 +724,8 @@ const summaryCards = [
 	.risk-register-summary {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 0.65rem;
-		margin-bottom: 0.85rem;
+		gap: 0.55rem;
+		margin-bottom: 0.8rem;
 	}
 
 	.risk-register-summary-card {
@@ -745,9 +735,9 @@ const summaryCards = [
 		display: grid;
 		grid-template-columns: auto minmax(0, 1fr);
 		align-items: center;
-		gap: 0.8rem;
-		min-height: 6rem;
-		padding: 0.82rem 0.9rem;
+		gap: 0.64rem;
+		min-height: 4.9rem;
+		padding: 0.7rem 0.78rem;
 		border: 1px solid var(--summary-border);
 		border-radius: 8px;
 		background:
@@ -759,16 +749,16 @@ const summaryCards = [
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 2.7rem;
-		height: 2.7rem;
+		width: 2.18rem;
+		height: 2.18rem;
 		border: 1px solid var(--summary-border);
 		border-radius: 999px;
 		background: color-mix(in srgb, var(--summary-background) 78%, rgba(4, 12, 24, 0.58));
 		color: var(--summary-accent);
-		font-size: 1.25rem;
+		font-size: 1.02rem;
 		font-weight: 950;
 		line-height: 1;
-		box-shadow: 0 0 0 0.45rem color-mix(in srgb, var(--summary-background) 42%, transparent);
+		box-shadow: 0 0 0 0.34rem color-mix(in srgb, var(--summary-background) 42%, transparent);
 	}
 
 	.risk-register-summary-card__body {
@@ -816,14 +806,14 @@ const summaryCards = [
 	.risk-register-summary-card__label,
 	.risk-register-summary-card__helper {
 		color: var(--muted-strong);
-		font-size: 0.84rem;
+		font-size: 0.78rem;
 		font-weight: 800;
 		line-height: 1.25;
 	}
 
 	.risk-register-summary-card__value {
 		color: var(--text);
-		font-size: clamp(1.42rem, 2vw, 1.9rem);
+		font-size: clamp(1.25rem, 1.6vw, 1.62rem);
 		font-weight: 900;
 		line-height: 1.1;
 	}
