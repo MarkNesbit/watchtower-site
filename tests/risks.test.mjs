@@ -993,7 +993,7 @@ test('Risk Register summary handles empty closed-only and Low-highest scenarios 
 	assert.equal(riskExposureToneLabel(riskExposureTone('low')), 'Low');
 });
 
-test('Risk Register exposure distribution counts assessed active risks only', () => {
+test('Risk Register exposure distribution counts active exposure and closed risks only', () => {
 	const risks = [
 		registerRisk({
 			risk_ref: 'Risk-HHH-001',
@@ -1075,6 +1075,8 @@ test('Risk Register exposure distribution counts assessed active risks only', ()
 	assert.equal(distribution.totalActiveRisks, 5);
 	assert.equal(distribution.assessedActiveRisks, 4);
 	assert.equal(distribution.unassessedActiveRisks, 1);
+	assert.equal(distribution.closedRisks, 2);
+	assert.equal(distribution.chartedRisks, 6);
 	assert.deepEqual(distribution.segments.map(({ exposure, label, tone, count, percentage }) => ({
 		exposure,
 		label,
@@ -1082,12 +1084,14 @@ test('Risk Register exposure distribution counts assessed active risks only', ()
 		count,
 		percentage,
 	})), [
-		{ exposure: 'critical', label: 'Critical', tone: 'risk-critical', count: 1, percentage: 25 },
-		{ exposure: 'high', label: 'High', tone: 'risk-high', count: 1, percentage: 25 },
-		{ exposure: 'medium', label: 'Medium', tone: 'risk-medium', count: 1, percentage: 25 },
-		{ exposure: 'low', label: 'Low', tone: 'risk-low', count: 1, percentage: 25 },
+		{ exposure: 'critical', label: 'Critical', tone: 'risk-critical', count: 1, percentage: 17 },
+		{ exposure: 'high', label: 'High', tone: 'risk-high', count: 1, percentage: 17 },
+		{ exposure: 'medium', label: 'Medium', tone: 'risk-medium', count: 1, percentage: 17 },
+		{ exposure: 'low', label: 'Low', tone: 'risk-low', count: 1, percentage: 17 },
+		{ exposure: 'closed', label: 'Closed', tone: 'neutral', count: 2, percentage: 33 },
 	]);
 	assert.match(distribution.summary, /1 Critical/);
+	assert.match(distribution.summary, /2 Closed/);
 	assert.match(distribution.summary, /1 unassessed/);
 	assert.equal(getHighestActiveExposure(risks), 'critical');
 	assert.equal(summarizeRiskRegister(risks).highestExposure, 'critical');
@@ -1125,7 +1129,11 @@ test('Risk Register exposure distribution handles lifecycle transitions and unas
 
 	assert.equal(getExposureDistribution([activeMedium]).segments.find((segment) => segment.exposure === 'medium')?.count, 1);
 	assert.equal(getExposureDistribution([closedMedium]).assessedActiveRisks, 0);
+	assert.equal(getExposureDistribution([closedMedium]).closedRisks, 1);
+	assert.equal(getExposureDistribution([closedMedium]).chartedRisks, 1);
+	assert.equal(getExposureDistribution([closedMedium]).segments.find((segment) => segment.exposure === 'closed')?.percentage, 100);
 	assert.equal(getExposureDistribution([draftHigh]).assessedActiveRisks, 0);
+	assert.equal(getExposureDistribution([draftHigh]).chartedRisks, 0);
 	assert.equal(getExposureDistribution([openedHigh]).segments.find((segment) => segment.exposure === 'high')?.count, 1);
 	assert.equal(getExposureDistribution([unassessedActive]).totalActiveRisks, 1);
 	assert.equal(getExposureDistribution([unassessedActive]).assessedActiveRisks, 0);
@@ -1137,7 +1145,7 @@ test('Risk Register exposure distribution handles lifecycle transitions and unas
 		critical: 0,
 	});
 	assert.equal(getHighestActiveExposure([unassessedActive]), null);
-	assert.equal(getExposureChartSummary([], 0), 'No active risks to chart.');
+	assert.equal(getExposureChartSummary([], 0), 'No active or closed risks to chart.');
 });
 
 test('Risk Register exposure distribution percentages and summaries remain project-level', () => {
@@ -1169,6 +1177,7 @@ test('Risk Register exposure distribution percentages and summaries remain proje
 		{ exposure: 'high', count: 3, percentage: 25 },
 		{ exposure: 'medium', count: 5, percentage: 42 },
 		{ exposure: 'low', count: 2, percentage: 17 },
+		{ exposure: 'closed', count: 0, percentage: 0 },
 	]);
 	assert.equal(filtered.length, 1);
 	assert.equal(paginated.items.length, 1);
@@ -2279,10 +2288,10 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /\.eq\('organisation_id', organisation\.id\)/);
 	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
 	assert.match(route, /data-risk-register-table/);
-	for (const heading of ['Ref', 'Risk', 'Exposure', 'Action state', 'Lifecycle / Status', 'Owner', 'Review due', 'Updated', 'Actions']) {
+	for (const heading of ['Ref', 'Risk', 'Exposure', 'Lifecycle / Status', 'Owner', 'Review due', 'Updated']) {
 		assert.match(route, new RegExp(`<th scope="col">${heading}</th>`));
 	}
-	for (const removedHeading of ['RAG', 'Actioner']) {
+	for (const removedHeading of ['RAG', 'Actioner', 'Action state', 'Actions']) {
 		assert.doesNotMatch(route, new RegExp(`<th scope="col">${removedHeading}</th>`));
 	}
 	assert.match(route, /No risks have been recorded for this project yet\./);
@@ -2317,30 +2326,37 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.doesNotMatch(route, /data-closed-risks-section/);
 	assert.match(route, /deriveRiskExposureTone\(risk\.probability, risk\.impact\)/);
 	assert.match(route, /riskExposureToneLabel\(exposureTone\)/);
-	assert.match(route, /statusLabel="Exposure"/);
+	assert.doesNotMatch(route, /statusLabel="Exposure"/);
 	assert.match(route, /actionStateFor\(risk\)/);
 	assert.match(route, /deriveRiskReferenceTone\(risk\)/);
 	assert.match(route, /riskReferenceStatusLabel\(risk\)/);
 	assert.match(route, /label: 'Not active'/);
-	assert.match(route, /statusLabel: riskLifecycleLabel\(risk\.status\)/);
 	assert.match(route, /riskProfileName\(risk\.owner, 'Unassigned'\)/);
 	assert.match(route, /risk-register-table__owner--missing/);
 	assert.match(route, /reviewDueState\(risk\)/);
 	assert.match(route, /No review date/);
 	assert.match(route, /Overdue/);
 	assert.match(route, /ariaLabel=\{`\$\{risk\.risk_ref\} exposure: \$\{exposureLabel\}`\}/);
-	assert.match(route, /ariaLabel=\{`\$\{risk\.risk_ref\} action state: \$\{actionState\.label\}`\}/);
+	assert.match(route, /tone=\{actionState\.tone\}/);
+	assert.match(route, /statusLabel=\{actionState\.label\}/);
+	assert.match(route, /ariaLabel=\{`Open \$\{risk\.risk_ref\} detail, action state: \$\{actionState\.label\}`\}/);
 	assert.match(route, /buildProjectNewRiskPath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(route, /data-risk-register-summary/);
-	for (const card of ['Open risks', 'Need action', 'Highest exposure', 'Draft risks']) {
+	for (const card of ['Open risks', 'Need action', 'Highest exposure']) {
 		assert.match(route, new RegExp(card));
 	}
-	for (const helper of ['Active project risks', 'Red or Amber action state', 'Across active risks', 'Need completion']) {
+	for (const removedCard of ['Draft risks', 'Need completion']) {
+		assert.doesNotMatch(route, new RegExp(removedCard));
+	}
+	for (const helper of ['Active project risks', 'Red or Amber action state', 'Across active risks']) {
 		assert.match(route, new RegExp(helper));
 	}
+	assert.match(route, /risk-register-summary-card__icon/);
 	assert.match(route, /highestExposureLabel = registerSummary\.highestExposure \? riskDisplayLabel\(registerSummary\.highestExposure\) : 'Not assessed'/);
 	assert.match(route, /risk-register-summary-card--risk-low/);
 	assert.match(route, /data-risk-register-tabs/);
+	assert.match(route, /draftTabTone = \(count\) => count > 5 \? 'red' : count > 0 \? 'amber' : 'neutral'/);
+	assert.match(route, /risk-register-tab__count--\$\{tab\.countTone\}/);
 	assert.match(route, /data-risk-register-controls/);
 	for (const tab of ['All risks', 'Need action', 'Draft', 'Closed']) {
 		assert.match(route, new RegExp(tab));
@@ -2358,7 +2374,8 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /No draft risks\./);
 	assert.match(route, /No closed risks\./);
 	assert.match(route, /<strong title=\{risk\.title\}>\{risk\.title\}<\/strong>/);
-	assert.match(route, /aria-label=\{`Open \$\{risk\.risk_ref\} detail`\}>Open<\/a>/);
+	assert.doesNotMatch(route, /risk-register-table__open/);
+	assert.doesNotMatch(route, />Open<\/a>/);
 	assert.match(route, /pagedRisks\.map\(\(risk\) =>/);
 	assert.match(route, /data-risk-register-pagination/);
 	assert.match(route, /data-risk-register-page-size/);
@@ -2373,21 +2390,23 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /page: 1/);
 	assert.match(route, /data-risk-exposure-distribution/);
 	assert.match(route, /Exposure distribution/);
-	assert.match(route, /Active risks by current exposure/);
+	assert.match(route, /Active exposure and closed risks/);
 	assert.match(route, /data-risk-exposure-chart-summary/);
-	assert.match(route, /No active risks to chart\./);
+	assert.match(route, /No active or closed risks to chart\./);
 	assert.match(route, /Exposure distribution will appear when active risks are assessed\./);
 	assert.match(route, /excluded from percentages/);
 	assert.match(route, /risk-register-exposure-chart__segment--critical/);
 	assert.match(route, /risk-register-exposure-chart__segment--high/);
 	assert.match(route, /risk-register-exposure-chart__segment--medium/);
 	assert.match(route, /risk-register-exposure-chart__segment--low/);
+	assert.match(route, /risk-register-exposure-chart__segment--closed/);
 	assert.match(route, /risk-register-exposure-chart__legend-item--critical/);
 	assert.match(route, /risk-register-exposure-chart__legend-item--low/);
+	assert.match(route, /risk-register-exposure-chart__legend-item--closed/);
 	assert.match(route, /risk-register-exposure-chart__swatch/);
 	assert.match(route, /aria-hidden="true"/);
 	assert.match(route, /focusable="false"/);
-	assert.match(route, /assessed/);
+	assert.match(route, /charted/);
 	assert.match(route, /action state/);
 	assert.doesNotMatch(route, /riskRagTone/);
 	assert.doesNotMatch(route, /risk\.description && <span>/);

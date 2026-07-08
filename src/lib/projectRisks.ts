@@ -52,9 +52,9 @@ export type RiskRegisterPagination = {
 	hasNext: boolean;
 };
 export type RiskExposureDistributionSegment = {
-	exposure: RiskExposure;
+	exposure: RiskExposure | 'closed';
 	label: string;
-	tone: RiskExposureTone;
+	tone: RiskExposureTone | 'neutral';
 	count: number;
 	percentage: number;
 };
@@ -62,6 +62,8 @@ export type RiskExposureDistribution = {
 	totalActiveRisks: number;
 	assessedActiveRisks: number;
 	unassessedActiveRisks: number;
+	closedRisks: number;
+	chartedRisks: number;
 	segments: RiskExposureDistributionSegment[];
 	summary: string;
 };
@@ -668,19 +670,33 @@ export function getActiveRiskExposureCounts(risks: Array<Pick<ProjectRisk, 'stat
 
 export function getExposureDistribution(risks: Array<Pick<ProjectRisk, 'status' | 'probability' | 'impact'>>): RiskExposureDistribution {
 	const activeRisks = risks.filter((risk) => riskLifecycleCategory(risk.status) === 'active');
+	const closedRisks = risks.filter((risk) => riskLifecycleCategory(risk.status) === 'closed').length;
 	const counts = getActiveRiskExposureCounts(activeRisks);
 	const assessedActiveRisks = activeRisks.filter((risk) => hasAssessedRiskExposure(risk)).length;
-	const segments = [...RISK_EXPOSURES].reverse().map((exposure) => ({
+	const chartedRisks = assessedActiveRisks + closedRisks;
+	const exposureSegments = [...RISK_EXPOSURES].reverse().map((exposure) => ({
 		exposure,
 		label: riskExposureLabel(exposure),
 		tone: riskExposureTone(exposure),
 		count: counts[exposure],
-		percentage: getExposurePercentage(counts[exposure], assessedActiveRisks),
+		percentage: getExposurePercentage(counts[exposure], chartedRisks),
 	}));
+	const segments = [
+		...exposureSegments,
+		{
+			exposure: 'closed' as const,
+			label: 'Closed',
+			tone: 'neutral' as const,
+			count: closedRisks,
+			percentage: getExposurePercentage(closedRisks, chartedRisks),
+		},
+	];
 	return {
 		totalActiveRisks: activeRisks.length,
 		assessedActiveRisks,
 		unassessedActiveRisks: activeRisks.length - assessedActiveRisks,
+		closedRisks,
+		chartedRisks,
 		segments,
 		summary: getExposureChartSummary(segments, activeRisks.length - assessedActiveRisks),
 	};
@@ -692,7 +708,7 @@ export function getExposureChartSummary(segments: RiskExposureDistributionSegmen
 		.map((segment) => `${segment.count} ${segment.label}`);
 	const unassessedPart = unassessedActiveRisks > 0 ? `${unassessedActiveRisks} unassessed` : '';
 	const parts = [...assessedParts, unassessedPart].filter(Boolean);
-	return parts.length > 0 ? `Active risk exposure: ${parts.join(', ')}.` : 'No active risks to chart.';
+	return parts.length > 0 ? `Risk exposure distribution: ${parts.join(', ')}.` : 'No active or closed risks to chart.';
 }
 
 export function summarizeRiskRegister(risks: ProjectRisk[], now = new Date()): RiskRegisterSummary {
