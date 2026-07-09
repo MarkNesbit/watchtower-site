@@ -358,7 +358,7 @@ const activePromptCount = activePromptAreas.reduce((total, area) => total + area
 							type="button"
 							aria-haspopup="dialog"
 							data-risk-prompts-open
-						>Use risk prompts</button>
+						>Risk Suggestions</button>
 						{canCreateRisk ? (
 							<a
 								class="button button--primary"
@@ -967,8 +967,10 @@ const activePromptCount = activePromptAreas.reduce((total, area) => total + area
 	}
 
 	.risk-register-action {
-		display: grid;
-		justify-items: end;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: flex-end;
 		gap: 0.45rem;
 	}
 
@@ -2094,7 +2096,13 @@ const activePromptCount = activePromptAreas.reduce((total, area) => total + area
 
 	@media (max-width: 760px) {
 		.risk-register-action {
-			justify-items: stretch;
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.risk-register-action .button {
+			justify-content: center;
+			width: 100%;
 		}
 
 		.risk-register-summary {
