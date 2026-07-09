@@ -35,6 +35,7 @@ import {
 	riskReferenceStatusLabel,
 	summarizeRiskRegister,
 } from '../../../../../../lib/projectRisks';
+import { getDefaultRiskPromptLibraryForSelection, type RiskPromptLibraryForSelection } from '../../../../../../lib/riskPrompts';
 import { buildProjectNewRiskPath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
 
@@ -48,6 +49,8 @@ let workspaceRole = '';
 let message = '';
 let risksLoadError = '';
 let featureAccess = getFeatureAccess('riskManagement');
+let riskPromptLibrary: RiskPromptLibraryForSelection | null = null;
+let riskPromptLibraryLoadError = false;
 
 const formatDate = (value, fallback = 'Not available') => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value))
@@ -129,6 +132,12 @@ try {
 				} catch (error) {
 					risks = [];
 					risksLoadError = error instanceof Error ? error.message : 'Unable to load the Risk Register.';
+				}
+				try {
+					riskPromptLibrary = await getDefaultRiskPromptLibraryForSelection(serverSupabase);
+				} catch (error) {
+					riskPromptLibraryLoadError = true;
+					console.error('Unable to load risk prompt library for Risk Register modal.', error);
 				}
 			}
 		}
@@ -321,6 +330,9 @@ const summaryCards = [
 		icon: '^',
 	},
 ];
+const activePromptAreas = riskPromptLibrary?.areas ?? [];
+const firstPromptArea = activePromptAreas[0] ?? null;
+const activePromptCount = activePromptAreas.reduce((total, area) => total + area.prompts.length, 0);
 ---
 <AuthenticatedLayout title={project ? `Risk Register — ${project.name} | WatchTower` : 'Risk Register | WatchTower'}>
 	<section class="risk-register-page" data-risk-management-route data-risk-register-route data-feature-state={featureAccess.state}>
@@ -341,6 +353,12 @@ const summaryCards = [
 					headingId="risk-register-table-heading"
 				>
 					<div slot="action" class="risk-register-action">
+						<button
+							class="button button--secondary"
+							type="button"
+							aria-haspopup="dialog"
+							data-risk-prompts-open
+						>Use risk prompts</button>
 						{canCreateRisk ? (
 							<a
 								class="button button--primary"
@@ -686,6 +704,122 @@ const summaryCards = [
 					)}
 					<a class="text-link risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
 				</ProjectContentPanel>
+
+				<dialog class="risk-prompt-modal" aria-labelledby="risk-prompt-modal-title" data-risk-prompt-modal>
+					<div class="risk-prompt-modal__header">
+						<div class="risk-prompt-modal__icon" aria-hidden="true">?</div>
+						<div>
+							<p class="eyebrow">Guided risk identification</p>
+							<h2 id="risk-prompt-modal-title">Create risks from prompts</h2>
+							<p>Review common risk areas and select any prompts that may apply to this project. These prompts are not assessed project risks; selected prompts will later be created as draft risk records for review and assessment.</p>
+						</div>
+						<form method="dialog">
+							<button class="risk-prompt-modal__close" type="submit" aria-label="Close risk prompt modal">x</button>
+						</form>
+					</div>
+
+					<div class="risk-prompt-modal__loading" data-risk-prompt-loading hidden>
+						<p>Loading risk prompts...</p>
+					</div>
+
+					{riskPromptLibraryLoadError ? (
+						<div class="risk-prompt-modal__state" role="alert" data-risk-prompt-error>
+							<h3>We could not load the risk prompt library.</h3>
+							<p>Close the modal and try again.</p>
+						</div>
+					) : !riskPromptLibrary ? (
+						<div class="risk-prompt-modal__state" data-risk-prompt-no-library>
+							<h3>The Watchtower Default Risk Prompt Library is not currently available.</h3>
+							<p>No prompts can be selected until the active default library has been seeded.</p>
+						</div>
+					) : activePromptAreas.length === 0 ? (
+						<div class="risk-prompt-modal__state" data-risk-prompt-no-areas>
+							<h3>No active risk areas are available in this library.</h3>
+							<p>Prompt selection will be available when active risk areas are configured.</p>
+						</div>
+					) : (
+						<div class="risk-prompt-modal__workspace" data-risk-prompt-workspace data-total-prompt-count={activePromptCount}>
+							<div class="risk-prompt-tabs" role="tablist" aria-label="Risk prompt areas" data-risk-prompt-tabs>
+								{activePromptAreas.map((area) => {
+									const selected = area.id === firstPromptArea?.id;
+									return (
+										<button
+											class={`risk-prompt-tab${selected ? ' risk-prompt-tab--active' : ''}`}
+											id={`risk-prompt-tab-${area.risk_area_key}`}
+											type="button"
+											role="tab"
+											aria-selected={selected ? 'true' : 'false'}
+											aria-controls={`risk-prompt-panel-${area.risk_area_key}`}
+											tabindex={selected ? '0' : '-1'}
+											data-risk-prompt-tab={area.id}
+										>
+											<span>{area.risk_area_title}</span>
+											<span class="risk-prompt-tab__count" aria-label={`0 selected prompts in ${area.risk_area_title}`} data-risk-prompt-tab-count={area.id} hidden>0</span>
+										</button>
+									);
+								})}
+							</div>
+
+							<div class="risk-prompt-panels" data-risk-prompt-panels>
+								{activePromptAreas.map((area) => {
+									const selected = area.id === firstPromptArea?.id;
+									return (
+										<section
+											class="risk-prompt-panel"
+											id={`risk-prompt-panel-${area.risk_area_key}`}
+											role="tabpanel"
+											aria-labelledby={`risk-prompt-tab-${area.risk_area_key}`}
+											data-risk-prompt-panel={area.id}
+											hidden={!selected}
+										>
+											<div class="risk-prompt-panel__heading">
+												<h3>{area.risk_area_title}</h3>
+												<p>{area.prompts.length} active {area.prompts.length === 1 ? 'prompt' : 'prompts'}</p>
+											</div>
+											{area.prompts.length > 0 ? (
+												<ul class="risk-prompt-list" data-risk-prompt-list>
+													{area.prompts.map((prompt) => (
+														<li class="risk-prompt-row" data-risk-prompt-row={prompt.risk_prompt_id}>
+															<label>
+																<span class="risk-prompt-row__text">
+																	<strong>{prompt.risk_prompt_title}</strong>
+																	<span class="visually-hidden">{prompt.risk_prompt_guidance}</span>
+																</span>
+																<input
+																	type="checkbox"
+																	value={prompt.risk_prompt_id}
+																	aria-describedby={`risk-prompt-guidance-${prompt.risk_prompt_id}`}
+																	data-risk-prompt-checkbox
+																	data-risk-prompt-id={prompt.risk_prompt_id}
+																	data-risk-prompt-area-id={area.id}
+																/>
+																<span class="risk-prompt-row__switch" aria-hidden="true"></span>
+															</label>
+															<span class="visually-hidden" id={`risk-prompt-guidance-${prompt.risk_prompt_id}`}>{prompt.risk_prompt_guidance}</span>
+														</li>
+													))}
+												</ul>
+											) : (
+												<p class="risk-prompt-panel__empty" data-risk-prompt-empty-area>No active risk prompts are available in this area.</p>
+											)}
+										</section>
+									);
+								})}
+							</div>
+
+							<div class="risk-prompt-modal__footer">
+								<p class="risk-prompt-selected-total" aria-live="polite" data-risk-prompt-selected-total>0 selected</p>
+								<button class="button button--secondary" type="button" disabled aria-describedby="risk-prompt-show-selected-disabled" data-risk-prompt-show-selected-disabled>Show selected only</button>
+								<span class="visually-hidden" id="risk-prompt-show-selected-disabled">Show selected only will be added in a later slice.</span>
+								<form method="dialog">
+									<button class="button button--secondary" type="submit">Cancel</button>
+								</form>
+								<button class="button button--primary" type="button" disabled aria-describedby="risk-prompt-create-disabled" data-risk-prompt-create-disabled>Create risks</button>
+								<span class="visually-hidden" id="risk-prompt-create-disabled">Risk creation from prompts is not available in this slice. Selected prompts will later create draft risk records for review.</span>
+							</div>
+						</div>
+					)}
+				</dialog>
 			</>
 		) : (
 			<section class="content-card" data-feature-unavailable-message>
@@ -697,6 +831,128 @@ const summaryCards = [
 		)}
 	</section>
 </AuthenticatedLayout>
+
+<script>
+	const promptModal = document.querySelector('[data-risk-prompt-modal]');
+	const promptOpenButton = document.querySelector('[data-risk-prompts-open]');
+	const selectedPromptIds = new Set();
+	let promptModalTrigger = null;
+
+	const promptTabs = () => Array.from(document.querySelectorAll('[data-risk-prompt-tab]'));
+	const promptPanels = () => Array.from(document.querySelectorAll('[data-risk-prompt-panel]'));
+	const promptCheckboxes = () => Array.from(document.querySelectorAll('[data-risk-prompt-checkbox]'));
+
+	const totalLabel = (count) => count === 1 ? '1 prompt selected' : `${count} selected`;
+
+	const updateRiskPromptCounts = () => {
+		const countsByArea = new Map();
+		promptCheckboxes().forEach((checkbox) => {
+			if (!(checkbox instanceof HTMLInputElement) || !checkbox.checked) return;
+			const areaId = checkbox.dataset.riskPromptAreaId || '';
+			countsByArea.set(areaId, (countsByArea.get(areaId) || 0) + 1);
+		});
+
+		document.querySelectorAll('[data-risk-prompt-tab-count]').forEach((badge) => {
+			if (!(badge instanceof HTMLElement)) return;
+			const areaId = badge.dataset.riskPromptTabCount || '';
+			const count = countsByArea.get(areaId) || 0;
+			badge.textContent = String(count);
+			badge.hidden = count === 0;
+			badge.setAttribute('aria-label', `${count} selected ${count === 1 ? 'prompt' : 'prompts'} in this area`);
+		});
+
+		const total = selectedPromptIds.size;
+		const selectedTotal = document.querySelector('[data-risk-prompt-selected-total]');
+		if (selectedTotal) selectedTotal.textContent = totalLabel(total);
+	};
+
+	const setActiveRiskPromptTab = (tabToActivate, focusTab = true) => {
+		if (!(tabToActivate instanceof HTMLElement)) return;
+		const areaId = tabToActivate.dataset.riskPromptTab || '';
+		promptTabs().forEach((tab) => {
+			if (!(tab instanceof HTMLElement)) return;
+			const isActive = tab === tabToActivate;
+			tab.classList.toggle('risk-prompt-tab--active', isActive);
+			tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+			tab.tabIndex = isActive ? 0 : -1;
+		});
+		promptPanels().forEach((panel) => {
+			if (!(panel instanceof HTMLElement)) return;
+			panel.hidden = panel.dataset.riskPromptPanel !== areaId;
+		});
+		if (focusTab) tabToActivate.focus();
+	};
+
+	const resetRiskPromptSelection = () => {
+		selectedPromptIds.clear();
+		promptCheckboxes().forEach((checkbox) => {
+			if (checkbox instanceof HTMLInputElement) checkbox.checked = false;
+		});
+		const firstTab = promptTabs()[0];
+		if (firstTab instanceof HTMLElement) setActiveRiskPromptTab(firstTab, false);
+		updateRiskPromptCounts();
+	};
+
+	if (promptOpenButton instanceof HTMLElement && promptModal instanceof HTMLDialogElement) {
+		promptOpenButton.addEventListener('click', () => {
+			promptModalTrigger = promptOpenButton;
+			promptModal.showModal();
+			const firstFocus = promptModal.querySelector('[data-risk-prompt-tab], button, [href], input, select, textarea');
+			if (firstFocus instanceof HTMLElement) firstFocus.focus();
+		});
+
+		promptModal.addEventListener('close', () => {
+			resetRiskPromptSelection();
+			if (promptModalTrigger instanceof HTMLElement && document.contains(promptModalTrigger)) {
+				promptModalTrigger.focus();
+			}
+			promptModalTrigger = null;
+		});
+	}
+
+	promptTabs().forEach((tab, index, tabs) => {
+		if (!(tab instanceof HTMLElement)) return;
+		tab.addEventListener('click', () => setActiveRiskPromptTab(tab));
+		tab.addEventListener('keydown', (event) => {
+			const keyActions = {
+				ArrowRight: 1,
+				ArrowDown: 1,
+				ArrowLeft: -1,
+				ArrowUp: -1,
+			};
+			if (event.key === 'Home') {
+				event.preventDefault();
+				setActiveRiskPromptTab(tabs[0]);
+				return;
+			}
+			if (event.key === 'End') {
+				event.preventDefault();
+				setActiveRiskPromptTab(tabs[tabs.length - 1]);
+				return;
+			}
+			const direction = keyActions[event.key];
+			if (!direction) return;
+			event.preventDefault();
+			const nextIndex = (index + direction + tabs.length) % tabs.length;
+			setActiveRiskPromptTab(tabs[nextIndex]);
+		});
+	});
+
+	promptCheckboxes().forEach((checkbox) => {
+		if (!(checkbox instanceof HTMLInputElement)) return;
+		checkbox.addEventListener('change', () => {
+			const promptId = checkbox.dataset.riskPromptId || checkbox.value;
+			if (checkbox.checked) {
+				selectedPromptIds.add(promptId);
+			} else {
+				selectedPromptIds.delete.call(selectedPromptIds, promptId);
+			}
+			updateRiskPromptCounts();
+		});
+	});
+
+	updateRiskPromptCounts();
+</script>
 
 <style>
 	.risk-register-page {
@@ -1488,6 +1744,316 @@ const summaryCards = [
 		justify-self: start;
 	}
 
+	.risk-prompt-modal {
+		width: min(68rem, calc(100vw - 2rem));
+		max-height: min(52rem, calc(100vh - 2rem));
+		border: 1px solid rgba(110, 181, 224, 0.34);
+		border-radius: 8px;
+		padding: 0;
+		background:
+			linear-gradient(145deg, rgba(16, 32, 47, 0.98), rgba(3, 12, 23, 0.98));
+		color: var(--text);
+		box-shadow: 0 24px 88px rgba(0, 0, 0, 0.48);
+		overflow: hidden;
+	}
+
+	.risk-prompt-modal::backdrop {
+		background: rgba(1, 7, 15, 0.68);
+		backdrop-filter: blur(10px);
+	}
+
+	.risk-prompt-modal__header {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		gap: 1rem;
+		align-items: start;
+		padding: 1.15rem;
+		border-bottom: 1px solid rgba(110, 181, 224, 0.18);
+	}
+
+	.risk-prompt-modal__header h2 {
+		margin: 0 0 0.35rem;
+		font-size: clamp(1.55rem, 3.2vw, 2.25rem);
+		letter-spacing: 0;
+	}
+
+	.risk-prompt-modal__header p {
+		max-width: 48rem;
+		margin-bottom: 0;
+	}
+
+	.risk-prompt-modal__icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 3.5rem;
+		aspect-ratio: 1;
+		border: 1px solid rgba(0, 160, 255, 0.58);
+		border-radius: 8px;
+		background: rgba(0, 160, 255, 0.16);
+		color: var(--accent-strong);
+		font-size: 1.9rem;
+		font-weight: 900;
+		line-height: 1;
+	}
+
+	.risk-prompt-modal__close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.5rem;
+		aspect-ratio: 1;
+		border: 1px solid transparent;
+		border-radius: 999px;
+		background: transparent;
+		color: var(--muted-strong);
+		font: inherit;
+		font-size: 1.3rem;
+		cursor: pointer;
+	}
+
+	.risk-prompt-modal__close:hover,
+	.risk-prompt-modal__close:focus-visible {
+		border-color: rgba(0, 160, 255, 0.52);
+		color: var(--text);
+		outline: none;
+	}
+
+	.risk-prompt-modal__loading,
+	.risk-prompt-modal__state {
+		padding: 1.2rem;
+	}
+
+	.risk-prompt-modal__state {
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.risk-prompt-modal__state h3 {
+		margin: 0;
+		font-size: 1.15rem;
+		letter-spacing: 0;
+	}
+
+	.risk-prompt-modal__state p {
+		margin: 0;
+	}
+
+	.risk-prompt-modal__workspace {
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr) auto;
+		max-height: calc(min(52rem, 100vh - 2rem) - 7.5rem);
+		min-height: 0;
+	}
+
+	.risk-prompt-tabs {
+		display: flex;
+		gap: 0.45rem;
+		overflow-x: auto;
+		padding: 0.8rem 1rem 0.7rem;
+		border-bottom: 1px solid rgba(110, 181, 224, 0.18);
+		scrollbar-width: thin;
+	}
+
+	.risk-prompt-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		flex: 0 0 auto;
+		max-width: min(18rem, 72vw);
+		min-height: 2.55rem;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 8px;
+		padding: 0.48rem 0.68rem;
+		background: rgba(8, 13, 23, 0.48);
+		color: var(--muted-strong);
+		font: inherit;
+		font-size: 0.88rem;
+		font-weight: 850;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.risk-prompt-tab span:first-child {
+		overflow-wrap: anywhere;
+		line-height: 1.2;
+	}
+
+	.risk-prompt-tab:hover,
+	.risk-prompt-tab:focus-visible,
+	.risk-prompt-tab--active {
+		border-color: rgba(56, 189, 248, 0.58);
+		background: rgba(14, 165, 233, 0.16);
+		color: var(--text);
+		outline: none;
+	}
+
+	.risk-prompt-tab:focus-visible {
+		box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.28);
+	}
+
+	.risk-prompt-tab--active {
+		box-shadow: inset 0 -2px 0 var(--accent-strong);
+	}
+
+	.risk-prompt-tab__count {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 1.45rem;
+		min-height: 1.35rem;
+		border: 1px solid rgba(0, 160, 255, 0.58);
+		border-radius: 999px;
+		background: rgba(0, 160, 255, 0.18);
+		color: var(--text);
+		font-size: 0.78rem;
+		font-weight: 900;
+		line-height: 1;
+	}
+
+	.risk-prompt-panels {
+		min-height: 0;
+		overflow: auto;
+		padding: 1rem;
+		scrollbar-width: thin;
+	}
+
+	.risk-prompt-panel {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.risk-prompt-panel__heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.risk-prompt-panel__heading h3 {
+		margin: 0;
+		font-size: 1.12rem;
+		letter-spacing: 0;
+	}
+
+	.risk-prompt-panel__heading p,
+	.risk-prompt-panel__empty {
+		margin: 0;
+		color: var(--muted-strong);
+		font-size: 0.9rem;
+		font-weight: 760;
+	}
+
+	.risk-prompt-list {
+		display: grid;
+		gap: 0.5rem;
+		margin: 0;
+		padding: 0 0 0.7rem;
+		list-style: none;
+	}
+
+	.risk-prompt-row label {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto auto;
+		gap: 0.8rem;
+		align-items: center;
+		min-height: 3.35rem;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 8px;
+		padding: 0.7rem 0.8rem;
+		background: rgba(15, 23, 42, 0.42);
+		cursor: pointer;
+	}
+
+	.risk-prompt-row label:hover,
+	.risk-prompt-row label:focus-within {
+		border-color: rgba(56, 189, 248, 0.52);
+		background: rgba(14, 165, 233, 0.12);
+	}
+
+	.risk-prompt-row label:focus-within {
+		box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.24);
+	}
+
+	.risk-prompt-row__text {
+		display: grid;
+		min-width: 0;
+	}
+
+	.risk-prompt-row__text strong {
+		color: var(--text);
+		font-size: 0.95rem;
+		font-weight: 850;
+		line-height: 1.32;
+		overflow-wrap: anywhere;
+	}
+
+	.risk-prompt-row input {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+	}
+
+	.risk-prompt-row__switch {
+		position: relative;
+		width: 3rem;
+		height: 1.6rem;
+		border: 1px solid rgba(148, 163, 184, 0.45);
+		border-radius: 999px;
+		background: rgba(51, 65, 85, 0.78);
+		transition: background 160ms ease, border-color 160ms ease;
+	}
+
+	.risk-prompt-row__switch::after {
+		position: absolute;
+		top: 50%;
+		left: 0.18rem;
+		width: 1.12rem;
+		height: 1.12rem;
+		border-radius: 999px;
+		background: var(--muted-strong);
+		content: "";
+		transform: translateY(-50%);
+		transition: transform 160ms ease, background 160ms ease;
+	}
+
+	.risk-prompt-row input:checked + .risk-prompt-row__switch {
+		border-color: rgba(0, 160, 255, 0.74);
+		background: rgba(0, 160, 255, 0.46);
+	}
+
+	.risk-prompt-row input:checked + .risk-prompt-row__switch::after {
+		background: var(--text);
+		transform: translate(1.34rem, -50%);
+	}
+
+	.risk-prompt-modal__footer {
+		position: sticky;
+		bottom: 0;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.65rem;
+		padding: 0.9rem 1rem;
+		border-top: 1px solid rgba(110, 181, 224, 0.22);
+		background: rgba(8, 18, 30, 0.98);
+	}
+
+	.risk-prompt-selected-total {
+		margin: 0 auto 0 0;
+		color: var(--text);
+		font-size: 0.95rem;
+		font-weight: 900;
+	}
+
+	.risk-prompt-modal__footer [disabled] {
+		opacity: 0.62;
+		cursor: not-allowed;
+	}
+
 	@media (max-width: 1420px) {
 		.risk-register-toolbar {
 			grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1562,6 +2128,33 @@ const summaryCards = [
 
 		.risk-register-pagination__pages {
 			flex-wrap: wrap;
+		}
+
+		.risk-prompt-modal__header {
+			grid-template-columns: minmax(0, 1fr) auto;
+		}
+
+		.risk-prompt-modal__icon {
+			display: none;
+		}
+
+		.risk-prompt-panel__heading,
+		.risk-prompt-modal__footer {
+			align-items: stretch;
+			flex-direction: column;
+		}
+
+		.risk-prompt-selected-total {
+			margin-right: 0;
+		}
+
+		.risk-prompt-modal__footer .button,
+		.risk-prompt-modal__footer form {
+			width: 100%;
+		}
+
+		.risk-prompt-row label {
+			grid-template-columns: minmax(0, 1fr) auto;
 		}
 	}
 </style>

@@ -93,6 +93,24 @@ Future functions are displayed separately as unavailable:
 
 These entries are non-interactive and do not implement upload or download functionality.
 
+## Risk Register prompt modal
+
+WT-RISK-GUIDE-002 adds the first Risk Register modal for guided risk identification. The entry point is the `Use risk prompts` action on the project Risk Register.
+
+The modal reads the active default library from Supabase through the same reference tables created in WT-RISK-GUIDE-001:
+
+- active default library only;
+- active risk areas only, ordered by `risk_area_order`;
+- active prompts only, ordered by `risk_prompt_order`.
+
+The page fails safely when the active default library cannot be loaded, when no active library exists, when no active areas exist, or when an area has no active prompts. User-facing messages are generic and do not expose raw database errors.
+
+Risk areas are rendered as accessible tabs. Only the selected tab panel displays its prompt rows in full. Prompt controls use stable `risk_prompt_id` values for identity, so duplicate titles would still be independent selections.
+
+Selection state is temporary and client-side only for the lifetime of the open modal. Closing the modal clears selections; reopening starts with no selected prompts. Per-tab badges and the total selected count are derived from the current checkbox state and are not persisted to Supabase, local storage or a session table.
+
+The footer reserves space for later workflow controls. `Show selected only` remains disabled until WT-RISK-GUIDE-004. `Create risks` remains disabled until WT-RISK-GUIDE-005, where selected prompts will create Draft risk records for review and assessment. WT-RISK-GUIDE-002 does not create project risks, source-prompt traceability fields, notifications, attention items or project-data recommendations.
+
 ## Deployment and rollback
 
 Deployment order:
