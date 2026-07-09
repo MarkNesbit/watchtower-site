@@ -11,6 +11,19 @@ import {
 	getDefaultRiskPromptLibraryForSelection,
 	getDefaultRiskPromptLibrarySummary,
 } from '../src/lib/riskPrompts.ts';
+import {
+	clearRiskPromptSelections,
+	createRiskPromptSelectionState,
+	deselectRiskPrompt,
+	getSelectedPromptCount,
+	getSelectedPromptCountByArea,
+	getSelectedPromptCountsByArea,
+	getSelectedPromptTotalLabel,
+	isRiskPromptSelected,
+	removeUnknownRiskPromptSelections,
+	selectRiskPrompt,
+	toggleRiskPrompt,
+} from '../src/lib/riskPromptSelection.ts';
 
 const csvUrl = new URL('../data/risk-prompts/watchtower_default_risk_prompt_library_v1_0.csv', import.meta.url);
 const migrationUrl = new URL('../supabase/migrations/20260708000100_risk_prompt_library_foundation.sql', import.meta.url);
@@ -317,6 +330,49 @@ test('Default risk prompt library selection reader handles missing empty and fai
 	await assert.rejects(() => getDefaultRiskPromptLibraryForSelection(promptErrorClient), /prompt failure/);
 });
 
+test('Risk prompt selection state uses stable prompt IDs across areas without duplicates', () => {
+	const knownPromptIds = new Set(['WT-RP-001', 'WT-RP-002', 'WT-RP-003', 'WT-RP-041']);
+	const areaByPromptId = new Map([
+		['WT-RP-001', 'area-governance'],
+		['WT-RP-002', 'area-governance'],
+		['WT-RP-003', 'area-scope'],
+		['WT-RP-041', 'area-technology'],
+	]);
+
+	let selectedPromptIds = createRiskPromptSelectionState([], knownPromptIds);
+	assert.equal(getSelectedPromptCount(selectedPromptIds), 0);
+	assert.equal(getSelectedPromptTotalLabel(getSelectedPromptCount(selectedPromptIds)), '0 prompts selected');
+
+	selectedPromptIds = selectRiskPrompt(selectedPromptIds, 'WT-RP-001', knownPromptIds);
+	selectedPromptIds = selectRiskPrompt(selectedPromptIds, 'WT-RP-001', knownPromptIds);
+	assert.equal(getSelectedPromptCount(selectedPromptIds), 1);
+	assert.equal(isRiskPromptSelected(selectedPromptIds, 'WT-RP-001'), true);
+	assert.equal(getSelectedPromptTotalLabel(getSelectedPromptCount(selectedPromptIds)), '1 prompt selected');
+	assert.equal(getSelectedPromptCountByArea(selectedPromptIds, areaByPromptId, 'area-governance'), 1);
+
+	selectedPromptIds = toggleRiskPrompt(selectedPromptIds, 'WT-RP-002', true, knownPromptIds);
+	selectedPromptIds = toggleRiskPrompt(selectedPromptIds, 'WT-RP-003', true, knownPromptIds);
+	selectedPromptIds = toggleRiskPrompt(selectedPromptIds, 'WT-RP-041', true, knownPromptIds);
+	selectedPromptIds = toggleRiskPrompt(selectedPromptIds, 'WT-RP-999', true, knownPromptIds);
+	assert.equal(getSelectedPromptCount(selectedPromptIds), 4);
+	assert.equal(getSelectedPromptTotalLabel(getSelectedPromptCount(selectedPromptIds)), '4 prompts selected');
+	assert.deepEqual([...getSelectedPromptCountsByArea(selectedPromptIds, areaByPromptId)], [
+		['area-governance', 2],
+		['area-scope', 1],
+		['area-technology', 1],
+	]);
+
+	selectedPromptIds = deselectRiskPrompt(selectedPromptIds, 'WT-RP-001');
+	assert.equal(getSelectedPromptCountByArea(selectedPromptIds, areaByPromptId, 'area-governance'), 1);
+	selectedPromptIds = toggleRiskPrompt(selectedPromptIds, 'WT-RP-002', false, knownPromptIds);
+	assert.equal(getSelectedPromptCountByArea(selectedPromptIds, areaByPromptId, 'area-governance'), 0);
+	assert.equal(isRiskPromptSelected(selectedPromptIds, 'WT-RP-002'), false);
+
+	selectedPromptIds = removeUnknownRiskPromptSelections(selectedPromptIds, new Set(['WT-RP-003']));
+	assert.deepEqual([...selectedPromptIds], ['WT-RP-003']);
+	assert.equal(getSelectedPromptCount(clearRiskPromptSelections()), 0);
+});
+
 test('Account page exposes read-only Risk Management modal without upload or download controls', async () => {
 	const accountPage = await readFile(accountPageUrl, 'utf8');
 	assert.match(accountPage, /data-risk-management-open/);
@@ -345,20 +401,32 @@ test('Risk Register prompt modal loads database prompts with tabbed temporary se
 	assert.match(route, /role="tab"/);
 	assert.match(route, /role="tabpanel"/);
 	assert.match(route, /aria-selected=\{selected \? 'true' : 'false'\}/);
+	assert.match(route, /aria-label=\{`\$\{area\.risk_area_title\}, 0 prompts selected`\}/);
 	assert.match(route, /riskPromptAreaTabLabels/);
 	assert.match(route, /'governance-decision-making': 'Governance'/);
 	assert.match(route, /'scope-requirements': 'Requirements'/);
 	assert.match(route, /'operational-readiness-transition': 'Readiness'/);
 	assert.match(route, /\{riskPromptAreaTabLabel\(area\)\}/);
+	assert.match(route, /data-risk-prompt-tab-title=\{area\.risk_area_title\}/);
 	assert.match(route, /data-risk-prompt-tab-count/);
+	assert.match(route, /aria-hidden="true" data-risk-prompt-tab-count/);
 	assert.match(route, /data-risk-prompt-panel=\{area\.id\}/);
 	assert.match(route, /data-risk-prompt-id=\{prompt\.risk_prompt_id\}/);
 	assert.match(route, /data-risk-prompt-area-id=\{area\.id\}/);
+	assert.match(route, /aria-label=\{`Select risk prompt: \$\{prompt\.risk_prompt_title\}`\}/);
 	assert.match(route, /risk_prompt_title/);
 	assert.match(route, /risk_prompt_guidance/);
-	assert.match(route, /const selectedPromptIds = new Set\(\)/);
-	assert.match(route, /selectedPromptIds\.add\(promptId\)/);
-	assert.match(route, /selectedPromptIds\.delete\.call\(selectedPromptIds, promptId\)/);
+	assert.match(route, /createRiskPromptSelectionState/);
+	assert.match(route, /let selectedPromptIds = createRiskPromptSelectionState\(\)/);
+	assert.match(route, /knownRiskPromptIds = new Set<string>\(\)/);
+	assert.match(route, /riskPromptAreaByPromptId = new Map<string, string>\(\)/);
+	assert.match(route, /rebuildRiskPromptSelectionIndex/);
+	assert.match(route, /removeUnknownRiskPromptSelections/);
+	assert.match(route, /toggleRiskPrompt\(selectedPromptIds, promptId, checkbox\.checked, knownRiskPromptIds\)/);
+	assert.match(route, /syncRiskPromptControls\(\)/);
+	assert.match(route, /getSelectedPromptCountsByArea/);
+	assert.match(route, /getSelectedPromptTotalLabel/);
+	assert.match(route, /0 prompts selected/);
 	assert.match(route, /resetRiskPromptSelection\(\)/);
 	assert.match(route, /setActiveRiskPromptTab/);
 	assert.match(route, /ArrowRight/);
@@ -366,6 +434,7 @@ test('Risk Register prompt modal loads database prompts with tabbed temporary se
 	assert.match(route, /data-risk-prompt-selected-total/);
 	assert.match(route, /data-risk-prompt-create-disabled/);
 	assert.match(route, /Risk creation from prompts is not available in this slice/);
+	assert.match(route, /<button class="button button--primary" type="button" disabled/);
 	assert.match(route, /data-risk-prompt-show-selected-disabled/);
 	assert.match(route, /flex-wrap: wrap/);
 	assert.match(route, /scroll-padding-bottom: 6rem/);
