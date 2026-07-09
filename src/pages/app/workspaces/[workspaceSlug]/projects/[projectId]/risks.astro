@@ -765,11 +765,13 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 											role="tab"
 											aria-selected={selected ? 'true' : 'false'}
 											aria-controls={`risk-prompt-panel-${area.risk_area_key}`}
+											aria-label={`${area.risk_area_title}, 0 prompts selected`}
 											tabindex={selected ? '0' : '-1'}
 											data-risk-prompt-tab={area.id}
+											data-risk-prompt-tab-title={area.risk_area_title}
 										>
 											<span>{riskPromptAreaTabLabel(area)}</span>
-											<span class="risk-prompt-tab__count" aria-label={`0 selected prompts in ${area.risk_area_title}`} data-risk-prompt-tab-count={area.id} hidden>0</span>
+											<span class="risk-prompt-tab__count" aria-hidden="true" data-risk-prompt-tab-count={area.id} hidden>0</span>
 										</button>
 									);
 								})}
@@ -803,6 +805,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 																<input
 																	type="checkbox"
 																	value={prompt.risk_prompt_id}
+																	aria-label={`Select risk prompt: ${prompt.risk_prompt_title}`}
 																	aria-describedby={`risk-prompt-guidance-${prompt.risk_prompt_id}`}
 																	data-risk-prompt-checkbox
 																	data-risk-prompt-id={prompt.risk_prompt_id}
@@ -823,7 +826,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 							</div>
 
 							<div class="risk-prompt-modal__footer">
-								<p class="risk-prompt-selected-total" aria-live="polite" data-risk-prompt-selected-total>0 selected</p>
+								<p class="risk-prompt-selected-total" aria-live="polite" data-risk-prompt-selected-total>0 prompts selected</p>
 								<button class="button button--secondary" type="button" disabled aria-describedby="risk-prompt-show-selected-disabled" data-risk-prompt-show-selected-disabled>Show selected only</button>
 								<span class="visually-hidden" id="risk-prompt-show-selected-disabled">Show selected only will be added in a later slice.</span>
 								<form method="dialog">
@@ -848,23 +851,58 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 </AuthenticatedLayout>
 
 <script>
+	import {
+		clearRiskPromptSelections,
+		createRiskPromptSelectionState,
+		getSelectedPromptCount,
+		getSelectedPromptCountsByArea,
+		getSelectedPromptTotalLabel,
+		isRiskPromptSelected,
+		removeUnknownRiskPromptSelections,
+		toggleRiskPrompt,
+	} from '../../../../../../lib/riskPromptSelection';
+
 	const promptModal = document.querySelector('[data-risk-prompt-modal]');
 	const promptOpenButton = document.querySelector('[data-risk-prompts-open]');
-	const selectedPromptIds = new Set();
+	let selectedPromptIds = createRiskPromptSelectionState();
+	let knownRiskPromptIds = new Set<string>();
+	let riskPromptAreaByPromptId = new Map<string, string>();
 	let promptModalTrigger = null;
 
 	const promptTabs = () => Array.from(document.querySelectorAll('[data-risk-prompt-tab]'));
 	const promptPanels = () => Array.from(document.querySelectorAll('[data-risk-prompt-panel]'));
 	const promptCheckboxes = () => Array.from(document.querySelectorAll('[data-risk-prompt-checkbox]'));
 
-	const totalLabel = (count) => count === 1 ? '1 prompt selected' : `${count} selected`;
+	const rebuildRiskPromptSelectionIndex = () => {
+		knownRiskPromptIds = new Set<string>();
+		riskPromptAreaByPromptId = new Map<string, string>();
+		promptCheckboxes().forEach((checkbox) => {
+			if (!(checkbox instanceof HTMLInputElement)) return;
+			const promptId = checkbox.dataset.riskPromptId || checkbox.value;
+			const areaId = checkbox.dataset.riskPromptAreaId || '';
+			if (!promptId || !areaId) return;
+			knownRiskPromptIds.add(promptId);
+			riskPromptAreaByPromptId.set(promptId, areaId);
+		});
+		selectedPromptIds = removeUnknownRiskPromptSelections(selectedPromptIds, knownRiskPromptIds);
+	};
+
+	const syncRiskPromptControls = () => {
+		promptCheckboxes().forEach((checkbox) => {
+			if (!(checkbox instanceof HTMLInputElement)) return;
+			const promptId = checkbox.dataset.riskPromptId || checkbox.value;
+			checkbox.checked = isRiskPromptSelected(selectedPromptIds, promptId);
+		});
+	};
 
 	const updateRiskPromptCounts = () => {
-		const countsByArea = new Map();
-		promptCheckboxes().forEach((checkbox) => {
-			if (!(checkbox instanceof HTMLInputElement) || !checkbox.checked) return;
-			const areaId = checkbox.dataset.riskPromptAreaId || '';
-			countsByArea.set(areaId, (countsByArea.get(areaId) || 0) + 1);
+		const countsByArea = getSelectedPromptCountsByArea(selectedPromptIds, riskPromptAreaByPromptId);
+		promptTabs().forEach((tab) => {
+			if (!(tab instanceof HTMLElement)) return;
+			const areaId = tab.dataset.riskPromptTab || '';
+			const areaTitle = tab.dataset.riskPromptTabTitle || 'Risk area';
+			const count = countsByArea.get(areaId) || 0;
+			tab.setAttribute('aria-label', `${areaTitle}, ${getSelectedPromptTotalLabel(count)}`);
 		});
 
 		document.querySelectorAll('[data-risk-prompt-tab-count]').forEach((badge) => {
@@ -873,12 +911,11 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 			const count = countsByArea.get(areaId) || 0;
 			badge.textContent = String(count);
 			badge.hidden = count === 0;
-			badge.setAttribute('aria-label', `${count} selected ${count === 1 ? 'prompt' : 'prompts'} in this area`);
 		});
 
-		const total = selectedPromptIds.size;
+		const total = getSelectedPromptCount(selectedPromptIds);
 		const selectedTotal = document.querySelector('[data-risk-prompt-selected-total]');
-		if (selectedTotal) selectedTotal.textContent = totalLabel(total);
+		if (selectedTotal) selectedTotal.textContent = getSelectedPromptTotalLabel(total);
 	};
 
 	const setActiveRiskPromptTab = (tabToActivate, focusTab = true) => {
@@ -899,10 +936,8 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	};
 
 	const resetRiskPromptSelection = () => {
-		selectedPromptIds.clear();
-		promptCheckboxes().forEach((checkbox) => {
-			if (checkbox instanceof HTMLInputElement) checkbox.checked = false;
-		});
+		selectedPromptIds = clearRiskPromptSelections();
+		syncRiskPromptControls();
 		const firstTab = promptTabs()[0];
 		if (firstTab instanceof HTMLElement) setActiveRiskPromptTab(firstTab, false);
 		updateRiskPromptCounts();
@@ -911,6 +946,8 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	if (promptOpenButton instanceof HTMLElement && promptModal instanceof HTMLDialogElement) {
 		promptOpenButton.addEventListener('click', () => {
 			promptModalTrigger = promptOpenButton;
+			rebuildRiskPromptSelectionIndex();
+			resetRiskPromptSelection();
 			promptModal.showModal();
 			const firstFocus = promptModal.querySelector('[data-risk-prompt-tab], button, [href], input, select, textarea');
 			if (firstFocus instanceof HTMLElement) firstFocus.focus();
@@ -957,15 +994,14 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		if (!(checkbox instanceof HTMLInputElement)) return;
 		checkbox.addEventListener('change', () => {
 			const promptId = checkbox.dataset.riskPromptId || checkbox.value;
-			if (checkbox.checked) {
-				selectedPromptIds.add(promptId);
-			} else {
-				selectedPromptIds.delete.call(selectedPromptIds, promptId);
-			}
+			selectedPromptIds = toggleRiskPrompt(selectedPromptIds, promptId, checkbox.checked, knownRiskPromptIds);
+			syncRiskPromptControls();
 			updateRiskPromptCounts();
 		});
 	});
 
+	rebuildRiskPromptSelectionIndex();
+	syncRiskPromptControls();
 	updateRiskPromptCounts();
 </script>
 
