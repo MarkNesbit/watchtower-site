@@ -172,15 +172,22 @@ const comingSoonCapabilities = [
 	const modal = document.querySelector('[data-risk-management-modal]');
 	const openButton = document.querySelector('[data-risk-management-open]');
 
+	const setRiskManagementScrollLock = (locked) => {
+		document.documentElement.classList.toggle('modal-scroll-locked', locked);
+		document.body.classList.toggle('modal-scroll-locked', locked);
+	};
+
 	if (openButton instanceof HTMLElement && modal instanceof HTMLDialogElement) {
 		openButton.addEventListener('click', () => {
 			activeRiskManagementTrigger = openButton;
 			modal.showModal();
+			setRiskManagementScrollLock(true);
 			const focusTarget = modal.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
 			if (focusTarget instanceof HTMLElement) focusTarget.focus();
 		});
 
 		modal.addEventListener('close', () => {
+			setRiskManagementScrollLock(false);
 			if (activeRiskManagementTrigger instanceof HTMLElement && document.contains(activeRiskManagementTrigger)) {
 				activeRiskManagementTrigger.focus();
 			}
@@ -251,6 +258,7 @@ const comingSoonCapabilities = [
 	.risk-management-modal {
 		width: min(58rem, calc(100vw - 2rem));
 		max-height: min(50rem, calc(100vh - 2rem));
+		max-height: min(50rem, calc(100dvh - 2rem));
 		border: 1px solid rgba(110, 181, 224, 0.34);
 		border-radius: 0.65rem;
 		padding: 0;
@@ -258,11 +266,24 @@ const comingSoonCapabilities = [
 			linear-gradient(145deg, rgba(16, 32, 47, 0.98), rgba(3, 12, 23, 0.98));
 		color: var(--text);
 		box-shadow: 0 24px 88px rgba(0, 0, 0, 0.48);
+		overscroll-behavior: contain;
+		overflow: hidden;
+	}
+
+	.risk-management-modal[open] {
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr) auto;
 	}
 
 	.risk-management-modal::backdrop {
 		background: rgba(1, 7, 15, 0.68);
 		backdrop-filter: blur(10px);
+	}
+
+	:global(html.modal-scroll-locked),
+	:global(body.modal-scroll-locked) {
+		overflow: hidden;
+		overscroll-behavior: none;
 	}
 
 	.risk-management-modal__header,
@@ -340,9 +361,11 @@ const comingSoonCapabilities = [
 	.risk-management-modal__body {
 		display: grid;
 		gap: 1.1rem;
-		max-height: min(34rem, calc(100vh - 13rem));
+		min-height: 0;
 		overflow: auto;
+		overscroll-behavior: contain;
 		padding: 1.2rem;
+		scrollbar-width: thin;
 	}
 
 	.risk-management-section {

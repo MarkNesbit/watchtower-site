@@ -947,6 +947,11 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	const promptReviewGroups = () => Array.from(document.querySelectorAll('[data-risk-prompt-review-group]'));
 	const promptReviewRows = () => Array.from(document.querySelectorAll('[data-risk-prompt-review-row]'));
 
+	const setPromptModalScrollLock = (locked: boolean) => {
+		document.documentElement.classList.toggle('modal-scroll-locked', locked);
+		document.body.classList.toggle('modal-scroll-locked', locked);
+	};
+
 	const rebuildRiskPromptSelectionIndex = () => {
 		knownRiskPromptIds = new Set<string>();
 		riskPromptAreaByPromptId = new Map<string, string>();
@@ -1096,11 +1101,13 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 			rebuildRiskPromptSelectionIndex();
 			resetRiskPromptSelection();
 			promptModal.showModal();
+			setPromptModalScrollLock(true);
 			const firstFocus = promptModal.querySelector('[data-risk-prompt-tab], button, [href], input, select, textarea');
 			if (firstFocus instanceof HTMLElement) firstFocus.focus();
 		});
 
 		promptModal.addEventListener('close', () => {
+			setPromptModalScrollLock(false);
 			resetRiskPromptSelection();
 			if (promptModalTrigger instanceof HTMLElement && document.contains(promptModalTrigger)) {
 				promptModalTrigger.focus();
@@ -1964,6 +1971,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	.risk-prompt-modal {
 		width: min(68rem, calc(100vw - 2rem));
 		max-height: min(52rem, calc(100vh - 2rem));
+		max-height: min(52rem, calc(100dvh - 2rem));
 		border: 1px solid rgba(110, 181, 224, 0.34);
 		border-radius: 8px;
 		padding: 0;
@@ -1971,12 +1979,24 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 			linear-gradient(145deg, rgba(16, 32, 47, 0.98), rgba(3, 12, 23, 0.98));
 		color: var(--text);
 		box-shadow: 0 24px 88px rgba(0, 0, 0, 0.48);
+		overscroll-behavior: contain;
 		overflow: hidden;
+	}
+
+	.risk-prompt-modal[open] {
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
 	}
 
 	.risk-prompt-modal::backdrop {
 		background: rgba(1, 7, 15, 0.68);
 		backdrop-filter: blur(10px);
+	}
+
+	:global(html.modal-scroll-locked),
+	:global(body.modal-scroll-locked) {
+		overflow: hidden;
+		overscroll-behavior: none;
 	}
 
 	.risk-prompt-modal__header {
@@ -2059,8 +2079,8 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	.risk-prompt-modal__workspace {
 		display: grid;
 		grid-template-rows: auto minmax(0, 1fr) auto;
-		max-height: calc(min(52rem, 100vh - 2rem) - 7.5rem);
 		min-height: 0;
+		overflow: hidden;
 	}
 
 	.risk-prompt-tabs {
@@ -2132,8 +2152,9 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	.risk-prompt-panels {
 		min-height: 0;
 		overflow: auto;
-		padding: 1rem 1rem 6rem;
-		scroll-padding-bottom: 6rem;
+		overscroll-behavior: contain;
+		padding: 1rem;
+		scroll-padding-bottom: 1rem;
 		scrollbar-width: thin;
 	}
 
@@ -2316,8 +2337,6 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	}
 
 	.risk-prompt-modal__footer {
-		position: sticky;
-		bottom: 0;
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
