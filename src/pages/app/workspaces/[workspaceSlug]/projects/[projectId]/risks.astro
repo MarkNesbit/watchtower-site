@@ -333,6 +333,21 @@ const summaryCards = [
 const activePromptAreas = riskPromptLibrary?.areas ?? [];
 const firstPromptArea = activePromptAreas[0] ?? null;
 const activePromptCount = activePromptAreas.reduce((total, area) => total + area.prompts.length, 0);
+const riskPromptAreaTabLabels: Record<string, string> = {
+	'governance-decision-making': 'Governance',
+	'scope-requirements': 'Requirements',
+	'schedule-milestones': 'Schedule',
+	'financial-commercial': 'Financial',
+	'people-skills-capacity': 'People',
+	'stakeholders-communications': 'Communication',
+	'technology-architecture': 'Technology',
+	'data-privacy-security': 'Data',
+	'suppliers-dependencies': 'Dependencies',
+	'quality-testing-acceptance': 'Quality',
+	'change-adoption': 'Adoption',
+	'operational-readiness-transition': 'Readiness',
+};
+const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][number]) => riskPromptAreaTabLabels[area.risk_area_key] ?? area.risk_area_title;
 ---
 <AuthenticatedLayout title={project ? `Risk Register — ${project.name} | WatchTower` : 'Risk Register | WatchTower'}>
 	<section class="risk-register-page" data-risk-management-route data-risk-register-route data-feature-state={featureAccess.state}>
@@ -753,7 +768,7 @@ const activePromptCount = activePromptAreas.reduce((total, area) => total + area
 											tabindex={selected ? '0' : '-1'}
 											data-risk-prompt-tab={area.id}
 										>
-											<span>{area.risk_area_title}</span>
+											<span>{riskPromptAreaTabLabel(area)}</span>
 											<span class="risk-prompt-tab__count" aria-label={`0 selected prompts in ${area.risk_area_title}`} data-risk-prompt-tab-count={area.id} hidden>0</span>
 										</button>
 									);
@@ -1850,35 +1865,36 @@ const activePromptCount = activePromptAreas.reduce((total, area) => total + area
 
 	.risk-prompt-tabs {
 		display: flex;
+		flex-wrap: wrap;
 		gap: 0.45rem;
-		overflow-x: auto;
 		padding: 0.8rem 1rem 0.7rem;
 		border-bottom: 1px solid rgba(110, 181, 224, 0.18);
-		scrollbar-width: thin;
 	}
 
 	.risk-prompt-tab {
 		display: inline-flex;
 		align-items: center;
+		justify-content: space-between;
 		gap: 0.45rem;
-		flex: 0 0 auto;
-		max-width: min(18rem, 72vw);
-		min-height: 2.55rem;
+		flex: 1 1 8.6rem;
+		min-width: 7.6rem;
+		min-height: 2.35rem;
 		border: 1px solid rgba(148, 163, 184, 0.24);
 		border-radius: 8px;
-		padding: 0.48rem 0.68rem;
+		padding: 0.44rem 0.6rem;
 		background: rgba(8, 13, 23, 0.48);
 		color: var(--muted-strong);
 		font: inherit;
-		font-size: 0.88rem;
+		font-size: 0.82rem;
 		font-weight: 850;
 		text-align: left;
 		cursor: pointer;
 	}
 
 	.risk-prompt-tab span:first-child {
+		min-width: 0;
 		overflow-wrap: anywhere;
-		line-height: 1.2;
+		line-height: 1.14;
 	}
 
 	.risk-prompt-tab:hover,
@@ -1916,7 +1932,8 @@ const activePromptCount = activePromptAreas.reduce((total, area) => total + area
 	.risk-prompt-panels {
 		min-height: 0;
 		overflow: auto;
-		padding: 1rem;
+		padding: 1rem 1rem 6rem;
+		scroll-padding-bottom: 6rem;
 		scrollbar-width: thin;
 	}
 
