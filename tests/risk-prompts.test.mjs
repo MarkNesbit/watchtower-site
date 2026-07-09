@@ -345,6 +345,11 @@ test('Risk Register prompt modal loads database prompts with tabbed temporary se
 	assert.match(route, /role="tab"/);
 	assert.match(route, /role="tabpanel"/);
 	assert.match(route, /aria-selected=\{selected \? 'true' : 'false'\}/);
+	assert.match(route, /riskPromptAreaTabLabels/);
+	assert.match(route, /'governance-decision-making': 'Governance'/);
+	assert.match(route, /'scope-requirements': 'Requirements'/);
+	assert.match(route, /'operational-readiness-transition': 'Readiness'/);
+	assert.match(route, /\{riskPromptAreaTabLabel\(area\)\}/);
 	assert.match(route, /data-risk-prompt-tab-count/);
 	assert.match(route, /data-risk-prompt-panel=\{area\.id\}/);
 	assert.match(route, /data-risk-prompt-id=\{prompt\.risk_prompt_id\}/);
@@ -362,6 +367,8 @@ test('Risk Register prompt modal loads database prompts with tabbed temporary se
 	assert.match(route, /data-risk-prompt-create-disabled/);
 	assert.match(route, /Risk creation from prompts is not available in this slice/);
 	assert.match(route, /data-risk-prompt-show-selected-disabled/);
+	assert.match(route, /flex-wrap: wrap/);
+	assert.match(route, /scroll-padding-bottom: 6rem/);
 	assert.match(route, /data-risk-prompt-no-library/);
 	assert.match(route, /data-risk-prompt-no-areas/);
 	assert.match(route, /data-risk-prompt-empty-area/);
