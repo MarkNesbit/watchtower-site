@@ -19,6 +19,7 @@ import {
 	getSelectedPromptCountByArea,
 	getSelectedPromptCountsByArea,
 	getSelectedPromptTotalLabel,
+	getSelectedRiskPromptGroups,
 	isRiskPromptSelected,
 	removeUnknownRiskPromptSelections,
 	selectRiskPrompt,
@@ -373,6 +374,62 @@ test('Risk prompt selection state uses stable prompt IDs across areas without du
 	assert.equal(getSelectedPromptCount(clearRiskPromptSelections()), 0);
 });
 
+test('Risk prompt selected-only review groups selected prompts by configured area and prompt order', () => {
+	const selectedPromptIds = createRiskPromptSelectionState(['WT-RP-004', 'WT-RP-010', 'WT-RP-001', 'WT-RP-050', 'WT-RP-010']);
+	const areas = [
+		{
+			id: 'area-scope',
+			risk_area_key: 'scope-requirements',
+			risk_area_title: 'Scope and requirements',
+			risk_area_order: 2,
+			prompts: [
+				{ risk_prompt_id: 'WT-RP-010', risk_prompt_order: 2, risk_prompt_title: 'Requirements are incomplete' },
+				{ risk_prompt_id: 'WT-RP-009', risk_prompt_order: 1, risk_prompt_title: 'Project scope is unclear' },
+			],
+		},
+		{
+			id: 'area-governance',
+			risk_area_key: 'governance-decision-making',
+			risk_area_title: 'Governance and decision-making',
+			risk_area_order: 1,
+			prompts: [
+				{ risk_prompt_id: 'WT-RP-004', risk_prompt_order: 4, risk_prompt_title: 'Escalation routes are unclear or unused' },
+				{ risk_prompt_id: 'WT-RP-001', risk_prompt_order: 1, risk_prompt_title: 'Decision-making authority is unclear' },
+			],
+		},
+		{
+			id: 'area-technology',
+			risk_area_key: 'technology-architecture',
+			risk_area_title: 'Technology and architecture',
+			risk_area_order: 7,
+			prompts: [
+				{ risk_prompt_id: 'WT-RP-050', risk_prompt_order: 2, risk_prompt_title: 'Integration complexity is underestimated' },
+			],
+		},
+		{
+			id: 'area-quality',
+			risk_area_key: 'quality-testing-acceptance',
+			risk_area_title: 'Quality, testing and acceptance',
+			risk_area_order: 10,
+			prompts: [
+				{ risk_prompt_id: 'WT-RP-075', risk_prompt_order: 1, risk_prompt_title: 'Testing coverage is incomplete' },
+			],
+		},
+	];
+	const groups = getSelectedRiskPromptGroups(selectedPromptIds, areas);
+
+	assert.deepEqual(groups.map((group) => group.riskAreaKey), [
+		'governance-decision-making',
+		'scope-requirements',
+		'technology-architecture',
+	]);
+	assert.deepEqual(groups[0].prompts.map((prompt) => prompt.risk_prompt_id), ['WT-RP-001', 'WT-RP-004']);
+	assert.deepEqual(groups[1].prompts.map((prompt) => prompt.risk_prompt_id), ['WT-RP-010']);
+	assert.equal(groups.flatMap((group) => group.prompts).filter((prompt) => prompt.risk_prompt_id === 'WT-RP-010').length, 1);
+	assert.equal(groups.some((group) => group.riskAreaKey === 'quality-testing-acceptance'), false);
+	assert.deepEqual(getSelectedRiskPromptGroups(clearRiskPromptSelections(), areas), []);
+});
+
 test('Account page exposes read-only Risk Management modal without upload or download controls', async () => {
 	const accountPage = await readFile(accountPageUrl, 'utf8');
 	assert.match(accountPage, /data-risk-management-open/);
@@ -426,6 +483,16 @@ test('Risk Register prompt modal loads database prompts with tabbed temporary se
 	assert.match(route, /syncRiskPromptControls\(\)/);
 	assert.match(route, /getSelectedPromptCountsByArea/);
 	assert.match(route, /getSelectedPromptTotalLabel/);
+	assert.match(route, /promptModalView: 'areas' \| 'selected' = 'areas'/);
+	assert.match(route, /setRiskPromptModalView/);
+	assert.match(route, /data-risk-prompt-selected-view/);
+	assert.match(route, /Selected risk prompts/);
+	assert.match(route, /data-risk-prompt-review-group=\{area\.id\}/);
+	assert.match(route, /data-risk-prompt-review-group-count=\{area\.id\}/);
+	assert.match(route, /data-risk-prompt-review-row=\{prompt\.risk_prompt_id\}/);
+	assert.match(route, /data-risk-prompt-selected-empty/);
+	assert.match(route, /No risk prompts are selected/);
+	assert.match(route, /data-risk-prompt-browse-areas/);
 	assert.match(route, /0 prompts selected/);
 	assert.match(route, /resetRiskPromptSelection\(\)/);
 	assert.match(route, /setActiveRiskPromptTab/);
@@ -435,7 +502,11 @@ test('Risk Register prompt modal loads database prompts with tabbed temporary se
 	assert.match(route, /data-risk-prompt-create-disabled/);
 	assert.match(route, /Risk creation from prompts is not available in this slice/);
 	assert.match(route, /<button class="button button--primary" type="button" disabled/);
-	assert.match(route, /data-risk-prompt-show-selected-disabled/);
+	assert.match(route, /data-risk-prompt-review-toggle/);
+	assert.match(route, /Show selected only/);
+	assert.match(route, /Show all risk areas/);
+	assert.match(route, /Review selected prompts when one or more prompts are selected/);
+	assert.match(route, /promptReviewToggle\.disabled = !isReviewMode && total === 0/);
 	assert.match(route, /flex-wrap: wrap/);
 	assert.match(route, /scroll-padding-bottom: 6rem/);
 	assert.match(route, /data-risk-prompt-no-library/);
