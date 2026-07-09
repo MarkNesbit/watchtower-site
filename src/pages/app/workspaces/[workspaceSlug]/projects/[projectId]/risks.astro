@@ -823,12 +823,77 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 										</section>
 									);
 								})}
+
+								<section
+									class="risk-prompt-selected-review"
+									aria-labelledby="risk-prompt-selected-review-title"
+									data-risk-prompt-selected-view
+									tabindex="-1"
+									hidden
+								>
+									<div class="risk-prompt-panel__heading risk-prompt-selected-review__heading">
+										<div>
+											<h3 id="risk-prompt-selected-review-title">Selected risk prompts</h3>
+											<p>Review the prompts selected across all risk areas. Remove any that no longer apply before creating draft risk records.</p>
+										</div>
+									</div>
+									<div class="risk-prompt-selected-review__groups" data-risk-prompt-selected-groups>
+										{activePromptAreas.map((area) => (
+											<article class="risk-prompt-selected-review__group" data-risk-prompt-review-group={area.id} hidden>
+												<div class="risk-prompt-selected-review__group-heading">
+													<h4>{area.risk_area_title}</h4>
+													<p data-risk-prompt-review-group-count={area.id}>0 prompts selected</p>
+												</div>
+												<ul class="risk-prompt-list" data-risk-prompt-review-list={area.id}>
+													{area.prompts.map((prompt) => (
+														<li
+															class="risk-prompt-row risk-prompt-selected-review__row"
+															data-risk-prompt-row={prompt.risk_prompt_id}
+															data-risk-prompt-review-row={prompt.risk_prompt_id}
+															hidden
+														>
+															<label>
+																<span class="risk-prompt-row__text">
+																	<strong>{prompt.risk_prompt_title}</strong>
+																	<span class="visually-hidden">{prompt.risk_prompt_guidance}</span>
+																</span>
+																<input
+																	type="checkbox"
+																	value={prompt.risk_prompt_id}
+																	aria-label={`Select risk prompt: ${prompt.risk_prompt_title}`}
+																	aria-describedby={`risk-prompt-review-guidance-${prompt.risk_prompt_id}`}
+																	data-risk-prompt-checkbox
+																	data-risk-prompt-id={prompt.risk_prompt_id}
+																	data-risk-prompt-area-id={area.id}
+																/>
+																<span class="risk-prompt-row__switch" aria-hidden="true"></span>
+															</label>
+															<span class="visually-hidden" id={`risk-prompt-review-guidance-${prompt.risk_prompt_id}`}>{prompt.risk_prompt_guidance}</span>
+														</li>
+													))}
+												</ul>
+											</article>
+										))}
+									</div>
+									<div class="risk-prompt-selected-review__empty" data-risk-prompt-selected-empty hidden>
+										<h4>No risk prompts are selected.</h4>
+										<p>Return to the risk areas to choose prompts.</p>
+										<button class="button button--secondary" type="button" data-risk-prompt-browse-areas>Browse risk areas</button>
+									</div>
+								</section>
 							</div>
 
 							<div class="risk-prompt-modal__footer">
 								<p class="risk-prompt-selected-total" aria-live="polite" data-risk-prompt-selected-total>0 prompts selected</p>
-								<button class="button button--secondary" type="button" disabled aria-describedby="risk-prompt-show-selected-disabled" data-risk-prompt-show-selected-disabled>Show selected only</button>
-								<span class="visually-hidden" id="risk-prompt-show-selected-disabled">Show selected only will be added in a later slice.</span>
+								<button
+									class="button button--secondary"
+									type="button"
+									disabled
+									aria-pressed="false"
+									aria-describedby="risk-prompt-show-selected-description"
+									data-risk-prompt-review-toggle
+								>Show selected only</button>
+								<span class="visually-hidden" id="risk-prompt-show-selected-description">Review selected prompts when one or more prompts are selected.</span>
 								<form method="dialog">
 									<button class="button button--secondary" type="submit">Cancel</button>
 								</form>
@@ -864,14 +929,23 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 
 	const promptModal = document.querySelector('[data-risk-prompt-modal]');
 	const promptOpenButton = document.querySelector('[data-risk-prompts-open]');
+	const promptTabsContainer = document.querySelector('[data-risk-prompt-tabs]');
+	const promptReviewToggle = document.querySelector('[data-risk-prompt-review-toggle]');
+	const promptSelectedView = document.querySelector('[data-risk-prompt-selected-view]');
+	const promptSelectedEmpty = document.querySelector('[data-risk-prompt-selected-empty]');
+	const promptBrowseAreasButton = document.querySelector('[data-risk-prompt-browse-areas]');
 	let selectedPromptIds = createRiskPromptSelectionState();
 	let knownRiskPromptIds = new Set<string>();
 	let riskPromptAreaByPromptId = new Map<string, string>();
 	let promptModalTrigger = null;
+	let promptModalView: 'areas' | 'selected' = 'areas';
+	let activePromptTabBeforeReview: HTMLElement | null = null;
 
 	const promptTabs = () => Array.from(document.querySelectorAll('[data-risk-prompt-tab]'));
 	const promptPanels = () => Array.from(document.querySelectorAll('[data-risk-prompt-panel]'));
 	const promptCheckboxes = () => Array.from(document.querySelectorAll('[data-risk-prompt-checkbox]'));
+	const promptReviewGroups = () => Array.from(document.querySelectorAll('[data-risk-prompt-review-group]'));
+	const promptReviewRows = () => Array.from(document.querySelectorAll('[data-risk-prompt-review-row]'));
 
 	const rebuildRiskPromptSelectionIndex = () => {
 		knownRiskPromptIds = new Set<string>();
@@ -895,6 +969,40 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		});
 	};
 
+	const updateRiskPromptReview = () => {
+		const countsByArea = getSelectedPromptCountsByArea(selectedPromptIds, riskPromptAreaByPromptId);
+		promptReviewRows().forEach((row) => {
+			if (!(row instanceof HTMLElement)) return;
+			const promptId = row.dataset.riskPromptReviewRow || '';
+			row.hidden = !isRiskPromptSelected(selectedPromptIds, promptId);
+		});
+		promptReviewGroups().forEach((group) => {
+			if (!(group instanceof HTMLElement)) return;
+			const areaId = group.dataset.riskPromptReviewGroup || '';
+			const count = countsByArea.get(areaId) || 0;
+			group.hidden = count === 0;
+			const countLabel = group.querySelector('[data-risk-prompt-review-group-count]');
+			if (countLabel) countLabel.textContent = getSelectedPromptTotalLabel(count);
+		});
+		if (promptSelectedEmpty instanceof HTMLElement) {
+			promptSelectedEmpty.hidden = promptModalView !== 'selected' || getSelectedPromptCount(selectedPromptIds) > 0;
+		}
+	};
+
+	const updateRiskPromptReviewToggle = () => {
+		if (!(promptReviewToggle instanceof HTMLButtonElement)) return;
+		const total = getSelectedPromptCount(selectedPromptIds);
+		const isReviewMode = promptModalView === 'selected';
+		promptReviewToggle.disabled = !isReviewMode && total === 0;
+		promptReviewToggle.textContent = isReviewMode ? 'Show all risk areas' : 'Show selected only';
+		promptReviewToggle.setAttribute('aria-pressed', isReviewMode ? 'true' : 'false');
+		promptReviewToggle.setAttribute('aria-label', isReviewMode
+			? 'Return to all risk areas'
+			: total > 0
+				? `Show ${total} selected ${total === 1 ? 'risk prompt' : 'risk prompts'}`
+				: 'Show selected risk prompts');
+	};
+
 	const updateRiskPromptCounts = () => {
 		const countsByArea = getSelectedPromptCountsByArea(selectedPromptIds, riskPromptAreaByPromptId);
 		promptTabs().forEach((tab) => {
@@ -916,6 +1024,8 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		const total = getSelectedPromptCount(selectedPromptIds);
 		const selectedTotal = document.querySelector('[data-risk-prompt-selected-total]');
 		if (selectedTotal) selectedTotal.textContent = getSelectedPromptTotalLabel(total);
+		updateRiskPromptReview();
+		updateRiskPromptReviewToggle();
 	};
 
 	const setActiveRiskPromptTab = (tabToActivate, focusTab = true) => {
@@ -935,11 +1045,48 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		if (focusTab) tabToActivate.focus();
 	};
 
+	const selectedRiskPromptReviewTarget = () => {
+		const visibleReviewRow = promptReviewRows().find((row) => row instanceof HTMLElement && !row.hidden);
+		const checkbox = visibleReviewRow instanceof HTMLElement
+			? visibleReviewRow.querySelector('[data-risk-prompt-checkbox]')
+			: null;
+		if (checkbox instanceof HTMLElement) return checkbox;
+		if (promptBrowseAreasButton instanceof HTMLElement) return promptBrowseAreasButton;
+		return promptReviewToggle instanceof HTMLElement ? promptReviewToggle : null;
+	};
+
+	const setRiskPromptModalView = (view: 'areas' | 'selected', focusTarget = true) => {
+		const nextView = view === 'selected' && getSelectedPromptCount(selectedPromptIds) > 0 ? 'selected' : 'areas';
+		if (nextView === 'selected') {
+			const activeTab = document.querySelector('[data-risk-prompt-tab][aria-selected="true"]');
+			activePromptTabBeforeReview = activeTab instanceof HTMLElement ? activeTab : null;
+		}
+		promptModalView = nextView;
+		if (promptTabsContainer instanceof HTMLElement) promptTabsContainer.hidden = nextView === 'selected';
+		promptPanels().forEach((panel) => {
+			if (panel instanceof HTMLElement) panel.hidden = nextView === 'selected' || panel.getAttribute('aria-labelledby') !== document.querySelector('[data-risk-prompt-tab][aria-selected="true"]')?.id;
+		});
+		if (promptSelectedView instanceof HTMLElement) promptSelectedView.hidden = nextView !== 'selected';
+		updateRiskPromptCounts();
+		if (nextView === 'areas') {
+			const tabToRestore = activePromptTabBeforeReview && document.contains(activePromptTabBeforeReview)
+				? activePromptTabBeforeReview
+				: promptTabs()[0];
+			if (tabToRestore instanceof HTMLElement) setActiveRiskPromptTab(tabToRestore, focusTarget);
+			return;
+		}
+		if (!focusTarget) return;
+		const target = selectedRiskPromptReviewTarget();
+		if (target instanceof HTMLElement) target.focus();
+	};
+
 	const resetRiskPromptSelection = () => {
 		selectedPromptIds = clearRiskPromptSelections();
 		syncRiskPromptControls();
+		setRiskPromptModalView('areas', false);
 		const firstTab = promptTabs()[0];
 		if (firstTab instanceof HTMLElement) setActiveRiskPromptTab(firstTab, false);
+		activePromptTabBeforeReview = null;
 		updateRiskPromptCounts();
 	};
 
@@ -994,11 +1141,28 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		if (!(checkbox instanceof HTMLInputElement)) return;
 		checkbox.addEventListener('change', () => {
 			const promptId = checkbox.dataset.riskPromptId || checkbox.value;
+			const changedInReviewMode = promptModalView === 'selected' && Boolean(checkbox.closest('[data-risk-prompt-selected-view]'));
 			selectedPromptIds = toggleRiskPrompt(selectedPromptIds, promptId, checkbox.checked, knownRiskPromptIds);
 			syncRiskPromptControls();
 			updateRiskPromptCounts();
+			if (changedInReviewMode && !checkbox.checked) {
+				const target = selectedRiskPromptReviewTarget();
+				if (target instanceof HTMLElement) target.focus();
+			}
 		});
 	});
+
+	if (promptReviewToggle instanceof HTMLButtonElement) {
+		promptReviewToggle.addEventListener('click', () => {
+			setRiskPromptModalView(promptModalView === 'selected' ? 'areas' : 'selected');
+		});
+	}
+
+	if (promptBrowseAreasButton instanceof HTMLButtonElement) {
+		promptBrowseAreasButton.addEventListener('click', () => {
+			setRiskPromptModalView('areas');
+		});
+	}
 
 	rebuildRiskPromptSelectionIndex();
 	syncRiskPromptControls();
@@ -1978,6 +2142,15 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		gap: 0.75rem;
 	}
 
+	.risk-prompt-selected-review {
+		display: grid;
+		gap: 0.9rem;
+	}
+
+	.risk-prompt-selected-review[hidden] {
+		display: none;
+	}
+
 	.risk-prompt-panel__heading {
 		display: flex;
 		align-items: center;
@@ -1997,6 +2170,64 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		color: var(--muted-strong);
 		font-size: 0.9rem;
 		font-weight: 760;
+	}
+
+	.risk-prompt-selected-review__heading {
+		align-items: flex-start;
+	}
+
+	.risk-prompt-selected-review__heading div {
+		display: grid;
+		gap: 0.28rem;
+	}
+
+	.risk-prompt-selected-review__groups {
+		display: grid;
+		gap: 0.8rem;
+	}
+
+	.risk-prompt-selected-review__group {
+		display: grid;
+		gap: 0.56rem;
+	}
+
+	.risk-prompt-selected-review__group-heading {
+		display: flex;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.risk-prompt-selected-review__group-heading h4,
+	.risk-prompt-selected-review__empty h4 {
+		margin: 0;
+		color: var(--text);
+		font-size: 1rem;
+		font-weight: 900;
+		line-height: 1.2;
+	}
+
+	.risk-prompt-selected-review__group-heading p,
+	.risk-prompt-selected-review__empty p {
+		margin: 0;
+		color: var(--muted-strong);
+		font-size: 0.88rem;
+		font-weight: 820;
+		line-height: 1.3;
+	}
+
+	.risk-prompt-selected-review__empty {
+		display: grid;
+		justify-items: start;
+		gap: 0.68rem;
+		padding: 1rem;
+		border: 1px solid rgba(148, 163, 184, 0.22);
+		border-radius: 8px;
+		background: rgba(15, 23, 42, 0.42);
+	}
+
+	.risk-prompt-selected-review__empty[hidden] {
+		display: none;
 	}
 
 	.risk-prompt-list {
@@ -2200,6 +2431,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		}
 
 		.risk-prompt-panel__heading,
+		.risk-prompt-selected-review__group-heading,
 		.risk-prompt-modal__footer {
 			align-items: stretch;
 			flex-direction: column;

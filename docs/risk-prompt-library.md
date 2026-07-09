@@ -95,7 +95,7 @@ These entries are non-interactive and do not implement upload or download functi
 
 ## Risk Register prompt modal
 
-WT-RISK-GUIDE-002 adds the first Risk Register modal for guided risk identification. WT-RISK-GUIDE-003 hardens the cross-category selection journey. The entry point is the `Risk Suggestions` action on the project Risk Register.
+WT-RISK-GUIDE-002 adds the first Risk Register modal for guided risk identification. WT-RISK-GUIDE-003 hardens the cross-category selection journey, and WT-RISK-GUIDE-004 adds the selected-only review mode. The entry point is the `Risk Suggestions` action on the project Risk Register.
 
 The modal reads the active default library from Supabase through the same reference tables created in WT-RISK-GUIDE-001:
 
@@ -111,7 +111,9 @@ Selection state is temporary and client-side only for the lifetime of the open m
 
 Closing the modal clears selections; reopening starts with no selected prompts, no tab-count badges and a `0 prompts selected` footer total. The tab accessible name includes the area title and selected count, while the visible badge is decorative for assistive technology to avoid duplicate announcements.
 
-The footer reserves space for later workflow controls. `Show selected only` remains disabled until WT-RISK-GUIDE-004. `Create risks` remains disabled until WT-RISK-GUIDE-005, where selected prompts will create Draft risk records for review and assessment. WT-RISK-GUIDE-003 does not create project risks, source-prompt traceability fields, notifications, attention items, selection sessions, local-storage records or project-data recommendations.
+`Show selected only` is enabled only when the modal has at least one selected prompt. It switches the modal from the risk-area tab view into a derived review view using the same selected-ID set. Selected prompts are grouped by source risk area in `risk_area_order` and shown in `risk_prompt_order`. Deselecting in the review view removes the prompt from the shared Set, updates the original tab badge and footer total immediately, and removes empty groups. Removing every prompt shows a deliberate empty state with a `Browse risk areas` action that returns to the normal tab view.
+
+The footer reserves space for later workflow controls. `Create risks` remains disabled until WT-RISK-GUIDE-005, where selected prompts will create Draft risk records for review and assessment. WT-RISK-GUIDE-004 does not create project risks, source-prompt traceability fields, notifications, attention items, selection sessions, local-storage records or project-data recommendations.
 
 ## Deployment and rollback
 

@@ -1,5 +1,26 @@
 export type RiskPromptSelectionState = Set<string>;
 
+export type RiskPromptSelectionPrompt = {
+	risk_prompt_id: string;
+	risk_prompt_order?: number | null;
+};
+
+export type RiskPromptSelectionArea<Prompt extends RiskPromptSelectionPrompt = RiskPromptSelectionPrompt> = {
+	id: string;
+	risk_area_key: string;
+	risk_area_title: string;
+	risk_area_order?: number | null;
+	prompts: Prompt[];
+};
+
+export type SelectedRiskPromptGroup<Prompt extends RiskPromptSelectionPrompt = RiskPromptSelectionPrompt> = {
+	riskAreaId: string;
+	riskAreaKey: string;
+	riskAreaTitle: string;
+	riskAreaOrder: number;
+	prompts: Prompt[];
+};
+
 const isValidRiskPromptId = (riskPromptId: string) => riskPromptId.trim().length > 0;
 
 const canSelectRiskPromptId = (riskPromptId: string, knownRiskPromptIds?: ReadonlySet<string>) =>
@@ -77,3 +98,29 @@ export const removeUnknownRiskPromptSelections = (
 
 export const getSelectedPromptTotalLabel = (count: number) =>
 	count === 1 ? '1 prompt selected' : `${count} prompts selected`;
+
+export const getSelectedRiskPromptGroups = <Prompt extends RiskPromptSelectionPrompt>(
+	selectedPromptIds: ReadonlySet<string>,
+	areas: RiskPromptSelectionArea<Prompt>[],
+): SelectedRiskPromptGroup<Prompt>[] => {
+	const renderedPromptIds = new Set<string>();
+	return [...areas]
+		.sort((a, b) => (a.risk_area_order ?? 0) - (b.risk_area_order ?? 0))
+		.map((area) => {
+			const prompts = [...area.prompts]
+				.sort((a, b) => (a.risk_prompt_order ?? 0) - (b.risk_prompt_order ?? 0))
+				.filter((prompt) => {
+					if (!selectedPromptIds.has(prompt.risk_prompt_id) || renderedPromptIds.has(prompt.risk_prompt_id)) return false;
+					renderedPromptIds.add(prompt.risk_prompt_id);
+					return true;
+				});
+			return {
+				riskAreaId: area.id,
+				riskAreaKey: area.risk_area_key,
+				riskAreaTitle: area.risk_area_title,
+				riskAreaOrder: area.risk_area_order ?? 0,
+				prompts,
+			};
+		})
+		.filter((group) => group.prompts.length > 0);
+};
