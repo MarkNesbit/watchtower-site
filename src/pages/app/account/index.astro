@@ -1,20 +1,55 @@
 ---
 import AuthenticatedLayout from '../../../layouts/AuthenticatedLayout.astro';
 import { getInternalRoleSimulationState, roleLabel, type RoleSimulationState } from '../../../lib/internalTesting';
+import { getDefaultRiskPromptLibrarySummary, type RiskPromptLibrarySummary } from '../../../lib/riskPrompts';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../lib/supabaseServer';
 
 const accessToken = getServerAccessToken(Astro.cookies);
 let state: RoleSimulationState | null = null;
+let riskPromptLibrary: RiskPromptLibrarySummary | null = null;
 let loadError = '';
+let riskPromptLibraryError = '';
 
 if (accessToken) {
 	try {
 		const serverSupabase = createSupabaseServerClient(accessToken);
 		state = await getInternalRoleSimulationState(serverSupabase, accessToken);
+		try {
+			riskPromptLibrary = await getDefaultRiskPromptLibrarySummary(serverSupabase);
+		} catch (error) {
+			riskPromptLibraryError = error instanceof Error ? error.message : 'Unable to load Risk Management details.';
+		}
 	} catch (error) {
 		loadError = error instanceof Error ? error.message : 'Unable to load account tools.';
 	}
 }
+
+const comingSoonCapabilities = [
+	{
+		title: 'Upload custom risk prompt library',
+		description: 'Workspace-managed import and validation controls are not available in the MVP.',
+	},
+	{
+		title: 'Download or export risk prompt library',
+		description: 'Export controls will be added after the controlled default library workflow is complete.',
+	},
+	{
+		title: 'Workspace-specific risk libraries',
+		description: 'Workspace-level prompt overrides are planned for a later governance slice.',
+	},
+	{
+		title: 'Organisation-managed risk libraries',
+		description: 'Central organisation library ownership is future scope.',
+	},
+	{
+		title: 'Alternative assessment profiles',
+		description: 'Project-type assessment profiles will be introduced separately from prompt guidance.',
+	},
+	{
+		title: 'Custom risk exposure models',
+		description: 'Configurable exposure labels, thresholds and scoring are not part of this slice.',
+	},
+];
 ---
 <AuthenticatedLayout title="Account | WatchTower">
 	<section class="content-card account-page">
@@ -25,6 +60,14 @@ if (accessToken) {
 		{loadError && <p class="form-message" role="alert">{loadError}</p>}
 
 		<div class="account-tool-list" data-account-tools>
+			<button class="account-tool-list__item account-tool-list__item--button" type="button" data-risk-management-open>
+				<span>
+					<strong>Risk Management</strong>
+					<small>Manage Risk Management guidance available to your account.</small>
+				</span>
+				<span class="text-link" aria-hidden="true">Manage</span>
+			</button>
+
 			{state?.isInternalTester && state?.workspace ? (
 				<a class="account-tool-list__item" href="/app/account/test-tools" data-test-tools-link>
 					<span>
@@ -34,11 +77,117 @@ if (accessToken) {
 					<span class="text-link">Open</span>
 				</a>
 			) : (
-				<p data-no-test-tools>There are no account tools available for this profile.</p>
+				<p class="account-tool-list__note" data-no-test-tools>There are no test tools available for this profile.</p>
 			)}
 		</div>
+
+		<dialog class="risk-management-modal" aria-labelledby="risk-management-title" data-risk-management-modal>
+			<div class="risk-management-modal__header">
+				<div class="risk-management-modal__icon" aria-hidden="true">
+					<svg viewBox="0 0 24 24" focusable="false">
+						<path d="M12 3l7 3v5c0 4.8-2.9 8.3-7 10-4.1-1.7-7-5.2-7-10V6l7-3z" />
+						<path d="M12 6.1v11.2" />
+						<path d="M8.1 7.7v3.6c0 2.7 1.5 4.7 3.9 5.9 2.4-1.2 3.9-3.2 3.9-5.9V7.7L12 6.1l-3.9 1.6z" />
+					</svg>
+				</div>
+				<div>
+					<p class="eyebrow">Account capability</p>
+					<h2 id="risk-management-title">Risk Management</h2>
+					<p>Configure the Risk Management capabilities available to your account. Watchtower currently includes a default library of structured risk prompts for use when creating Draft risks.</p>
+				</div>
+				<form method="dialog">
+					<button class="risk-management-modal__close" type="submit" aria-label="Close Risk Management">x</button>
+				</form>
+			</div>
+
+			<div class="risk-management-modal__body">
+				<section class="risk-management-section" aria-labelledby="risk-management-available-heading">
+					<div class="risk-management-section__heading">
+						<h3 id="risk-management-available-heading">Available now</h3>
+						<span class="risk-management-status">Active</span>
+					</div>
+
+					{riskPromptLibrary ? (
+						<article class="risk-library-card" data-risk-management-library-card>
+							<div>
+								<h4>{riskPromptLibrary.name}</h4>
+								<p>A structured starter library of common project risk areas and prompts. Selected prompts will later be created as Draft risks for review and assessment.</p>
+							</div>
+							<dl class="risk-library-metrics">
+								<div>
+									<dt>Version</dt>
+									<dd>{riskPromptLibrary.risk_library_version}</dd>
+								</div>
+								<div>
+									<dt>Active risk areas</dt>
+									<dd data-risk-management-area-count>{riskPromptLibrary.activeAreaCount}</dd>
+								</div>
+								<div>
+									<dt>Active risk prompts</dt>
+									<dd data-risk-management-prompt-count>{riskPromptLibrary.activePromptCount}</dd>
+								</div>
+								<div>
+									<dt>Status</dt>
+									<dd>Available</dd>
+								</div>
+							</dl>
+						</article>
+					) : (
+						<div class="risk-library-card risk-library-card--empty" data-risk-management-library-empty>
+							<h4>Watchtower Default Risk Prompt Library</h4>
+							<p>{riskPromptLibraryError || 'The default risk prompt library has not been seeded yet.'}</p>
+						</div>
+					)}
+				</section>
+
+				<section class="risk-management-section" aria-labelledby="risk-management-coming-soon-heading">
+					<div class="risk-management-section__heading">
+						<h3 id="risk-management-coming-soon-heading">Coming soon</h3>
+					</div>
+					<div class="risk-management-coming-soon" aria-label="Unavailable Risk Management functions">
+						{comingSoonCapabilities.map((capability) => (
+							<article class="risk-management-coming-soon__item" aria-disabled="true" data-risk-management-coming-soon>
+								<div>
+									<h4>{capability.title}</h4>
+									<p>{capability.description}</p>
+								</div>
+								<span>Unavailable</span>
+							</article>
+						))}
+					</div>
+				</section>
+			</div>
+
+			<div class="risk-management-modal__footer">
+				<form method="dialog">
+					<button class="button button--secondary" type="submit">Close</button>
+				</form>
+			</div>
+		</dialog>
 	</section>
 </AuthenticatedLayout>
+
+<script>
+	let activeRiskManagementTrigger = null;
+	const modal = document.querySelector('[data-risk-management-modal]');
+	const openButton = document.querySelector('[data-risk-management-open]');
+
+	if (openButton instanceof HTMLElement && modal instanceof HTMLDialogElement) {
+		openButton.addEventListener('click', () => {
+			activeRiskManagementTrigger = openButton;
+			modal.showModal();
+			const focusTarget = modal.querySelector('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+			if (focusTarget instanceof HTMLElement) focusTarget.focus();
+		});
+
+		modal.addEventListener('close', () => {
+			if (activeRiskManagementTrigger instanceof HTMLElement && document.contains(activeRiskManagementTrigger)) {
+				activeRiskManagementTrigger.focus();
+			}
+			activeRiskManagementTrigger = null;
+		});
+	}
+</script>
 
 <style>
 	.account-page {
@@ -68,6 +217,21 @@ if (accessToken) {
 		text-decoration: none;
 	}
 
+	.account-tool-list__item--button {
+		width: 100%;
+		color: inherit;
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.account-tool-list__item:hover,
+	.account-tool-list__item:focus-visible {
+		border-color: rgba(0, 160, 255, 0.58);
+		outline: none;
+		box-shadow: 0 0 0 3px rgba(0, 160, 255, 0.13);
+	}
+
 	.account-tool-list__item span:first-child {
 		display: grid;
 		gap: 0.15rem;
@@ -76,5 +240,243 @@ if (accessToken) {
 	.account-tool-list__item small {
 		color: var(--muted);
 		font-weight: 700;
+	}
+
+	.account-tool-list__note {
+		margin: 0;
+		color: var(--muted);
+		font-weight: 700;
+	}
+
+	.risk-management-modal {
+		width: min(58rem, calc(100vw - 2rem));
+		max-height: min(50rem, calc(100vh - 2rem));
+		border: 1px solid rgba(110, 181, 224, 0.34);
+		border-radius: 0.65rem;
+		padding: 0;
+		background:
+			linear-gradient(145deg, rgba(16, 32, 47, 0.98), rgba(3, 12, 23, 0.98));
+		color: var(--text);
+		box-shadow: 0 24px 88px rgba(0, 0, 0, 0.48);
+	}
+
+	.risk-management-modal::backdrop {
+		background: rgba(1, 7, 15, 0.68);
+		backdrop-filter: blur(10px);
+	}
+
+	.risk-management-modal__header,
+	.risk-management-modal__footer {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		padding: 1.2rem;
+	}
+
+	.risk-management-modal__header {
+		align-items: flex-start;
+		border-bottom: 1px solid rgba(110, 181, 224, 0.18);
+	}
+
+	.risk-management-modal__header h2 {
+		margin: 0 0 0.35rem;
+		font-size: clamp(1.7rem, 4vw, 2.35rem);
+		letter-spacing: 0;
+	}
+
+	.risk-management-modal__header p {
+		max-width: 42rem;
+		margin-bottom: 0;
+	}
+
+	.risk-management-modal__header form {
+		margin-left: auto;
+	}
+
+	.risk-management-modal__icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: 0 0 auto;
+		width: 4.4rem;
+		aspect-ratio: 1;
+		border: 1px solid rgba(0, 160, 255, 0.58);
+		border-radius: 0.5rem;
+		background:
+			linear-gradient(145deg, rgba(0, 160, 255, 0.25), rgba(36, 78, 146, 0.28));
+	}
+
+	.risk-management-modal__icon svg {
+		width: 2.35rem;
+		fill: none;
+		stroke: var(--text);
+		stroke-width: 1.6;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	}
+
+	.risk-management-modal__close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.5rem;
+		aspect-ratio: 1;
+		border: 1px solid transparent;
+		border-radius: 999px;
+		background: transparent;
+		color: var(--muted-strong);
+		font: inherit;
+		font-size: 1.3rem;
+		cursor: pointer;
+	}
+
+	.risk-management-modal__close:hover,
+	.risk-management-modal__close:focus-visible {
+		border-color: rgba(0, 160, 255, 0.52);
+		color: var(--text);
+		outline: none;
+	}
+
+	.risk-management-modal__body {
+		display: grid;
+		gap: 1.1rem;
+		max-height: min(34rem, calc(100vh - 13rem));
+		overflow: auto;
+		padding: 1.2rem;
+	}
+
+	.risk-management-section {
+		display: grid;
+		gap: 0.8rem;
+	}
+
+	.risk-management-section__heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.8rem;
+	}
+
+	.risk-management-section__heading h3,
+	.risk-library-card h4,
+	.risk-management-coming-soon__item h4 {
+		margin: 0;
+		letter-spacing: 0;
+	}
+
+	.risk-management-section__heading h3 {
+		font-size: 1.05rem;
+	}
+
+	.risk-management-status,
+	.risk-management-coming-soon__item span {
+		border: 1px solid rgba(110, 231, 168, 0.58);
+		border-radius: 999px;
+		padding: 0.22rem 0.62rem;
+		background: rgba(110, 231, 168, 0.12);
+		color: #9ff0c1;
+		font-size: 0.78rem;
+		font-weight: 850;
+	}
+
+	.risk-library-card {
+		display: grid;
+		grid-template-columns: minmax(0, 1.1fr) minmax(17rem, 0.9fr);
+		gap: 1rem;
+		border: 1px solid rgba(110, 181, 224, 0.26);
+		border-radius: 0.5rem;
+		padding: 1rem;
+		background: rgba(18, 31, 42, 0.72);
+	}
+
+	.risk-library-card p,
+	.risk-management-coming-soon__item p {
+		margin: 0.35rem 0 0;
+	}
+
+	.risk-library-card--empty {
+		grid-template-columns: 1fr;
+		border-style: dashed;
+	}
+
+	.risk-library-metrics {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.7rem;
+		margin: 0;
+	}
+
+	.risk-library-metrics div {
+		border: 1px solid rgba(110, 181, 224, 0.18);
+		border-radius: 0.5rem;
+		padding: 0.72rem;
+		background: rgba(4, 12, 24, 0.42);
+	}
+
+	.risk-library-metrics dt {
+		color: var(--muted);
+		font-size: 0.78rem;
+		font-weight: 800;
+	}
+
+	.risk-library-metrics dd {
+		margin: 0.18rem 0 0;
+		color: var(--text);
+		font-size: 1.15rem;
+		font-weight: 900;
+	}
+
+	.risk-management-coming-soon {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.75rem;
+	}
+
+	.risk-management-coming-soon__item {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.8rem;
+		border: 1px solid rgba(168, 179, 194, 0.24);
+		border-radius: 0.5rem;
+		padding: 0.9rem;
+		background: rgba(148, 163, 184, 0.08);
+		color: rgba(244, 248, 251, 0.74);
+	}
+
+	.risk-management-coming-soon__item span {
+		flex: 0 0 auto;
+		border-color: rgba(168, 179, 194, 0.34);
+		background: rgba(148, 163, 184, 0.12);
+		color: rgba(215, 226, 234, 0.72);
+	}
+
+	.risk-management-modal__footer {
+		justify-content: flex-end;
+		border-top: 1px solid rgba(110, 181, 224, 0.18);
+	}
+
+	.risk-management-modal__footer .button {
+		min-width: 7rem;
+	}
+
+	@media (max-width: 720px) {
+		.risk-management-modal__header {
+			display: grid;
+			grid-template-columns: auto 1fr auto;
+		}
+
+		.risk-management-modal__icon {
+			width: 3.5rem;
+		}
+
+		.risk-library-card,
+		.risk-management-coming-soon {
+			grid-template-columns: 1fr;
+		}
+
+		.risk-library-metrics {
+			grid-template-columns: 1fr;
+		}
 	}
 </style>

@@ -36,6 +36,8 @@ WT-TEST-001 adds `/app/account` and the restricted `/app/account/test-tools` rou
 
 WT-TEST-002 extends the restricted Test tools area with `/app/account/test-tools/demo-people` for CSV demo people import and persona simulation. Demo people are workspace-scoped test personas with notification routing metadata; they are not Supabase auth users and do not replace real profiles or workspace memberships. Persona simulation uses the selected demo person's effective workspace role for normal RBAC testing and continues to distinguish the real authenticated Mark account from the simulated persona.
 
+WT-RISK-GUIDE-001 adds the controlled Watchtower Default Risk Prompt Library foundation. The source CSV lives at `data/risk-prompts/watchtower_default_risk_prompt_library_v1_0.csv`, the schema migration adds global `risk_prompt_libraries`, `risk_prompt_areas` and `risk_prompts` reference tables, and `scripts/seed-risk-prompts.mjs` validates and upserts records through generated SQL at `supabase/seed-risk-prompts.sql`. The Account page Risk Management modal is read-only, loads active area/prompt counts from the database, and keeps upload/download/custom library functions visibly unavailable for later slices.
+
 Authenticated project pages should follow the reusable layout, action, empty-state and restricted-action guidance in `docs/ui-page-design-standard.md`.
 
 ## Development
@@ -86,6 +88,17 @@ npx supabase link --project-ref <your-project-ref>
 ```
 
 Use `supabase login` to authenticate the CLI with your Supabase account. Then use `supabase link --project-ref <your-project-ref>` to link this local repository to the hosted Supabase project.
+
+### Risk prompt library seed
+
+After applying the risk prompt library migration, validate and apply the controlled prompt data:
+
+```bash
+npm run seed:risk-prompts
+npm run seed:risk-prompts:sql
+```
+
+Apply `supabase/seed-risk-prompts.sql` through the deployment database process, or run `DATABASE_URL=postgres://... node scripts/seed-risk-prompts.mjs --apply` where direct `psql` execution is appropriate. The seed is idempotent and intentionally does not delete database prompt records when CSV rows are removed. Details are documented in `docs/risk-prompt-library.md`.
 
 ### Database change rule
 
