@@ -445,6 +445,7 @@ test('Account page exposes read-only Risk Management modal without upload or dow
 	assert.match(accountPage, /setRiskManagementScrollLock\(true\)/);
 	assert.match(accountPage, /setRiskManagementScrollLock\(false\)/);
 	assert.match(accountPage, /\.risk-management-modal\[open\]/);
+	assert.match(accountPage, /height: min\(50rem, calc\(100dvh - 2rem\)\)/);
 	assert.match(accountPage, /grid-template-rows: auto minmax\(0, 1fr\) auto/);
 	assert.match(accountPage, /modal-scroll-locked/);
 	assert.match(accountPage, /overscroll-behavior: contain/);
@@ -522,6 +523,7 @@ test('Risk Register prompt modal loads database prompts with tabbed temporary se
 	assert.match(route, /setPromptModalScrollLock\(true\)/);
 	assert.match(route, /setPromptModalScrollLock\(false\)/);
 	assert.match(route, /\.risk-prompt-modal\[open\]/);
+	assert.match(route, /height: min\(52rem, calc\(100dvh - 2rem\)\)/);
 	assert.match(route, /grid-template-rows: auto minmax\(0, 1fr\)/);
 	assert.match(route, /modal-scroll-locked/);
 	assert.match(route, /overscroll-behavior: contain/);
