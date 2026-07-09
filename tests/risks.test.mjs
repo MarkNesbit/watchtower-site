@@ -7,6 +7,7 @@ import {
 	countDraftRisks,
 	countOpenRisks,
 	countRisksNeedingAction,
+	createDraftProjectRisksFromPrompts,
 	createProjectRiskComment,
 	createProjectRisk,
 	deriveRiskActionStateTone,
@@ -339,6 +340,174 @@ function createRiskMutationClient({
 	};
 }
 
+function createPromptDraftClient({
+	role = 'member',
+	existingSequence = 1,
+	duplicateSourcePromptIds = [],
+} = {}) {
+	const calls = [];
+	const insertedRisks = [];
+	const membershipWithWorkspace = {
+		role,
+		organisations: { id: 'workspace-1', name: 'Alpha Workspace', slug: 'alpha' },
+	};
+	const project = { id: 'project-1', name: 'Delivery Hub', project_ref: 'HHH', slug: 'delivery-hub' };
+	const library = { id: 'library-1' };
+	const activeAreas = [{ id: 'area-1' }, { id: 'area-2' }];
+	const prompts = [
+		{
+			id: 'prompt-uuid-1',
+			risk_prompt_area_id: 'area-1',
+			risk_prompt_id: 'WT-RP-001',
+			risk_prompt_title: 'Decision-making authority is unclear',
+			risk_prompt_guidance: 'Clarify decision ownership and escalation routes.',
+			risk_default_status: 'draft',
+		},
+		{
+			id: 'prompt-uuid-2',
+			risk_prompt_area_id: 'area-2',
+			risk_prompt_id: 'WT-RP-002',
+			risk_prompt_title: 'The team does not have enough capacity',
+			risk_prompt_guidance: 'Review capacity and confirm delivery cover.',
+			risk_default_status: 'draft',
+		},
+		{
+			id: 'prompt-uuid-3',
+			risk_prompt_area_id: 'inactive-area',
+			risk_prompt_id: 'WT-RP-003',
+			risk_prompt_title: 'Inactive area prompt',
+			risk_prompt_guidance: 'This prompt should not create a risk.',
+			risk_default_status: 'draft',
+		},
+	];
+
+	const makeQuery = (table) => {
+		const query = {
+			table,
+			selectValue: '',
+			insertPayload: null,
+			filters: {},
+			select(value) {
+				this.selectValue = value;
+				calls.push(['select', table, value]);
+				return this;
+			},
+			insert(payload) {
+				this.insertPayload = payload;
+				calls.push(['insert', table, payload]);
+				return this;
+			},
+			eq(column, value) {
+				this.filters[column] = value;
+				calls.push(['eq', table, column, value]);
+				return this;
+			},
+			is(column, value) {
+				calls.push(['is', table, column, value]);
+				return this;
+			},
+			order(column, options) {
+				calls.push(['order', table, column, options]);
+				return this;
+			},
+			limit(value) {
+				calls.push(['limit', table, value]);
+				return this;
+			},
+			in(column, values) {
+				calls.push(['in', table, column, values]);
+				if (table === 'risk_prompts') {
+					return { data: prompts.filter((prompt) => values.includes(prompt.risk_prompt_id)), error: null };
+				}
+				if (table === 'project_risks' && column === 'source_risk_prompt_id') {
+					return { data: duplicateSourcePromptIds.map((id) => ({ source_risk_prompt_id: id })), error: null };
+				}
+				return { data: [], error: null };
+			},
+			maybeSingle() {
+				calls.push(['maybeSingle', table, this.selectValue]);
+				if (table === 'organisation_members') return { data: membershipWithWorkspace, error: null };
+				if (table === 'projects') return { data: project, error: null };
+				if (table === 'risk_prompt_libraries') return { data: library, error: null };
+				if (table === 'project_risks') {
+					return { data: { risk_sequence: existingSequence + insertedRisks.length }, error: null };
+				}
+				return { data: null, error: null };
+			},
+			single() {
+				calls.push(['single', table]);
+				if (table === 'project_risks') {
+					const risk = {
+						risk_id: `risk-${insertedRisks.length + 1}`,
+						created_by: 'user-1',
+						created_at: '2026-07-09T10:00:00Z',
+						updated_at: '2026-07-09T10:00:00Z',
+						...this.insertPayload,
+					};
+					insertedRisks.push(risk);
+					return { data: risk, error: null };
+				}
+				return { data: null, error: null };
+			},
+		};
+
+		if (table === 'risk_prompt_areas') {
+			query.eq = function eq(column, value) {
+				this.filters[column] = value;
+				calls.push(['eq', table, column, value]);
+				return this;
+			};
+			query.select = function select(value) {
+				this.selectValue = value;
+				calls.push(['select', table, value]);
+				return this;
+			};
+			query.eqResult = { data: activeAreas, error: null };
+		}
+		return query;
+	};
+
+	return {
+		calls,
+		insertedRisks,
+		auth: {
+			getUser() {
+				calls.push(['getUser']);
+				return { data: { user: { id: 'user-1' } }, error: null };
+			},
+		},
+		from(table) {
+			calls.push(['from', table]);
+			if (table === 'risk_prompt_areas') {
+				return {
+					select(value) {
+						calls.push(['select', table, value]);
+						return this;
+					},
+					eq(column, value) {
+						calls.push(['eq', table, column, value]);
+						if (column === 'is_active') return { data: activeAreas, error: null };
+						return this;
+					},
+				};
+			}
+			if (table === 'profiles') {
+				return {
+					select(value) {
+						calls.push(['select', table, value]);
+						return this;
+					},
+					in(column, values) {
+						calls.push(['in', table, column, values]);
+						return { data: [], error: null };
+					},
+				};
+			}
+			return makeQuery(table);
+		},
+	};
+}
+
 test('Risk migration creates explicit risk and note tables with non-generic primary keys', async () => {
 	const sql = await migrationSql();
 	assert.match(sql, /create table public\.project_risks \(/);
@@ -387,6 +556,15 @@ test('Risk actioner migration adds a nullable profile reference without creating
 	assert.match(sql, /create index if not exists project_risks_actioner_id_idx/);
 	assert.match(sql, /Nullable primary risk actioner for MVP assignment/);
 	assert.doesNotMatch(sql, /create\s+table\s+(public\.)?project_risk_actions\b/i);
+});
+
+test('Risk prompt-created risks keep source traceability and project duplicate protection', async () => {
+	const sql = await allMigrationSql();
+	assert.match(sql, /add column if not exists source_risk_prompt_id uuid references public\.risk_prompts\(id\)/);
+	assert.match(sql, /project_risks_project_source_prompt_key/);
+	assert.match(sql, /on public\.project_risks \(project_id, source_risk_prompt_id\)/);
+	assert.match(sql, /where source_risk_prompt_id is not null[\s\S]*and deleted_at is null/);
+	assert.match(sql, /project_risks_source_risk_prompt_id_idx/);
 });
 
 test('Risk and note constraints cover status, scoring, references and attention levels', async () => {
@@ -1952,6 +2130,58 @@ test('Creating a Draft risk does not create a Project Narrative entry', async ()
 	assert.equal(client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries').length, 0);
 });
 
+test('Risk prompt selection creates scoped Draft risks with source prompt traceability', async () => {
+	const client = createPromptDraftClient({ existingSequence: 1 });
+	const result = await createDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002'], client);
+
+	assert.equal(result.createdCount, 2);
+	assert.equal(result.skippedDuplicateCount, 0);
+	assert.deepEqual(result.createdRisks.map((risk) => risk.risk_ref), ['Risk-HHH-002', 'Risk-HHH-003']);
+	const riskInserts = client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_risks');
+	assert.equal(riskInserts.length, 2);
+	assert.deepEqual(riskInserts[0][2], {
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		title: 'Decision-making authority is unclear',
+		description: 'Clarify decision ownership and escalation routes.',
+		status: 'draft',
+		probability: 'medium',
+		impact: 'medium',
+		owner_id: null,
+		actioner_id: null,
+		review_date: null,
+		due_date: null,
+		mitigation_plan: null,
+		contingency_plan: null,
+		rag_status: 'blue',
+		source_risk_prompt_id: 'prompt-uuid-1',
+	});
+	assert.equal(riskInserts[1][2].source_risk_prompt_id, 'prompt-uuid-2');
+	assert.ok(client.calls.some((call) => call[0] === 'in' && call[1] === 'risk_prompts' && call[2] === 'risk_prompt_id'));
+	assert.ok(!client.calls.some((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries'));
+});
+
+test('Risk prompt draft creation skips duplicates and rejects read-only roles', async () => {
+	const duplicateClient = createPromptDraftClient({
+		existingSequence: 1,
+		duplicateSourcePromptIds: ['prompt-uuid-1'],
+	});
+	const result = await createDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002'], duplicateClient);
+
+	assert.equal(result.createdCount, 1);
+	assert.equal(result.skippedDuplicateCount, 1);
+	assert.equal(duplicateClient.insertedRisks[0].source_risk_prompt_id, 'prompt-uuid-2');
+
+	const viewerClient = createPromptDraftClient({ role: 'viewer' });
+	await assert.rejects(
+		createDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001'], viewerClient),
+		/does not permit risk creation/,
+	);
+	assert.ok(!viewerClient.calls.some((call) => call[0] === 'from' && call[1] === 'risk_prompts'));
+});
+
 test('Risk edit helper updates only scoped editable fields without narrative for Red staying Red', async () => {
 	const client = createRiskMutationClient();
 	const risk = await updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
@@ -2548,6 +2778,8 @@ test('Risk detail route renders edit access state and requires the risk to belon
 test('Risk create and edit routes enforce permissions, validation and scoped mutations', async () => {
 	const createRoute = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/new.astro', import.meta.url), 'utf8');
 	const editRoute = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId]/edit.astro', import.meta.url), 'utf8');
+	const registerRoute = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
+	const promptDraftRoute = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/prompt-drafts.ts', import.meta.url), 'utf8');
 	const form = await readFile(new URL('../src/components/app/RiskForm.astro', import.meta.url), 'utf8');
 
 	assert.match(createRoute, /data-risk-new-route/);
@@ -2560,6 +2792,13 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(createRoute, /buildLoginRedirectPath\(Astro\.url\.pathname\)/);
 	assert.match(createRoute, /isSupabaseAuthSessionError\(error\)[\s\S]*Astro\.redirect\(sessionRedirectPath\)/);
 	assert.match(createRoute, /Viewer access is read-only\. Risk creation is unavailable\./);
+	assert.match(registerRoute, /data-risk-prompt-create-action=\{riskPromptDraftCreatePath\}/);
+	assert.match(registerRoute, /data-risk-prompt-can-create=\{canCreateRisk \? 'true' : 'false'\}/);
+	assert.match(registerRoute, /fetch\(endpoint/);
+	assert.match(registerRoute, /nextUrl\.searchParams\.set\('view', 'draft'\)/);
+	assert.match(promptDraftRoute, /createDraftProjectRisksFromPrompts\(/);
+	assert.match(promptDraftRoute, /getServerAccessToken\(cookies\)/);
+	assert.match(promptDraftRoute, /isSupabaseAuthSessionError\(error\)/);
 
 	assert.match(editRoute, /data-risk-edit-route/);
 	assert.match(editRoute, /can\(workspace\.role, 'risk\.edit'\)/);

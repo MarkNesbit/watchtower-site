@@ -506,9 +506,11 @@ test('Risk Register prompt modal loads database prompts with tabbed temporary se
 	assert.match(route, /ArrowRight/);
 	assert.match(route, /activePromptAreas\[0\]/);
 	assert.match(route, /data-risk-prompt-selected-total/);
-	assert.match(route, /data-risk-prompt-create-disabled/);
-	assert.match(route, /Risk creation from prompts is not available in this slice/);
-	assert.match(route, /<button class="button button--primary" type="button" disabled/);
+	assert.match(route, /data-risk-prompt-create-action=\{riskPromptDraftCreatePath\}/);
+	assert.match(route, /data-risk-prompt-can-create=\{canCreateRisk \? 'true' : 'false'\}/);
+	assert.match(route, /updateRiskPromptCreateButton/);
+	assert.match(route, /Create \$\{total\} draft \$\{total === 1 \? 'risk' : 'risks'\}/);
+	assert.match(route, /<button[\s\S]*class="button button--primary"[\s\S]*type="button"[\s\S]*disabled/);
 	assert.match(route, /data-risk-prompt-review-toggle/);
 	assert.match(route, /Show selected only/);
 	assert.match(route, /Show all risk areas/);

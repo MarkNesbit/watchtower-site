@@ -113,7 +113,15 @@ Closing the modal clears selections; reopening starts with no selected prompts, 
 
 `Show selected only` is enabled only when the modal has at least one selected prompt. It switches the modal from the risk-area tab view into a derived review view using the same selected-ID set. Selected prompts are grouped by source risk area in `risk_area_order` and shown in `risk_prompt_order`. Deselecting in the review view removes the prompt from the shared Set, updates the original tab badge and footer total immediately, and removes empty groups. Removing every prompt shows a deliberate empty state with a `Browse risk areas` action that returns to the normal tab view.
 
-The footer reserves space for later workflow controls. `Create risks` remains disabled until WT-RISK-GUIDE-005, where selected prompts will create Draft risk records for review and assessment. WT-RISK-GUIDE-004 does not create project risks, source-prompt traceability fields, notifications, attention items, selection sessions, local-storage records or project-data recommendations.
+WT-RISK-GUIDE-005 makes the footer `Create` action functional for users whose existing workspace role can create project risks. The browser submits only selected stable `risk_prompt_id` values to the project-scoped server endpoint. The server reloads prompt titles and guidance from Supabase, checks the current workspace/project route, enforces `risk.create`, includes only active prompts from the active default library and active areas, and inserts one Draft `project_risks` record per eligible non-duplicate prompt.
+
+Prompt-created risks are candidate records only. They are created with `status='draft'`, no owner or actioner, no review or due date, no mitigation or contingency plan, and the same safe required probability/impact storage defaults used for draft compatibility. They do not become active risks, do not appear in Needs Action as active work, do not create Project Narrative entries and do not send notifications.
+
+Each created risk stores `project_risks.source_risk_prompt_id`, a nullable foreign key to `risk_prompts(id)`. Manual risks leave this field null. Duplicate prevention is layered: the client disables the create button while a request is in flight, the server checks existing non-deleted risks with the same source prompt in the same project, and migration `20260709000100_project_risk_prompt_source.sql` adds a partial unique index on `(project_id, source_risk_prompt_id)` where the source prompt is present and the risk is not soft-deleted. The same prompt can still seed a risk in a different project.
+
+The app-layer create strategy is deterministic partial success rather than an explicit multi-row transaction. Valid, non-duplicate prompts are inserted sequentially using the existing risk-reference generation path; duplicates are skipped and reported. A concurrent duplicate conflict from the unique index is handled as a skipped duplicate. Unexpected insert failures stop the request and return a safe error message without exposing raw database details.
+
+On success with at least one created risk, the modal clears its temporary selection by closing/reloading, the Risk Register refreshes, and the user is moved to the Draft tab with a page-level success message that includes created and skipped counts. If every selected prompt already exists for the project, the modal stays open, keeps the selection available and shows a duplicate-only message. Expected errors such as missing selection, unavailable library or insufficient permission are shown in the modal while preserving selections where retry is useful.
 
 ## Deployment and rollback
 
@@ -123,9 +131,13 @@ Deployment order:
 2. Run `npm run seed:risk-prompts` before deployment to validate the CSV.
 3. Apply `supabase/seed-risk-prompts.sql` or run `node scripts/seed-risk-prompts.mjs --apply` with `DATABASE_URL`.
 4. Verify the default library reports 12 active areas and 96 active prompts.
+5. Apply `20260709000100_project_risk_prompt_source.sql` before enabling prompt-created Draft risks.
+6. Smoke test one Draft risk creation in a non-production or controlled test project, then repeat a duplicate create to confirm the duplicate skip path.
 
 Development rollback can drop the three prompt-library tables after dependent seed data is no longer needed. Production rollback should prefer marking the library inactive rather than deleting reference records, unless a controlled data-removal plan exists.
 
+If the WT-RISK-GUIDE-005 UI/API must be rolled back after the traceability migration has run, leave the nullable `source_risk_prompt_id` column in place unless a controlled data-removal plan exists. If the duplicate index causes an unexpected production conflict, the safer rollback is to drop `project_risks_project_source_prompt_key` while keeping the traceability column.
+
 ## Explicit exclusions
 
-WT-RISK-GUIDE-001 does not implement prompt selection, category tabs, switches, cross-tab state, Show selected only, Draft risk creation, prompt-created risk source fields, risk activation, CSV upload/download, custom prompt editing, workspace overrides, multiple selectable libraries, assessment profile configuration, exposure model changes, AI prompt generation, search, filtering or analytics.
+WT-RISK-GUIDE-005 does not implement draft review workflow, draft activation workflow, risk scoring, owner/actioner assignment, due-date assignment, bulk edit, AI generation, prompt recommendation, prompt-library editing, persisted selection sessions, workspace-specific libraries, notifications or Needs Action generation for created Draft risks.
