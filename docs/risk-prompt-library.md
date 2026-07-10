@@ -115,13 +115,15 @@ Closing the modal clears selections; reopening starts with no selected prompts, 
 
 WT-RISK-GUIDE-005 makes the footer `Create` action functional for users whose existing workspace role can create project risks. The browser submits only selected stable `risk_prompt_id` values to the project-scoped server endpoint. The server reloads prompt titles and guidance from Supabase, checks the current workspace/project route, enforces `risk.create`, includes only active prompts from the active default library and active areas, and inserts one Draft `project_risks` record per eligible non-duplicate prompt.
 
-Prompt-created risks are candidate records only. They are created with `status='draft'`, no owner or actioner, no review or due date, no mitigation or contingency plan, and the same safe required probability/impact storage defaults used for draft compatibility. They do not become active risks, do not appear in Needs Action as active work, do not create Project Narrative entries and do not send notifications.
+Prompt-created risks are raised Draft records in a basic-capture state. They are visible in the Risk Register and Draft tab immediately, but they still need project-specific detail, assessment and ownership before becoming Active/Open. They are created with `status='draft'`, no owner or actioner, no review or due date, no mitigation or contingency plan, and the same safe required probability/impact storage defaults used for draft compatibility. The stored `rag_status='blue'` value is technical compatibility for the legacy required column only; Draft must not be presented as an assessed Blue risk. Prompt-created Drafts do not appear in Needs Action as active work, do not create Project Narrative entries and do not send notifications.
 
-Each created risk stores `project_risks.source_risk_prompt_id`, a nullable foreign key to `risk_prompts(id)`. Manual risks leave this field null. Duplicate prevention is layered: the client disables the create button while a request is in flight, the server checks existing non-deleted risks with the same source prompt in the same project, and migration `20260709000100_project_risk_prompt_source.sql` adds a partial unique index on `(project_id, source_risk_prompt_id)` where the source prompt is present and the risk is not soft-deleted. The same prompt can still seed a risk in a different project.
+Each created risk stores `project_risks.source_risk_prompt_id`, a nullable foreign key to `risk_prompts(id)`. Manual risks leave this field null. Duplicate prevention is layered: the client disables the create button while a request is in flight, the server checks existing non-deleted risks with the same source prompt in the same project, and migration `20260709000100_project_risk_prompt_source.sql` adds a partial unique index on `(project_id, source_risk_prompt_id)` where the source prompt is present and the risk is not soft-deleted. The same prompt can still seed a risk in a different project. This one non-deleted project risk per source prompt per project rule is an MVP constraint and should be reviewed later against real usage data.
 
 The app-layer create strategy is deterministic partial success rather than an explicit multi-row transaction. Valid, non-duplicate prompts are inserted sequentially using the existing risk-reference generation path; duplicates are skipped and reported. A concurrent duplicate conflict from the unique index is handled as a skipped duplicate. Unexpected insert failures stop the request and return a safe error message without exposing raw database details.
 
 On success with at least one created risk, the modal clears its temporary selection by closing/reloading, the Risk Register refreshes, and the user is moved to the Draft tab with a page-level success message that includes created and skipped counts. If every selected prompt already exists for the project, the modal stays open, keeps the selection available and shows a duplicate-only message. Expected errors such as missing selection, unavailable library or insufficient permission are shown in the modal while preserving selections where retry is useful.
+
+Follow-up requirement: Draft age can be derived from `project_risks.created_at` and raised-by can be derived from `created_by`. A future slice should surface how long each risk has remained Draft and challenge Drafts older than an initial 14-day threshold.
 
 ## Deployment and rollback
 
@@ -132,7 +134,8 @@ Deployment order:
 3. Apply `supabase/seed-risk-prompts.sql` or run `node scripts/seed-risk-prompts.mjs --apply` with `DATABASE_URL`.
 4. Verify the default library reports 12 active areas and 96 active prompts.
 5. Apply `20260709000100_project_risk_prompt_source.sql` before enabling prompt-created Draft risks.
-6. Smoke test one Draft risk creation in a non-production or controlled test project, then repeat a duplicate create to confirm the duplicate skip path.
+6. Apply `20260710000100_project_risk_insert_updated_by.sql` so newly raised manual and prompt-created risks carry `updated_by` immediately.
+7. Smoke test one Draft risk creation in a non-production or controlled test project, then repeat a duplicate create to confirm the duplicate skip path.
 
 Development rollback can drop the three prompt-library tables after dependent seed data is no longer needed. Production rollback should prefer marking the library inactive rather than deleting reference records, unless a controlled data-removal plan exists.
 

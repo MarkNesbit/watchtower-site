@@ -344,9 +344,14 @@ function createPromptDraftClient({
 	role = 'member',
 	existingSequence = 1,
 	duplicateSourcePromptIds = [],
+	riskRefConflictAttempts = 0,
+	sourcePromptConflictIds = [],
 } = {}) {
 	const calls = [];
 	const insertedRisks = [];
+	let remainingRiskRefConflictAttempts = riskRefConflictAttempts;
+	let sequenceOffset = 0;
+	const sourcePromptConflictSet = new Set(sourcePromptConflictIds);
 	const membershipWithWorkspace = {
 		role,
 		organisations: { id: 'workspace-1', name: 'Alpha Workspace', slug: 'alpha' },
@@ -430,16 +435,38 @@ function createPromptDraftClient({
 				if (table === 'projects') return { data: project, error: null };
 				if (table === 'risk_prompt_libraries') return { data: library, error: null };
 				if (table === 'project_risks') {
-					return { data: { risk_sequence: existingSequence + insertedRisks.length }, error: null };
+					return { data: { risk_sequence: existingSequence + insertedRisks.length + sequenceOffset }, error: null };
 				}
 				return { data: null, error: null };
 			},
 			single() {
 				calls.push(['single', table]);
 				if (table === 'project_risks') {
+					if (sourcePromptConflictSet.has(this.insertPayload.source_risk_prompt_id)) {
+						sourcePromptConflictSet.delete(this.insertPayload.source_risk_prompt_id);
+						return {
+							data: null,
+							error: {
+								code: '23505',
+								message: 'duplicate key value violates unique constraint "project_risks_project_source_prompt_key"',
+							},
+						};
+					}
+					if (remainingRiskRefConflictAttempts > 0) {
+						remainingRiskRefConflictAttempts -= 1;
+						sequenceOffset += 1;
+						return {
+							data: null,
+							error: {
+								code: '23505',
+								message: 'duplicate key value violates unique constraint "project_risks_project_sequence_key"',
+							},
+						};
+					}
 					const risk = {
 						risk_id: `risk-${insertedRisks.length + 1}`,
 						created_by: 'user-1',
+						updated_by: 'user-1',
 						created_at: '2026-07-09T10:00:00Z',
 						updated_at: '2026-07-09T10:00:00Z',
 						...this.insertPayload,
@@ -565,6 +592,14 @@ test('Risk prompt-created risks keep source traceability and project duplicate p
 	assert.match(sql, /on public\.project_risks \(project_id, source_risk_prompt_id\)/);
 	assert.match(sql, /where source_risk_prompt_id is not null[\s\S]*and deleted_at is null/);
 	assert.match(sql, /project_risks_source_risk_prompt_id_idx/);
+});
+
+test('Project risk audit fields set updated_by when a risk is first raised', async () => {
+	const sql = await allMigrationSql();
+	assert.match(sql, /New manual and prompt-created project risks should carry both created_by and updated_by on insert/);
+	assert.match(sql, /if tg_op = 'INSERT' then\s+new\.created_by = auth\.uid\(\);\s+new\.updated_by = auth\.uid\(\);/);
+	assert.match(sql, /elsif tg_op = 'UPDATE' then\s+new\.updated_by = auth\.uid\(\);/);
+	assert.match(sql, /raised-by and latest-updated-by are available immediately/);
 });
 
 test('Risk and note constraints cover status, scoring, references and attention levels', async () => {
@@ -2132,11 +2167,38 @@ test('Creating a Draft risk does not create a Project Narrative entry', async ()
 
 test('Risk prompt selection creates scoped Draft risks with source prompt traceability', async () => {
 	const client = createPromptDraftClient({ existingSequence: 1 });
-	const result = await createDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002'], client);
+	const result = await createDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-001', 'WT-RP-002'], client);
 
+	assert.equal(result.requestedCount, 2);
 	assert.equal(result.createdCount, 2);
 	assert.equal(result.skippedDuplicateCount, 0);
 	assert.deepEqual(result.createdRisks.map((risk) => risk.risk_ref), ['Risk-HHH-002', 'Risk-HHH-003']);
+	assert.deepEqual(
+		{
+			risk_id: result.createdRisks[0].risk_id,
+			organisation_id: result.createdRisks[0].organisation_id,
+			project_id: result.createdRisks[0].project_id,
+			risk_ref: result.createdRisks[0].risk_ref,
+			risk_sequence: result.createdRisks[0].risk_sequence,
+			created_by: result.createdRisks[0].created_by,
+			updated_by: result.createdRisks[0].updated_by,
+			created_at: result.createdRisks[0].created_at,
+			updated_at: result.createdRisks[0].updated_at,
+			source_risk_prompt_id: result.createdRisks[0].source_risk_prompt_id,
+		},
+		{
+			risk_id: 'risk-1',
+			organisation_id: 'workspace-1',
+			project_id: 'project-1',
+			risk_ref: 'Risk-HHH-002',
+			risk_sequence: 2,
+			created_by: 'user-1',
+			updated_by: 'user-1',
+			created_at: '2026-07-09T10:00:00Z',
+			updated_at: '2026-07-09T10:00:00Z',
+			source_risk_prompt_id: 'prompt-uuid-1',
+		},
+	);
 	const riskInserts = client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_risks');
 	assert.equal(riskInserts.length, 2);
 	assert.deepEqual(riskInserts[0][2], {
@@ -2173,6 +2235,24 @@ test('Risk prompt draft creation skips duplicates and rejects read-only roles', 
 	assert.equal(result.createdCount, 1);
 	assert.equal(result.skippedDuplicateCount, 1);
 	assert.equal(duplicateClient.insertedRisks[0].source_risk_prompt_id, 'prompt-uuid-2');
+	assert.equal(duplicateClient.insertedRisks[0].risk_ref, 'Risk-HHH-002');
+
+	const duplicateOnlyClient = createPromptDraftClient({
+		duplicateSourcePromptIds: ['prompt-uuid-1', 'prompt-uuid-2'],
+	});
+	const duplicateOnlyResult = await createDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002'], duplicateOnlyClient);
+	assert.equal(duplicateOnlyResult.createdCount, 0);
+	assert.equal(duplicateOnlyResult.skippedDuplicateCount, 2);
+	assert.equal(duplicateOnlyClient.insertedRisks.length, 0);
+
+	const concurrentDuplicateClient = createPromptDraftClient({
+		sourcePromptConflictIds: ['prompt-uuid-1'],
+	});
+	const concurrentResult = await createDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002'], concurrentDuplicateClient);
+	assert.equal(concurrentResult.createdCount, 1);
+	assert.equal(concurrentResult.skippedDuplicateCount, 1);
+	assert.equal(concurrentDuplicateClient.insertedRisks[0].source_risk_prompt_id, 'prompt-uuid-2');
+	assert.equal(concurrentDuplicateClient.insertedRisks[0].risk_ref, 'Risk-HHH-002');
 
 	const viewerClient = createPromptDraftClient({ role: 'viewer' });
 	await assert.rejects(
@@ -2180,6 +2260,18 @@ test('Risk prompt draft creation skips duplicates and rejects read-only roles', 
 		/does not permit risk creation/,
 	);
 	assert.ok(!viewerClient.calls.some((call) => call[0] === 'from' && call[1] === 'risk_prompts'));
+});
+
+test('Risk prompt draft creation retries project reference collisions', async () => {
+	const client = createPromptDraftClient({ existingSequence: 1, riskRefConflictAttempts: 1 });
+	const result = await createDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001'], client);
+	const riskInsertCalls = client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_risks');
+
+	assert.equal(result.createdCount, 1);
+	assert.equal(result.createdRisks[0].risk_ref, 'Risk-HHH-003');
+	assert.deepEqual(riskInsertCalls.map((call) => call[2].risk_ref), ['Risk-HHH-002', 'Risk-HHH-003']);
+	assert.deepEqual(riskInsertCalls.map((call) => call[2].risk_sequence), [2, 3]);
+	assert.equal(client.insertedRisks.length, 1);
 });
 
 test('Risk edit helper updates only scoped editable fields without narrative for Red staying Red', async () => {
