@@ -104,6 +104,7 @@ export type RiskRegisterActionItem = {
 const RISK_SEQUENCE_CONSTRAINT = 'project_risks_project_sequence_key';
 const RISK_REF_CONSTRAINT = 'project_risks_project_ref_key';
 const RISK_ORGANISATION_REF_CONSTRAINT = 'project_risks_organisation_ref_key';
+const RISK_SOURCE_PROMPT_CONSTRAINT = 'project_risks_project_source_prompt_key';
 const MAX_RISK_REF_INSERT_ATTEMPTS = 3;
 
 export type RiskProfile = {
@@ -118,6 +119,7 @@ export type ProjectRisk = {
 	project_id: string;
 	risk_ref: string;
 	risk_sequence: number;
+	source_risk_prompt_id?: string | null;
 	title: string;
 	description?: string | null;
 	status: RiskStatus | string;
@@ -188,6 +190,14 @@ export type RiskFormInput = {
 	contingencyPlan?: string;
 };
 
+export type CreateDraftRisksFromPromptsResult = {
+	requestedCount: number;
+	eligiblePromptCount: number;
+	createdCount: number;
+	skippedDuplicateCount: number;
+	createdRisks: ProjectRisk[];
+};
+
 type DatabaseError = { code?: string; message?: string; details?: string; hint?: string };
 
 const RISK_SELECT = [
@@ -196,6 +206,7 @@ const RISK_SELECT = [
 	'project_id',
 	'risk_ref',
 	'risk_sequence',
+	'source_risk_prompt_id',
 	'title',
 	'description',
 	'status',
@@ -242,6 +253,10 @@ function isConstraintViolation(error: DatabaseError | null, constraintName: stri
 function isRiskRefConstraintViolation(error: DatabaseError | null): boolean {
 	return [RISK_SEQUENCE_CONSTRAINT, RISK_REF_CONSTRAINT, RISK_ORGANISATION_REF_CONSTRAINT]
 		.some((constraint) => isConstraintViolation(error, constraint));
+}
+
+function isSourcePromptConstraintViolation(error: DatabaseError | null): boolean {
+	return isConstraintViolation(error, RISK_SOURCE_PROMPT_CONSTRAINT);
 }
 
 function uniqueValues(values: Array<string | null | undefined>): string[] {
@@ -1506,11 +1521,43 @@ function normaliseRiskPayload(input: RiskFormInput, now = new Date()) {
 	};
 	return {
 		...payload,
-		rag_status: deriveRiskActionStateTone({
-			...payload,
-			updated_at: now.toISOString(),
-		}),
+		rag_status: isActiveRiskStatus(payload.status)
+			? deriveRiskActionStateTone({
+				...payload,
+				updated_at: now.toISOString(),
+			})
+			: 'blue',
 	};
+}
+
+async function insertProjectRiskWithGeneratedReference(
+	organisationId: string,
+	projectId: string,
+	projectRef: string,
+	payload: ReturnType<typeof normaliseRiskPayload> & { source_risk_prompt_id?: string | null },
+	client,
+): Promise<ProjectRisk> {
+	for (let attempt = 1; attempt <= MAX_RISK_REF_INSERT_ATTEMPTS; attempt += 1) {
+		const riskSequence = await getNextRiskSequence(organisationId, projectId, client);
+		const riskRef = buildRiskReference(projectRef, riskSequence);
+		const { data, error } = await client
+			.from('project_risks')
+			.insert({
+				organisation_id: organisationId,
+				project_id: projectId,
+				risk_ref: riskRef,
+				risk_sequence: riskSequence,
+				...payload,
+			})
+			.select(RISK_SELECT)
+			.single();
+
+		if (!error) return data as ProjectRisk;
+		if (isRiskRefConstraintViolation(error) && attempt < MAX_RISK_REF_INSERT_ATTEMPTS) continue;
+		throw error;
+	}
+
+	throw new Error('Watchtower could not assign a unique risk reference. Please try again.');
 }
 
 export async function createProjectRisk(
@@ -1529,37 +1576,131 @@ export async function createProjectRisk(
 	await assertActiveRiskMember(organisation.id, ownerId, client, 'risk owner');
 	await assertActiveRiskMember(organisation.id, actionerId, client, 'risk actioner');
 	const eventTime = new Date();
-
-	let risk: ProjectRisk | null = null;
-	for (let attempt = 1; attempt <= MAX_RISK_REF_INSERT_ATTEMPTS; attempt += 1) {
-		const riskSequence = await getNextRiskSequence(organisation.id, project.id, client);
-		const riskRef = buildRiskReference(project.project_ref, riskSequence);
-		const { data, error } = await client
-			.from('project_risks')
-			.insert({
-				organisation_id: organisation.id,
-				project_id: project.id,
-				risk_ref: riskRef,
-				risk_sequence: riskSequence,
-				...normaliseRiskPayload({ ...input, ownerId, actionerId }, eventTime),
-			})
-			.select(RISK_SELECT)
-			.single();
-
-		if (!error) {
-			risk = data as ProjectRisk;
-			break;
-		}
-		if (isRiskRefConstraintViolation(error) && attempt < MAX_RISK_REF_INSERT_ATTEMPTS) continue;
-		throw error;
-	}
-
-	if (!risk) throw new Error('Watchtower could not assign a unique risk reference. Please try again.');
+	const risk = await insertProjectRiskWithGeneratedReference(
+		organisation.id,
+		project.id,
+		project.project_ref,
+		normaliseRiskPayload({ ...input, ownerId, actionerId }, eventTime),
+		client,
+	);
 	if (isActiveRiskStatus(risk.status)) {
 		await createRiskRaisedNarrativeEntry(risk, workspace.role, client, eventTime);
 	}
 	const [enrichedRisk] = await enrichRiskProfiles([risk], client);
 	return enrichedRisk;
+}
+
+export async function createDraftProjectRisksFromPrompts(
+	workspaceSlug: string,
+	projectSlug: string,
+	riskPromptIds: string[],
+	client,
+	accessToken?: string,
+): Promise<CreateDraftRisksFromPromptsResult> {
+	const requestedPromptIds = uniqueValues(riskPromptIds.map((riskPromptId) => trimmedText(riskPromptId)));
+	if (requestedPromptIds.length === 0) throw new Error('Select at least one risk prompt.');
+
+	const { organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.create', client, accessToken);
+
+	const { data: library, error: libraryError } = await client
+		.from('risk_prompt_libraries')
+		.select('id')
+		.eq('is_default', true)
+		.eq('is_active', true)
+		.order('risk_library_version', { ascending: false })
+		.order('created_at', { ascending: false })
+		.limit(1)
+		.maybeSingle();
+	if (libraryError) throw libraryError;
+	if (!library) throw new Error('The Watchtower Default Risk Prompt Library is not currently available.');
+
+	const { data: activeAreas, error: areaError } = await client
+		.from('risk_prompt_areas')
+		.select('id')
+		.eq('risk_prompt_library_id', library.id)
+		.eq('is_active', true);
+	if (areaError) throw areaError;
+	const activeAreaIds = new Set((activeAreas ?? []).map((area) => area.id));
+	if (activeAreaIds.size === 0) throw new Error('No active risk prompt areas are available.');
+
+	const { data: prompts, error: promptError } = await client
+		.from('risk_prompts')
+		.select('id, risk_prompt_area_id, risk_prompt_id, risk_prompt_title, risk_prompt_guidance, risk_default_status')
+		.eq('risk_prompt_library_id', library.id)
+		.eq('risk_prompt_is_active', true)
+		.order('risk_prompt_order', { ascending: true })
+		.order('risk_prompt_id', { ascending: true })
+		.in('risk_prompt_id', requestedPromptIds);
+	if (promptError) throw promptError;
+
+	const eligiblePrompts = (prompts ?? []).filter((prompt) =>
+		activeAreaIds.has(prompt.risk_prompt_area_id) && prompt.risk_default_status === 'draft',
+	);
+	if (eligiblePrompts.length === 0) {
+		throw new Error('None of the selected risk prompts are currently active.');
+	}
+
+	const sourcePromptIds = eligiblePrompts.map((prompt) => prompt.id);
+	const { data: duplicates, error: duplicateError } = await client
+		.from('project_risks')
+		.select('source_risk_prompt_id')
+		.eq('organisation_id', organisation.id)
+		.eq('project_id', project.id)
+		.is('deleted_at', null)
+		.is('archived_at', null)
+		.in('source_risk_prompt_id', sourcePromptIds);
+	if (duplicateError) throw duplicateError;
+
+	const duplicateSourcePromptIds = new Set((duplicates ?? [])
+		.map((risk) => risk.source_risk_prompt_id)
+		.filter((value): value is string => Boolean(value)));
+	const createdRisks: ProjectRisk[] = [];
+	let skippedDuplicateCount = duplicateSourcePromptIds.size;
+	const eventTime = new Date();
+
+	for (const prompt of eligiblePrompts) {
+		if (duplicateSourcePromptIds.has(prompt.id)) continue;
+		try {
+			const risk = await insertProjectRiskWithGeneratedReference(
+				organisation.id,
+				project.id,
+				project.project_ref,
+				{
+					...normaliseRiskPayload({
+						title: prompt.risk_prompt_title,
+						description: prompt.risk_prompt_guidance,
+						status: 'draft',
+						probability: 'medium',
+						impact: 'medium',
+						ownerId: '',
+						actionerId: '',
+						reviewDate: '',
+						dueDate: '',
+						mitigationPlan: '',
+						contingencyPlan: '',
+					}, eventTime),
+					source_risk_prompt_id: prompt.id,
+				},
+				client,
+			);
+			createdRisks.push(risk);
+		} catch (error) {
+			if (isSourcePromptConstraintViolation(error as DatabaseError)) {
+				skippedDuplicateCount += 1;
+				continue;
+			}
+			throw error;
+		}
+	}
+
+	const enrichedRisks = await enrichRiskProfiles(createdRisks, client);
+	return {
+		requestedCount: requestedPromptIds.length,
+		eligiblePromptCount: eligiblePrompts.length,
+		createdCount: enrichedRisks.length,
+		skippedDuplicateCount,
+		createdRisks: enrichedRisks,
+	};
 }
 
 export async function updateProjectRisk(
