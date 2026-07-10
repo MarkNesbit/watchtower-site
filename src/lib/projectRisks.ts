@@ -18,12 +18,21 @@ export const RISK_RAG_STATUSES = ['blue', 'green', 'amber', 'red'] as const;
 export type RiskRagStatus = (typeof RISK_RAG_STATUSES)[number];
 export const RISK_EXPOSURES = ['low', 'medium', 'high', 'critical'] as const;
 export type RiskExposure = (typeof RISK_EXPOSURES)[number];
+export const RISK_REGISTER_EXPOSURE_FILTERS = ['low', 'medium', 'high', 'critical', 'unassessed'] as const;
+export type RiskRegisterExposureFilter = (typeof RISK_REGISTER_EXPOSURE_FILTERS)[number];
+export type RiskRegisterExposureDisplay = {
+	value: RiskExposure | 'unassessed' | 'none';
+	label: string;
+	tone: RiskExposureTone | 'neutral';
+	ariaLabel: string;
+	isProvisional: boolean;
+};
 export type RiskExposureTone = 'risk-low' | 'risk-medium' | 'risk-high' | 'risk-critical';
 export type RiskAssuranceTone = 'green' | 'amber' | 'red' | 'neutral';
 export type RiskActionStateTone = 'green' | 'amber' | 'red';
 export type RiskDashboardAssuranceTone = RiskAssuranceTone;
 export type RiskDisplayTone = RiskAssuranceTone | RiskExposureTone;
-export const RISK_REGISTER_VIEW_TABS = ['all', 'need-action', 'draft', 'closed'] as const;
+export const RISK_REGISTER_VIEW_TABS = ['active', 'need-action', 'draft', 'closed'] as const;
 export type RiskRegisterViewTab = (typeof RISK_REGISTER_VIEW_TABS)[number];
 export const RISK_REGISTER_SORTS = ['highest-exposure', 'action-needed', 'review-due', 'recently-updated'] as const;
 export type RiskRegisterSort = (typeof RISK_REGISTER_SORTS)[number];
@@ -33,7 +42,7 @@ export type RiskRegisterPageSize = (typeof RISK_REGISTER_PAGE_SIZES)[number];
 export type RiskRegisterFilters = {
 	view?: RiskRegisterViewTab | string | null;
 	search?: string | null;
-	exposure?: RiskExposure | string | null;
+	exposure?: RiskRegisterExposureFilter | string | null;
 	actionState?: RiskActionStateTone | string | null;
 	ownerId?: string | null;
 	lifecycle?: RiskLifecycleCategory | string | null;
@@ -448,6 +457,47 @@ export function riskExposureToneLabel(tone: RiskExposureTone): string {
 	return 'Low';
 }
 
+export function isDraftRiskExposureUnassessed(risk: Pick<ProjectRisk, 'status' | 'probability' | 'impact'>): boolean {
+	return riskLifecycleCategory(risk.status) === 'draft'
+		&& risk.probability === 'medium'
+		&& risk.impact === 'medium';
+}
+
+export function getRiskRegisterExposureDisplay(
+	risk: Pick<ProjectRisk, 'risk_ref' | 'status' | 'probability' | 'impact'>,
+): RiskRegisterExposureDisplay {
+	const lifecycle = riskLifecycleCategory(risk.status);
+	if (lifecycle === 'closed') {
+		return {
+			value: 'none',
+			label: '—',
+			tone: 'neutral',
+			ariaLabel: `${risk.risk_ref} has no current exposure because it is closed.`,
+			isProvisional: false,
+		};
+	}
+	if (lifecycle === 'draft' && isDraftRiskExposureUnassessed(risk)) {
+		return {
+			value: 'unassessed',
+			label: 'Unassessed',
+			tone: 'neutral',
+			ariaLabel: `${risk.risk_ref} estimated exposure is unassessed.`,
+			isProvisional: true,
+		};
+	}
+	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
+	const label = riskExposureLabel(exposure);
+	return {
+		value: exposure,
+		label,
+		tone: riskExposureTone(exposure),
+		ariaLabel: lifecycle === 'draft'
+			? `${risk.risk_ref} estimated exposure: ${label}.`
+			: `${risk.risk_ref} exposure: ${label}.`,
+		isProvisional: lifecycle === 'draft',
+	};
+}
+
 export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
 	if (typeof value !== 'string' || !value.trim()) return fallback;
 	return value
@@ -458,7 +508,7 @@ export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
 }
 
 export function normaliseRiskRegisterViewTab(value: unknown): RiskRegisterViewTab {
-	return RISK_REGISTER_VIEW_TABS.includes(value as RiskRegisterViewTab) ? value as RiskRegisterViewTab : 'all';
+	return RISK_REGISTER_VIEW_TABS.includes(value as RiskRegisterViewTab) ? value as RiskRegisterViewTab : 'active';
 }
 
 export function normaliseRiskRegisterSort(value: unknown): RiskRegisterSort {
@@ -505,14 +555,15 @@ export function riskMatchesRegisterView(
 	now = new Date(),
 ): boolean {
 	const tab = normaliseRiskRegisterViewTab(view);
-	if (tab === 'all') return true;
+	if (tab === 'active') return riskLifecycleCategory(risk.status) === 'active';
 	if (tab === 'draft') return riskLifecycleCategory(risk.status) === 'draft';
 	if (tab === 'closed') return riskLifecycleCategory(risk.status) === 'closed';
-	return deriveRiskReferenceTone(risk, now) === 'red' || deriveRiskReferenceTone(risk, now) === 'amber';
+	return riskLifecycleCategory(risk.status) === 'active'
+		&& (deriveRiskReferenceTone(risk, now) === 'red' || deriveRiskReferenceTone(risk, now) === 'amber');
 }
 
-function normalisedExposureFilter(value: unknown): RiskExposure | '' {
-	return RISK_EXPOSURES.includes(value as RiskExposure) ? value as RiskExposure : '';
+function normalisedExposureFilter(value: unknown): RiskRegisterExposureFilter | '' {
+	return RISK_REGISTER_EXPOSURE_FILTERS.includes(value as RiskRegisterExposureFilter) ? value as RiskRegisterExposureFilter : '';
 }
 
 function normalisedActionStateFilter(value: unknown): RiskActionStateTone | '' {
@@ -534,7 +585,7 @@ export function riskMatchesRegisterFilters(
 	if (!riskMatchesRegisterSearch(risk, filters.search)) return false;
 
 	const exposure = normalisedExposureFilter(filters.exposure);
-	if (exposure && deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact) !== exposure) return false;
+	if (exposure && getRiskRegisterExposureDisplay(risk).value !== exposure) return false;
 
 	const actionState = normalisedActionStateFilter(filters.actionState);
 	if (actionState && deriveRiskReferenceTone(risk, now) !== actionState) return false;
@@ -549,13 +600,24 @@ export function riskMatchesRegisterFilters(
 	return true;
 }
 
-function riskExposureSortRank(risk: Pick<ProjectRisk, 'probability' | 'impact'>): number {
-	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
+export function defaultRiskRegisterSortForView(view: unknown): RiskRegisterSort {
+	const tab = normaliseRiskRegisterViewTab(view);
+	if (tab === 'need-action') return 'action-needed';
+	if (tab === 'closed') return 'recently-updated';
+	return 'highest-exposure';
+}
+
+function riskExposureSortRank(risk: Pick<ProjectRisk, 'risk_ref' | 'status' | 'probability' | 'impact'>): number {
+	const exposure = getRiskRegisterExposureDisplay(risk).value;
 	if (exposure === 'critical') return 0;
 	if (exposure === 'high') return 1;
 	if (exposure === 'medium') return 2;
 	if (exposure === 'low') return 3;
 	return 4;
+}
+
+function compareRiskCreatedOldest(a: Pick<ProjectRisk, 'created_at'>, b: Pick<ProjectRisk, 'created_at'>): number {
+	return new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime();
 }
 
 function riskActionStateSortRank(risk: Pick<ProjectRisk,
@@ -593,8 +655,14 @@ function compareRiskStable(a: Pick<ProjectRisk, 'risk_sequence' | 'risk_ref'>, b
 		|| String(a.risk_ref ?? '').localeCompare(String(b.risk_ref ?? ''));
 }
 
-export function compareRisksForRegister(a: ProjectRisk, b: ProjectRisk, sort: unknown = 'highest-exposure', now = new Date()): number {
+export function compareRisksForRegister(a: ProjectRisk, b: ProjectRisk, sort: unknown = 'highest-exposure', now = new Date(), view: unknown = 'active'): number {
 	const selectedSort = normaliseRiskRegisterSort(sort);
+	const selectedView = normaliseRiskRegisterViewTab(view);
+	if (selectedView === 'draft' && selectedSort === 'highest-exposure') {
+		return riskExposureSortRank(a) - riskExposureSortRank(b)
+			|| compareRiskCreatedOldest(a, b)
+			|| compareRiskStable(a, b);
+	}
 	if (selectedSort === 'action-needed') {
 		return riskActionStateSortRank(a, now) - riskActionStateSortRank(b, now)
 			|| riskExposureSortRank(a) - riskExposureSortRank(b)
@@ -623,9 +691,11 @@ export function compareRisksForRegister(a: ProjectRisk, b: ProjectRisk, sort: un
 }
 
 export function filterAndSortRisksForRegister(risks: ProjectRisk[], filters: RiskRegisterFilters = {}, now = new Date()): ProjectRisk[] {
+	const selectedView = normaliseRiskRegisterViewTab(filters.view);
+	const selectedSort = filters.sort ? normaliseRiskRegisterSort(filters.sort) : defaultRiskRegisterSortForView(selectedView);
 	return risks
 		.filter((risk) => riskMatchesRegisterFilters(risk, filters, now))
-		.sort((a, b) => compareRisksForRegister(a, b, filters.sort, now));
+		.sort((a, b) => compareRisksForRegister(a, b, selectedSort, now, selectedView));
 }
 
 export function getRiskRegisterPaginationRange(totalItems: number, requestedPage: unknown = 1, requestedPageSize: unknown = DEFAULT_RISK_REGISTER_PAGE_SIZE): RiskRegisterPagination {

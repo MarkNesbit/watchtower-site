@@ -13,6 +13,7 @@ import {
 	deriveRiskActionStateTone,
 	deriveProjectRiskDashboardAssuranceTone,
 	deriveRiskAssuranceTone,
+	defaultRiskRegisterSortForView,
 	deriveWatchtowerDefaultRiskExposure,
 	deriveRiskExposureTone,
 	deriveRiskReferenceTone,
@@ -23,6 +24,7 @@ import {
 	getExposureDistribution,
 	getExposurePercentage,
 	getRiskRegisterPageNumbers,
+	getRiskRegisterExposureDisplay,
 	getRiskRegisterPaginationRange,
 	getProjectRiskActionItems,
 	getRiskActionItems,
@@ -47,6 +49,7 @@ import {
 	parseRiskRegisterPageSize,
 	preflightDraftProjectRisksFromPrompts,
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
+	RISK_REGISTER_EXPOSURE_FILTERS,
 	RISK_REGISTER_PAGE_SIZES,
 	riskDisplayLabel,
 	riskExposureTone,
@@ -752,9 +755,14 @@ test('Risk lifecycle helpers centralise Draft Active and Closed categorisation',
 
 test('Risk Register control helpers normalise tabs search and sort safely', () => {
 	assert.equal(normaliseRiskRegisterViewTab('need-action'), 'need-action');
-	assert.equal(normaliseRiskRegisterViewTab('unexpected'), 'all');
+	assert.equal(normaliseRiskRegisterViewTab('unexpected'), 'active');
+	assert.equal(defaultRiskRegisterSortForView('active'), 'highest-exposure');
+	assert.equal(defaultRiskRegisterSortForView('need-action'), 'action-needed');
+	assert.equal(defaultRiskRegisterSortForView('draft'), 'highest-exposure');
+	assert.equal(defaultRiskRegisterSortForView('closed'), 'recently-updated');
 	assert.equal(normaliseRiskRegisterSort('review-due'), 'review-due');
 	assert.equal(normaliseRiskRegisterSort('unsafe-sort'), 'highest-exposure');
+	assert.deepEqual([...RISK_REGISTER_EXPOSURE_FILTERS], ['low', 'medium', 'high', 'critical', 'unassessed']);
 	assert.equal(normaliseRiskRegisterSearch('  Risk-HHH  '), 'risk-hhh');
 	assert.equal(riskMatchesRegisterSearch(registerRisk({ risk_ref: 'Risk-HHH-014' }), 'hhh-014'), true);
 	assert.equal(riskMatchesRegisterSearch(registerRisk({ title: 'API performance may not meet launch demand' }), 'PERFORMANCE'), true);
@@ -805,12 +813,10 @@ test('Risk Register view tabs are lifecycle-aware and Need action is driven by a
 	assert.equal(deriveRiskReferenceTone(criticalGreen, now), 'green');
 	assert.equal(deriveRiskReferenceTone(lowAmber, now), 'amber');
 	assert.equal(deriveRiskReferenceTone(mediumRed, now), 'red');
-	assert.deepEqual(risks.filter((risk) => riskMatchesRegisterView(risk, 'all', now)).map((risk) => risk.risk_ref), [
+	assert.deepEqual(risks.filter((risk) => riskMatchesRegisterView(risk, 'active', now)).map((risk) => risk.risk_ref), [
 		'Risk-HHH-001',
 		'Risk-HHH-002',
 		'Risk-HHH-003',
-		'Risk-HHH-004',
-		'Risk-HHH-005',
 	]);
 	assert.deepEqual(risks.filter((risk) => riskMatchesRegisterView(risk, 'need-action', now)).map((risk) => risk.risk_ref), [
 		'Risk-HHH-002',
@@ -818,6 +824,8 @@ test('Risk Register view tabs are lifecycle-aware and Need action is driven by a
 	]);
 	assert.equal(riskMatchesRegisterView(criticalGreen, 'need-action', now), false);
 	assert.equal(riskMatchesRegisterView(lowAmber, 'need-action', now), true);
+	assert.equal(riskMatchesRegisterView(draft, 'need-action', now), false);
+	assert.equal(riskMatchesRegisterView(closed, 'need-action', now), false);
 	assert.deepEqual(risks.filter((risk) => riskMatchesRegisterView(risk, 'draft', now)).map((risk) => risk.risk_ref), ['Risk-HHH-004']);
 	assert.deepEqual(risks.filter((risk) => riskMatchesRegisterView(risk, 'closed', now)).map((risk) => risk.risk_ref), ['Risk-HHH-005']);
 });
@@ -851,10 +859,12 @@ test('Risk Register search and filters combine across exposure action state owne
 		registerRisk({
 			risk_id: 'risk-4',
 			risk_ref: 'Risk-HHH-004',
-			risk_sequence: 4,
-			title: 'Draft security risk',
-			status: 'draft',
-		}),
+		risk_sequence: 4,
+		title: 'Draft security risk',
+		status: 'draft',
+		probability: 'medium',
+		impact: 'medium',
+	}),
 		registerRisk({
 			risk_id: 'risk-5',
 			risk_ref: 'Risk-HHH-005',
@@ -877,15 +887,70 @@ test('Risk Register search and filters combine across exposure action state owne
 	assert.equal(riskExposureToneLabel(deriveRiskExposureTone('low', 'low')), 'Low');
 	assert.equal(deriveRiskReferenceTone(risks[1], now), 'amber');
 	assert.equal(riskMatchesRegisterFilters(risks[2], { ownerId: 'unassigned' }, now), true);
-	assert.equal(riskMatchesRegisterFilters(risks[3], { lifecycle: 'draft' }, now), true);
-	assert.equal(riskMatchesRegisterFilters(risks[4], { lifecycle: 'closed' }, now), true);
+	assert.equal(riskMatchesRegisterFilters(risks[3], { view: 'draft', lifecycle: 'draft' }, now), true);
+	assert.equal(riskMatchesRegisterFilters(risks[3], { view: 'draft', exposure: 'unassessed' }, now), true);
+	assert.equal(riskMatchesRegisterFilters(risks[4], { view: 'closed', exposure: 'critical' }, now), false);
+	assert.equal(riskMatchesRegisterFilters(risks[4], { view: 'closed', lifecycle: 'closed' }, now), true);
 	assert.deepEqual(filterAndSortRisksForRegister(risks, { search: '' }, now).map((risk) => risk.risk_ref), [
 		'Risk-HHH-001',
 		'Risk-HHH-003',
 		'Risk-HHH-002',
-		'Risk-HHH-004',
-		'Risk-HHH-005',
 	]);
+});
+
+test('Risk Register exposure display normalises Draft and Closed lifecycle states', () => {
+	const activeCritical = registerRisk({
+		risk_ref: 'Risk-HHH-001',
+		probability: 'high',
+		impact: 'high',
+	});
+	const draftUnassessed = registerRisk({
+		risk_ref: 'Risk-HHH-002',
+		status: 'draft',
+		probability: 'medium',
+		impact: 'medium',
+	});
+	const draftEstimate = registerRisk({
+		risk_ref: 'Risk-HHH-003',
+		status: 'draft',
+		probability: 'high',
+		impact: 'medium',
+	});
+	const closedHistorical = registerRisk({
+		risk_ref: 'Risk-HHH-004',
+		status: 'closed',
+		probability: 'high',
+		impact: 'high',
+	});
+
+	assert.deepEqual(getRiskRegisterExposureDisplay(activeCritical), {
+		value: 'critical',
+		label: 'Critical',
+		tone: 'risk-critical',
+		ariaLabel: 'Risk-HHH-001 exposure: Critical.',
+		isProvisional: false,
+	});
+	assert.deepEqual(getRiskRegisterExposureDisplay(draftUnassessed), {
+		value: 'unassessed',
+		label: 'Unassessed',
+		tone: 'neutral',
+		ariaLabel: 'Risk-HHH-002 estimated exposure is unassessed.',
+		isProvisional: true,
+	});
+	assert.deepEqual(getRiskRegisterExposureDisplay(draftEstimate), {
+		value: 'high',
+		label: 'High',
+		tone: 'risk-high',
+		ariaLabel: 'Risk-HHH-003 estimated exposure: High.',
+		isProvisional: true,
+	});
+	assert.deepEqual(getRiskRegisterExposureDisplay(closedHistorical), {
+		value: 'none',
+		label: '—',
+		tone: 'neutral',
+		ariaLabel: 'Risk-HHH-004 has no current exposure because it is closed.',
+		isProvisional: false,
+	});
 });
 
 test('Risk Register sort options prioritise exposure action state review date and updates explicitly', () => {
@@ -969,7 +1034,6 @@ test('Risk Register sort options prioritise exposure action state review date an
 		'Risk-HHH-005',
 		'Risk-HHH-003',
 		'Risk-HHH-004',
-		'Risk-HHH-007',
 		'Risk-HHH-006',
 	]);
 	assert.equal(compareRisksForRegister(mediumRed, mediumAmber, 'highest-exposure', now) < 0, true);
@@ -986,14 +1050,96 @@ test('Risk Register sort options prioritise exposure action state review date an
 		'Risk-HHH-002',
 		'Risk-HHH-001',
 		'Risk-HHH-006',
-		'Risk-HHH-007',
 	]);
 	assert.deepEqual(filterAndSortRisksForRegister(risks, { sort: 'recently-updated' }, now).slice(0, 3).map((risk) => risk.risk_ref), [
-		'Risk-HHH-007',
 		'Risk-HHH-006',
 		'Risk-HHH-005',
+		'Risk-HHH-004',
 	]);
 	assert.equal(filterAndSortRisksForRegister([closedOverdue, lowGreenRecent], { sort: 'review-due' }, now)[0].risk_ref, 'Risk-HHH-006');
+});
+
+test('Risk Register applies tab-specific default sorting for Draft and Closed views', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const draftUnassessed = registerRisk({
+		risk_id: 'risk-1',
+		risk_ref: 'Risk-HHH-001',
+		risk_sequence: 1,
+		status: 'draft',
+		probability: 'medium',
+		impact: 'medium',
+		created_at: '2026-06-01T10:00:00Z',
+	});
+	const draftLow = registerRisk({
+		risk_id: 'risk-2',
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		status: 'draft',
+		probability: 'low',
+		impact: 'low',
+		created_at: '2026-06-02T10:00:00Z',
+	});
+	const draftHighOlder = registerRisk({
+		risk_id: 'risk-3',
+		risk_ref: 'Risk-HHH-003',
+		risk_sequence: 3,
+		status: 'draft',
+		probability: 'high',
+		impact: 'medium',
+		created_at: '2026-05-30T10:00:00Z',
+		updated_at: '2026-06-22T10:00:00Z',
+	});
+	const draftHighNewer = registerRisk({
+		risk_id: 'risk-4',
+		risk_ref: 'Risk-HHH-004',
+		risk_sequence: 4,
+		status: 'draft',
+		probability: 'high',
+		impact: 'medium',
+		created_at: '2026-06-03T10:00:00Z',
+		updated_at: '2026-06-25T10:00:00Z',
+	});
+	const draftCritical = registerRisk({
+		risk_id: 'risk-5',
+		risk_ref: 'Risk-HHH-005',
+		risk_sequence: 5,
+		status: 'draft',
+		probability: 'high',
+		impact: 'high',
+		created_at: '2026-06-04T10:00:00Z',
+		updated_at: '2026-06-26T10:00:00Z',
+	});
+	const closedOlder = registerRisk({
+		risk_id: 'risk-6',
+		risk_ref: 'Risk-HHH-006',
+		risk_sequence: 6,
+		status: 'closed',
+		updated_at: '2026-06-10T10:00:00Z',
+	});
+	const closedNewer = registerRisk({
+		risk_id: 'risk-7',
+		risk_ref: 'Risk-HHH-007',
+		risk_sequence: 7,
+		status: 'closed',
+		updated_at: '2026-06-20T10:00:00Z',
+	});
+
+	const risks = [draftUnassessed, draftLow, draftHighNewer, closedOlder, draftCritical, closedNewer, draftHighOlder];
+	assert.deepEqual(filterAndSortRisksForRegister(risks, { view: 'draft' }, now).map((risk) => risk.risk_ref), [
+		'Risk-HHH-005',
+		'Risk-HHH-003',
+		'Risk-HHH-004',
+		'Risk-HHH-002',
+		'Risk-HHH-001',
+	]);
+	assert.deepEqual(filterAndSortRisksForRegister(risks, { view: 'closed' }, now).map((risk) => risk.risk_ref), [
+		'Risk-HHH-007',
+		'Risk-HHH-006',
+	]);
+	assert.deepEqual(filterAndSortRisksForRegister(risks, { view: 'draft', sort: 'recently-updated' }, now).slice(0, 2).map((risk) => risk.risk_ref), [
+		'Risk-HHH-005',
+		'Risk-HHH-004',
+	]);
 });
 
 test('Risk Register pagination helpers normalise page state and ranges safely', () => {
@@ -2163,8 +2309,8 @@ test('Creating a Draft risk does not create a Project Narrative entry', async ()
 		title: 'Draft supplier delay',
 		description: 'Supplier risk is being shaped before publication.',
 		status: 'draft',
-		probability: 'high',
-		impact: 'high',
+		probability: 'medium',
+		impact: 'medium',
 		ownerId: '',
 		actionerId: '',
 		reviewDate: '',
@@ -2174,6 +2320,8 @@ test('Creating a Draft risk does not create a Project Narrative entry', async ()
 	}, client);
 
 	assert.equal(risk.status, 'draft');
+	assert.equal(getRiskRegisterExposureDisplay(risk).value, 'unassessed');
+	assert.equal(getRiskRegisterExposureDisplay(risk).label, 'Unassessed');
 	assert.equal(client.calls.filter((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries').length, 0);
 });
 
@@ -2185,6 +2333,7 @@ test('Risk prompt selection creates scoped Draft risks with source prompt tracea
 	assert.equal(result.createdCount, 2);
 	assert.equal(result.skippedDuplicateCount, 0);
 	assert.deepEqual(result.createdRisks.map((risk) => risk.risk_ref), ['Risk-HHH-002', 'Risk-HHH-003']);
+	assert.deepEqual(result.createdRisks.map((risk) => getRiskRegisterExposureDisplay(risk).value), ['unassessed', 'unassessed']);
 	assert.deepEqual(
 		{
 			risk_id: result.createdRisks[0].risk_id,
@@ -2701,9 +2850,9 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
 	assert.match(route, /filterAndSortRisksForRegister\(risks, registerFilters, registerNow\)/);
 	assert.match(route, /riskLifecycleCategory\(risk\.status\)/);
-	assert.match(route, /data-risk-lifecycle=\{riskLifecycleCategory\(risk\.status\)\}/);
+	assert.match(route, /data-risk-lifecycle=\{lifecycleCategory\}/);
 	assert.match(route, /normaliseRiskRegisterViewTab\(registerParams\.get\('view'\)\)/);
-	assert.match(route, /normaliseRiskRegisterSort\(registerParams\.get\('sort'\)\)/);
+	assert.match(route, /selectedSort = requestedSort \? normaliseRiskRegisterSort\(requestedSort\) : defaultSort/);
 	assert.match(route, /parseRiskRegisterPage\(registerParams\.get\('page'\)\)/);
 	assert.match(route, /parseRiskRegisterPageSize\(registerParams\.get\('pageSize'\)\)/);
 	assert.match(route, /paginateRisksForRegister\(filteredRisks, requestedPage, selectedPageSize\)/);
@@ -2727,22 +2876,24 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.doesNotMatch(route, /data-draft-risk-register/);
 	assert.doesNotMatch(route, /data-closed-risk-register/);
 	assert.doesNotMatch(route, /data-closed-risks-section/);
-	assert.match(route, /deriveRiskExposureTone\(risk\.probability, risk\.impact\)/);
-	assert.match(route, /riskExposureToneLabel\(exposureTone\)/);
+	assert.match(route, /getRiskRegisterExposureDisplay\(risk\)/);
 	assert.doesNotMatch(route, /statusLabel="Exposure"/);
 	assert.match(route, /actionStateFor\(risk\)/);
 	assert.match(route, /deriveRiskReferenceTone\(risk\)/);
 	assert.match(route, /riskReferenceStatusLabel\(risk\)/);
 	assert.match(route, /label: 'Not active'/);
+	assert.match(route, /referenceTone = lifecycleCategory === 'active' \? actionState\.tone : 'neutral'/);
+	assert.match(route, /referenceStatusLabel = lifecycleCategory === 'active' \? actionState\.label : ''/);
 	assert.match(route, /riskProfileName\(risk\.owner, 'Unassigned'\)/);
 	assert.match(route, /risk-register-table__owner--missing/);
 	assert.match(route, /reviewDueState\(risk\)/);
 	assert.match(route, /No review date/);
 	assert.match(route, /Overdue/);
-	assert.match(route, /ariaLabel=\{`\$\{risk\.risk_ref\} exposure: \$\{exposureLabel\}`\}/);
-	assert.match(route, /tone=\{actionState\.tone\}/);
-	assert.match(route, /statusLabel=\{actionState\.label\}/);
-	assert.match(route, /ariaLabel=\{`Open \$\{risk\.risk_ref\} detail, action state: \$\{actionState\.label\}`\}/);
+	assert.match(route, /ariaLabel=\{exposure\.ariaLabel\}/);
+	assert.match(route, /tone=\{referenceTone\}/);
+	assert.match(route, /statusLabel=\{referenceStatusLabel\}/);
+	assert.match(route, /ariaLabel=\{referenceAriaLabel\}/);
+	assert.match(route, /Estimated exposure/);
 	assert.match(route, /buildProjectNewRiskPath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(route, /data-risk-register-summary/);
 	for (const card of ['Open risks', 'Need action', 'Highest exposure']) {
@@ -2761,12 +2912,15 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /draftTabTone = \(count\) => count > 5 \? 'red' : count > 0 \? 'amber' : 'neutral'/);
 	assert.match(route, /risk-register-tab__count--\$\{tab\.countTone\}/);
 	assert.match(route, /data-risk-register-controls/);
-	for (const tab of ['All risks', 'Need action', 'Draft', 'Closed']) {
+	for (const tab of ['Active risks', 'Need action', 'Draft', 'Closed']) {
 		assert.match(route, new RegExp(tab));
 	}
+	assert.doesNotMatch(route, /All risks/);
 	for (const control of ['Search risks', 'Exposure', 'Action state', 'Owner', 'Lifecycle', 'Sort']) {
 		assert.match(route, new RegExp(control));
 	}
+	assert.match(route, /Closed risks have no current exposure\./);
+	assert.match(route, /RISK_REGISTER_EXPOSURE_FILTERS/);
 	assert.match(route, /Highest exposure first/);
 	assert.match(route, /Action needed first/);
 	assert.match(route, /Review due soonest/);
@@ -2820,7 +2974,7 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /Viewer access is read-only\. Risk creation is unavailable\./);
 	assert.match(route, /<form class="risk-register-toolbar" method="get"/);
 	assert.match(route, /<input type="search" name="q"/);
-	assert.match(route, /<select name="exposure">/);
+	assert.match(route, /<select name="exposure" disabled=\{selectedView === 'closed'\}/);
 	assert.match(route, /<select name="actionState">/);
 	assert.match(route, /<select name="owner">/);
 	assert.match(route, /<select name="lifecycle">/);

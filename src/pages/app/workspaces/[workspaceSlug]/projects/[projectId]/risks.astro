@@ -8,11 +8,12 @@ import RagReferencePill from '../../../../../../components/app/RagReferencePill.
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import { can } from '../../../../../../lib/permissions';
 import {
-	deriveRiskExposureTone,
 	deriveRiskReferenceTone,
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
+	defaultRiskRegisterSortForView,
 	filterAndSortRisksForRegister,
 	getExposureDistribution,
+	getRiskRegisterExposureDisplay,
 	getRiskRegisterPageNumbers,
 	getTopRiskActionItems,
 	listProjectRisks,
@@ -21,13 +22,12 @@ import {
 	paginateRisksForRegister,
 	parseRiskRegisterPage,
 	parseRiskRegisterPageSize,
-	RISK_EXPOSURES,
+	RISK_REGISTER_EXPOSURE_FILTERS,
 	RISK_REGISTER_PAGE_SIZES,
 	RISK_REGISTER_SORTS,
 	RISK_REGISTER_VIEW_TABS,
 	riskDisplayLabel,
 	riskExposureTone,
-	riskExposureToneLabel,
 	riskLifecycleCategory,
 	riskLifecycleLabel,
 	riskProfileName,
@@ -154,14 +154,18 @@ const registerParams = registerUrl.searchParams;
 const riskPromptDraftCreatePath = `${registerPath.replace(/\/$/, '')}/prompt-drafts`;
 const registerNow = new Date();
 const selectedView = normaliseRiskRegisterViewTab(registerParams.get('view'));
-const selectedSort = normaliseRiskRegisterSort(registerParams.get('sort'));
+const requestedSort = registerParams.get('sort');
+const defaultSort = defaultRiskRegisterSortForView(selectedView);
+const selectedSort = requestedSort ? normaliseRiskRegisterSort(requestedSort) : defaultSort;
 const requestedPage = parseRiskRegisterPage(registerParams.get('page'));
 const selectedPageSize = parseRiskRegisterPageSize(registerParams.get('pageSize'));
 const selectedSearch = (registerParams.get('q') ?? '').trim().slice(0, 120);
 const requestedExposure = registerParams.get('exposure') ?? '';
 const requestedActionState = registerParams.get('actionState') ?? '';
 const requestedLifecycle = registerParams.get('lifecycle') ?? '';
-const selectedExposure = RISK_EXPOSURES.includes(requestedExposure) ? requestedExposure : '';
+const selectedExposure = selectedView === 'closed'
+	? ''
+	: RISK_REGISTER_EXPOSURE_FILTERS.includes(requestedExposure) ? requestedExposure : '';
 const selectedActionState = ['red', 'amber', 'green'].includes(requestedActionState) ? requestedActionState : '';
 const selectedLifecycle = ['draft', 'active', 'closed'].includes(requestedLifecycle) ? requestedLifecycle : '';
 const promptDraftsCreated = Math.max(0, Number(registerParams.get('promptDraftsCreated')) || 0);
@@ -215,7 +219,7 @@ const exposureChartSegments = exposureDistribution.segments
 		return chartSegment;
 	});
 const tabLabels = {
-	all: 'All risks',
+	active: 'Active risks',
 	'need-action': 'Need action',
 	draft: 'Draft',
 	closed: 'Closed',
@@ -246,13 +250,13 @@ const buildRegisterPath = (overrides = {}) => {
 		...overrides,
 	};
 	const params = new URLSearchParams();
-	if (next.view && next.view !== 'all') params.set('view', next.view);
+	if (next.view && next.view !== 'active') params.set('view', next.view);
 	if (next.q) params.set('q', next.q);
 	if (next.exposure) params.set('exposure', next.exposure);
 	if (next.actionState) params.set('actionState', next.actionState);
 	if (next.owner) params.set('owner', next.owner);
 	if (next.lifecycle) params.set('lifecycle', next.lifecycle);
-	if (next.sort && next.sort !== 'highest-exposure') params.set('sort', next.sort);
+	if (next.sort && next.sort !== defaultRiskRegisterSortForView(next.view)) params.set('sort', next.sort);
 	if (next.page && Number(next.page) > 1) params.set('page', String(next.page));
 	if (next.pageSize && Number(next.pageSize) !== DEFAULT_RISK_REGISTER_PAGE_SIZE) params.set('pageSize', String(next.pageSize));
 	const query = params.toString();
@@ -274,19 +278,19 @@ const tabItems = RISK_REGISTER_VIEW_TABS.map((tab) => {
 		id: tab,
 		label: tabLabels[tab],
 		count,
-		href: buildRegisterPath({ view: tab, page: 1 }),
+		href: buildRegisterPath({ view: tab, sort: defaultRiskRegisterSortForView(tab), page: 1 }),
 		active: selectedView === tab,
 		countTone: tab === 'draft' ? draftTabTone(count) : 'neutral',
 	};
 });
 const pageSizeHiddenFields = [
-	['view', selectedView !== 'all' ? selectedView : ''],
+	['view', selectedView !== 'active' ? selectedView : ''],
 	['q', selectedSearch],
 	['exposure', selectedExposure],
 	['actionState', selectedActionState],
 	['owner', selectedOwnerId],
 	['lifecycle', selectedLifecycle],
-	['sort', selectedSort !== 'highest-exposure' ? selectedSort : ''],
+	['sort', selectedSort !== defaultSort ? selectedSort : ''],
 	['page', '1'],
 ].filter(([, value]) => Boolean(value));
 const ownerFilterLabel = selectedOwnerId === 'unassigned'
@@ -298,9 +302,9 @@ const activeFilterChips = [
 	selectedActionState ? `Action state: ${riskDisplayLabel(selectedActionState)}` : '',
 	selectedOwnerId ? `Owner: ${ownerFilterLabel}` : '',
 	selectedLifecycle ? `Lifecycle: ${lifecycleFilterLabels[selectedLifecycle]}` : '',
-	selectedSort !== 'highest-exposure' ? `Sort: ${sortLabels[selectedSort]}` : '',
+	selectedSort !== defaultSort ? `Sort: ${sortLabels[selectedSort]}` : '',
 ].filter(Boolean);
-const hasSelectedControls = selectedView !== 'all' || activeFilterChips.length > 0;
+const hasSelectedControls = selectedView !== 'active' || activeFilterChips.length > 0;
 const hasNarrowedFilters = Boolean(selectedSearch || selectedExposure || selectedActionState || selectedOwnerId || selectedLifecycle);
 const filteredEmptyTitle = hasNarrowedFilters
 	? 'No risks match the current filters.'
@@ -463,12 +467,13 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 											</label>
 											<label class="risk-register-field">
 												<span>Exposure</span>
-												<select name="exposure">
+												<select name="exposure" disabled={selectedView === 'closed'} aria-describedby={selectedView === 'closed' ? 'risk-register-exposure-filter-note' : undefined}>
 													<option value="" selected={!selectedExposure}>All exposures</option>
-													{[...RISK_EXPOSURES].reverse().map((exposure) => (
+													{[...RISK_REGISTER_EXPOSURE_FILTERS].reverse().map((exposure) => (
 														<option value={exposure} selected={selectedExposure === exposure}>{riskDisplayLabel(exposure)}</option>
 													))}
 												</select>
+												{selectedView === 'closed' && <span class="risk-register-field__note" id="risk-register-exposure-filter-note">Closed risks have no current exposure.</span>}
 											</label>
 											<label class="risk-register-field">
 												<span>Action state</span>
@@ -546,15 +551,20 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 														</thead>
 														<tbody>
 															{pagedRisks.map((risk) => {
-																const exposureTone = deriveRiskExposureTone(risk.probability, risk.impact);
-																const exposureLabel = riskExposureToneLabel(exposureTone);
+																const exposure = getRiskRegisterExposureDisplay(risk);
 																const actionState = actionStateFor(risk);
 																const reviewDue = reviewDueState(risk);
 																const ownerLabel = riskProfileName(risk.owner, 'Unassigned');
 																const riskHref = buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id);
+																const lifecycleCategory = riskLifecycleCategory(risk.status);
 																const lifecycle = riskLifecycleLabel(risk.status);
+																const referenceTone = lifecycleCategory === 'active' ? actionState.tone : 'neutral';
+																const referenceStatusLabel = lifecycleCategory === 'active' ? actionState.label : '';
+																const referenceAriaLabel = lifecycleCategory === 'active'
+																	? `Open ${risk.risk_ref} detail, action state: ${actionState.label}`
+																	: `Open ${risk.risk_ref} detail, ${lifecycle} risk`;
 																return (
-																	<tr data-risk-lifecycle={riskLifecycleCategory(risk.status)}>
+																	<tr data-risk-lifecycle={lifecycleCategory}>
 																		<td>
 																			<a
 																				class="risk-reference-link"
@@ -562,10 +572,10 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 																				aria-label={`Open ${risk.risk_ref}`}
 																			>
 																				<RagReferencePill
-																					tone={actionState.tone}
+																					tone={referenceTone}
 																					label={risk.risk_ref}
-																					statusLabel={actionState.label}
-																					ariaLabel={`Open ${risk.risk_ref} detail, action state: ${actionState.label}`}
+																					statusLabel={referenceStatusLabel}
+																					ariaLabel={referenceAriaLabel}
 																				/>
 																			</a>
 																		</td>
@@ -574,10 +584,11 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 																		</td>
 																		<td>
 																			<RagReferencePill
-																				tone={exposureTone}
-																				label={exposureLabel}
-																				ariaLabel={`${risk.risk_ref} exposure: ${exposureLabel}`}
+																				tone={exposure.tone}
+																				label={exposure.label}
+																				ariaLabel={exposure.ariaLabel}
 																			/>
+																			{exposure.isProvisional && <span class="risk-register-table__exposure-note">Estimated exposure</span>}
 																		</td>
 																		<td>
 																			<span class="risk-register-table__status">
@@ -2074,6 +2085,13 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		border-color: var(--accent-strong);
 	}
 
+	.risk-register-field__note {
+		color: var(--muted);
+		font-size: 0.76rem;
+		font-weight: 760;
+		line-height: 1.25;
+	}
+
 	.risk-register-toolbar__actions {
 		display: flex;
 		align-items: center;
@@ -2117,11 +2135,11 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	}
 
 	.risk-register-table th:first-child {
-		width: 12.5rem;
+		width: 11.75rem;
 	}
 
 	.risk-register-table th:nth-child(2) {
-		width: 22rem;
+		width: 23rem;
 	}
 
 	.risk-register-table th:nth-child(3) {
@@ -2152,8 +2170,13 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 
 	.risk-reference-link {
 		display: inline-flex;
+		max-width: 100%;
 		border-radius: 999px;
 		text-decoration: none;
+	}
+
+	.risk-reference-link :global(.rag-reference-pill) {
+		max-width: 100%;
 	}
 
 	.risk-reference-link:hover :global(.rag-reference-pill) {
@@ -2179,6 +2202,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	}
 
 	.risk-register-table__status,
+	.risk-register-table__exposure-note,
 	.risk-register-table__review {
 		display: grid;
 		gap: 0.18rem;
@@ -2191,9 +2215,17 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	}
 
 	.risk-register-table__status span,
+	.risk-register-table__exposure-note,
 	.risk-register-table__review span:last-child,
 	.risk-register-table__owner {
 		color: var(--muted-strong);
+	}
+
+	.risk-register-table__exposure-note {
+		margin-top: 0.18rem;
+		font-size: 0.72rem;
+		font-weight: 820;
+		line-height: 1.2;
 	}
 
 	.risk-register-table__owner--missing,
