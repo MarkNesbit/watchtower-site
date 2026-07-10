@@ -193,9 +193,37 @@ export type RiskFormInput = {
 export type CreateDraftRisksFromPromptsResult = {
 	requestedCount: number;
 	eligiblePromptCount: number;
+	invalidPromptCount: number;
 	createdCount: number;
 	skippedDuplicateCount: number;
 	createdRisks: ProjectRisk[];
+};
+
+export type DraftRiskPromptPreflightItem = {
+	riskPromptId: string;
+	sourceRiskPromptId: string;
+	title: string;
+	guidance: string | null;
+};
+
+export type DraftRiskPromptDuplicateItem = {
+	riskPromptId: string;
+	sourceRiskPromptId: string;
+	title: string;
+	existingRiskId: string;
+	existingRiskRef: string;
+	existingRiskTitle: string;
+};
+
+export type DraftRiskPromptPreflightResult = {
+	requestedCount: number;
+	selectedPromptCount: number;
+	eligiblePromptCount: number;
+	createableCount: number;
+	duplicateCount: number;
+	invalidPromptCount: number;
+	createablePrompts: DraftRiskPromptPreflightItem[];
+	duplicatePrompts: DraftRiskPromptDuplicateItem[];
 };
 
 type DatabaseError = { code?: string; message?: string; details?: string; hint?: string };
@@ -1590,13 +1618,19 @@ export async function createProjectRisk(
 	return enrichedRisk;
 }
 
-export async function createDraftProjectRisksFromPrompts(
+async function planDraftProjectRisksFromPrompts(
 	workspaceSlug: string,
 	projectSlug: string,
 	riskPromptIds: string[],
 	client,
 	accessToken?: string,
-): Promise<CreateDraftRisksFromPromptsResult> {
+): Promise<{
+	organisationId: string;
+	projectId: string;
+	projectRef: string;
+	requestedPromptIds: string[];
+	preflight: DraftRiskPromptPreflightResult;
+}> {
 	const requestedPromptIds = uniqueValues(riskPromptIds.map((riskPromptId) => trimmedText(riskPromptId)));
 	if (requestedPromptIds.length === 0) throw new Error('Select at least one risk prompt.');
 
@@ -1636,39 +1670,99 @@ export async function createDraftProjectRisksFromPrompts(
 	const eligiblePrompts = (prompts ?? []).filter((prompt) =>
 		activeAreaIds.has(prompt.risk_prompt_area_id) && prompt.risk_default_status === 'draft',
 	);
-	if (eligiblePrompts.length === 0) {
-		throw new Error('None of the selected risk prompts are currently active.');
-	}
 
 	const sourcePromptIds = eligiblePrompts.map((prompt) => prompt.id);
-	const { data: duplicates, error: duplicateError } = await client
-		.from('project_risks')
-		.select('source_risk_prompt_id')
-		.eq('organisation_id', organisation.id)
-		.eq('project_id', project.id)
-		.is('deleted_at', null)
-		.is('archived_at', null)
-		.in('source_risk_prompt_id', sourcePromptIds);
-	if (duplicateError) throw duplicateError;
+	const duplicates = sourcePromptIds.length > 0
+		? await client
+			.from('project_risks')
+			.select('risk_id, risk_ref, title, source_risk_prompt_id')
+			.eq('organisation_id', organisation.id)
+			.eq('project_id', project.id)
+			.is('deleted_at', null)
+			.is('archived_at', null)
+			.in('source_risk_prompt_id', sourcePromptIds)
+		: { data: [], error: null };
+	if (duplicates.error) throw duplicates.error;
 
-	const duplicateSourcePromptIds = new Set((duplicates ?? [])
+	const duplicateRisksBySourcePromptId = new Map((duplicates.data ?? [])
+		.filter((risk) => Boolean(risk.source_risk_prompt_id))
+		.map((risk) => [risk.source_risk_prompt_id, risk]));
+	const duplicateSourcePromptIds = new Set((duplicates.data ?? [])
 		.map((risk) => risk.source_risk_prompt_id)
 		.filter((value): value is string => Boolean(value)));
+	const duplicatePrompts = eligiblePrompts
+		.filter((prompt) => duplicateSourcePromptIds.has(prompt.id))
+		.map((prompt) => {
+			const existingRisk = duplicateRisksBySourcePromptId.get(prompt.id);
+			return {
+				riskPromptId: prompt.risk_prompt_id,
+				sourceRiskPromptId: prompt.id,
+				title: prompt.risk_prompt_title,
+				existingRiskId: existingRisk?.risk_id ?? '',
+				existingRiskRef: existingRisk?.risk_ref ?? '',
+				existingRiskTitle: existingRisk?.title ?? prompt.risk_prompt_title,
+			};
+		});
+	const createablePrompts = eligiblePrompts
+		.filter((prompt) => !duplicateSourcePromptIds.has(prompt.id))
+		.map((prompt) => ({
+			riskPromptId: prompt.risk_prompt_id,
+			sourceRiskPromptId: prompt.id,
+			title: prompt.risk_prompt_title,
+			guidance: prompt.risk_prompt_guidance ?? null,
+		}));
+
+	return {
+		organisationId: organisation.id,
+		projectId: project.id,
+		projectRef: project.project_ref,
+		requestedPromptIds,
+		preflight: {
+			requestedCount: requestedPromptIds.length,
+			selectedPromptCount: requestedPromptIds.length,
+			eligiblePromptCount: eligiblePrompts.length,
+			createableCount: createablePrompts.length,
+			duplicateCount: duplicatePrompts.length,
+			invalidPromptCount: Math.max(0, requestedPromptIds.length - eligiblePrompts.length),
+			createablePrompts,
+			duplicatePrompts,
+		},
+	};
+}
+
+export async function preflightDraftProjectRisksFromPrompts(
+	workspaceSlug: string,
+	projectSlug: string,
+	riskPromptIds: string[],
+	client,
+	accessToken?: string,
+): Promise<DraftRiskPromptPreflightResult> {
+	const plan = await planDraftProjectRisksFromPrompts(workspaceSlug, projectSlug, riskPromptIds, client, accessToken);
+	return plan.preflight;
+}
+
+export async function createDraftProjectRisksFromPrompts(
+	workspaceSlug: string,
+	projectSlug: string,
+	riskPromptIds: string[],
+	client,
+	accessToken?: string,
+): Promise<CreateDraftRisksFromPromptsResult> {
+	const plan = await planDraftProjectRisksFromPrompts(workspaceSlug, projectSlug, riskPromptIds, client, accessToken);
 	const createdRisks: ProjectRisk[] = [];
-	let skippedDuplicateCount = duplicateSourcePromptIds.size;
+	let skippedDuplicateCount = plan.preflight.duplicateCount;
 	const eventTime = new Date();
 
-	for (const prompt of eligiblePrompts) {
-		if (duplicateSourcePromptIds.has(prompt.id)) continue;
+	for (const prompt of plan.preflight.createablePrompts) {
 		try {
 			const risk = await insertProjectRiskWithGeneratedReference(
-				organisation.id,
-				project.id,
-				project.project_ref,
+				plan.organisationId,
+				plan.projectId,
+				plan.projectRef,
 				{
 					...normaliseRiskPayload({
-						title: prompt.risk_prompt_title,
-						description: prompt.risk_prompt_guidance,
+						title: prompt.title,
+						description: prompt.guidance ?? '',
 						status: 'draft',
 						probability: 'medium',
 						impact: 'medium',
@@ -1679,7 +1773,7 @@ export async function createDraftProjectRisksFromPrompts(
 						mitigationPlan: '',
 						contingencyPlan: '',
 					}, eventTime),
-					source_risk_prompt_id: prompt.id,
+					source_risk_prompt_id: prompt.sourceRiskPromptId,
 				},
 				client,
 			);
@@ -1695,8 +1789,9 @@ export async function createDraftProjectRisksFromPrompts(
 
 	const enrichedRisks = await enrichRiskProfiles(createdRisks, client);
 	return {
-		requestedCount: requestedPromptIds.length,
-		eligiblePromptCount: eligiblePrompts.length,
+		requestedCount: plan.preflight.requestedCount,
+		eligiblePromptCount: plan.preflight.eligiblePromptCount,
+		invalidPromptCount: plan.preflight.invalidPromptCount,
 		createdCount: enrichedRisks.length,
 		skippedDuplicateCount,
 		createdRisks: enrichedRisks,

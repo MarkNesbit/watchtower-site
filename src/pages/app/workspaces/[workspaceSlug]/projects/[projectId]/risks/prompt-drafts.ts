@@ -1,5 +1,9 @@
 import type { APIRoute } from 'astro';
-import { createDraftProjectRisksFromPrompts } from '../../../../../../../lib/projectRisks.ts';
+import { buildProjectRiskPath } from '../../../../../../../lib/projects.ts';
+import {
+	createDraftProjectRisksFromPrompts,
+	preflightDraftProjectRisksFromPrompts,
+} from '../../../../../../../lib/projectRisks.ts';
 import {
 	buildLoginRedirectPath,
 	createSupabaseServerClient,
@@ -29,8 +33,45 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 	const promptIds = typeof body === 'object' && body && Array.isArray((body as { riskPromptIds?: unknown }).riskPromptIds)
 		? (body as { riskPromptIds: unknown[] }).riskPromptIds.filter((value): value is string => typeof value === 'string')
 		: [];
+	const mode = typeof body === 'object' && body && (body as { mode?: unknown }).mode === 'preflight'
+		? 'preflight'
+		: 'create';
 
 	try {
+		if (mode === 'preflight') {
+			const result = await preflightDraftProjectRisksFromPrompts(
+				params.workspaceSlug ?? '',
+				params.projectId ?? '',
+				promptIds,
+				serverSupabase,
+				accessToken,
+			);
+			return json({
+				ok: true,
+				mode,
+				requestedCount: result.requestedCount,
+				selectedPromptCount: result.selectedPromptCount,
+				eligiblePromptCount: result.eligiblePromptCount,
+				createableCount: result.createableCount,
+				duplicateCount: result.duplicateCount,
+				invalidPromptCount: result.invalidPromptCount,
+				createablePrompts: result.createablePrompts.map((prompt) => ({
+					riskPromptId: prompt.riskPromptId,
+					title: prompt.title,
+				})),
+				duplicatePrompts: result.duplicatePrompts.map((prompt) => ({
+					riskPromptId: prompt.riskPromptId,
+					title: prompt.title,
+					existingRiskId: prompt.existingRiskId,
+					existingRiskRef: prompt.existingRiskRef,
+					existingRiskTitle: prompt.existingRiskTitle,
+					existingRiskPath: prompt.existingRiskId
+						? buildProjectRiskPath(params.workspaceSlug ?? '', params.projectId ?? '', prompt.existingRiskId)
+						: '',
+				})),
+			});
+		}
+
 		const result = await createDraftProjectRisksFromPrompts(
 			params.workspaceSlug ?? '',
 			params.projectId ?? '',
@@ -40,8 +81,10 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 		);
 		return json({
 			ok: true,
+			mode,
 			requestedCount: result.requestedCount,
 			eligiblePromptCount: result.eligiblePromptCount,
+			invalidPromptCount: result.invalidPromptCount,
 			createdCount: result.createdCount,
 			skippedDuplicateCount: result.skippedDuplicateCount,
 			createdRiskRefs: result.createdRisks.map((risk) => risk.risk_ref),
