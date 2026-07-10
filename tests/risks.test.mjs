@@ -45,6 +45,7 @@ import {
 	paginateRisksForRegister,
 	parseRiskRegisterPage,
 	parseRiskRegisterPageSize,
+	preflightDraftProjectRisksFromPrompts,
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
 	RISK_REGISTER_PAGE_SIZES,
 	riskDisplayLabel,
@@ -425,7 +426,18 @@ function createPromptDraftClient({
 					return { data: prompts.filter((prompt) => values.includes(prompt.risk_prompt_id)), error: null };
 				}
 				if (table === 'project_risks' && column === 'source_risk_prompt_id') {
-					return { data: duplicateSourcePromptIds.map((id) => ({ source_risk_prompt_id: id })), error: null };
+					return {
+						data: duplicateSourcePromptIds.map((id, index) => {
+							const prompt = prompts.find((item) => item.id === id);
+							return {
+								risk_id: `existing-risk-${index + 1}`,
+								risk_ref: `Risk-HHH-00${index + 8}`,
+								title: prompt?.risk_prompt_title ?? 'Existing risk',
+								source_risk_prompt_id: id,
+							};
+						}),
+						error: null,
+					};
 				}
 				return { data: [], error: null };
 			},
@@ -2225,6 +2237,48 @@ test('Risk prompt selection creates scoped Draft risks with source prompt tracea
 	assert.ok(!client.calls.some((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries'));
 });
 
+test('Risk prompt draft preflight reports all-new, mixed and duplicate-only selections', async () => {
+	const allNewClient = createPromptDraftClient();
+	const allNew = await preflightDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002'], allNewClient);
+
+	assert.equal(allNew.selectedPromptCount, 2);
+	assert.equal(allNew.createableCount, 2);
+	assert.equal(allNew.duplicateCount, 0);
+	assert.equal(allNew.invalidPromptCount, 0);
+	assert.deepEqual(allNew.createablePrompts.map((prompt) => prompt.title), [
+		'Decision-making authority is unclear',
+		'The team does not have enough capacity',
+	]);
+	assert.equal(allNewClient.insertedRisks.length, 0);
+
+	const mixedClient = createPromptDraftClient({ duplicateSourcePromptIds: ['prompt-uuid-1'] });
+	const mixed = await preflightDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002', 'WT-RP-003'], mixedClient);
+
+	assert.equal(mixed.selectedPromptCount, 3);
+	assert.equal(mixed.eligiblePromptCount, 2);
+	assert.equal(mixed.createableCount, 1);
+	assert.equal(mixed.duplicateCount, 1);
+	assert.equal(mixed.invalidPromptCount, 1);
+	assert.deepEqual(mixed.createablePrompts.map((prompt) => prompt.riskPromptId), ['WT-RP-002']);
+	assert.deepEqual(mixed.duplicatePrompts.map((prompt) => ({
+		riskPromptId: prompt.riskPromptId,
+		existingRiskId: prompt.existingRiskId,
+		existingRiskRef: prompt.existingRiskRef,
+		title: prompt.title,
+	})), [{
+		riskPromptId: 'WT-RP-001',
+		existingRiskId: 'existing-risk-1',
+		existingRiskRef: 'Risk-HHH-008',
+		title: 'Decision-making authority is unclear',
+	}]);
+
+	const duplicateOnlyClient = createPromptDraftClient({ duplicateSourcePromptIds: ['prompt-uuid-1', 'prompt-uuid-2'] });
+	const duplicateOnly = await preflightDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002'], duplicateOnlyClient);
+	assert.equal(duplicateOnly.createableCount, 0);
+	assert.equal(duplicateOnly.duplicateCount, 2);
+	assert.equal(duplicateOnlyClient.insertedRisks.length, 0);
+});
+
 test('Risk prompt draft creation skips duplicates and rejects read-only roles', async () => {
 	const duplicateClient = createPromptDraftClient({
 		existingSequence: 1,
@@ -2260,6 +2314,28 @@ test('Risk prompt draft creation skips duplicates and rejects read-only roles', 
 		/does not permit risk creation/,
 	);
 	assert.ok(!viewerClient.calls.some((call) => call[0] === 'from' && call[1] === 'risk_prompts'));
+
+	const viewerPreflightClient = createPromptDraftClient({ role: 'viewer' });
+	await assert.rejects(
+		preflightDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001'], viewerPreflightClient),
+		/does not permit risk creation/,
+	);
+	assert.ok(!viewerPreflightClient.calls.some((call) => call[0] === 'from' && call[1] === 'risk_prompts'));
+});
+
+test('Risk prompt draft creation re-checks duplicates after preflight', async () => {
+	const preflightClient = createPromptDraftClient();
+	const preflight = await preflightDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002'], preflightClient);
+	assert.equal(preflight.createableCount, 2);
+
+	const createClientAfterDuplicateAppears = createPromptDraftClient({
+		duplicateSourcePromptIds: ['prompt-uuid-1'],
+	});
+	const result = await createDraftProjectRisksFromPrompts('alpha', 'delivery-hub', ['WT-RP-001', 'WT-RP-002'], createClientAfterDuplicateAppears);
+
+	assert.equal(result.createdCount, 1);
+	assert.equal(result.skippedDuplicateCount, 1);
+	assert.deepEqual(createClientAfterDuplicateAppears.insertedRisks.map((risk) => risk.source_risk_prompt_id), ['prompt-uuid-2']);
 });
 
 test('Risk prompt draft creation retries project reference collisions', async () => {
@@ -2672,9 +2748,9 @@ test('Risk Register route renders a table-led scoped register and create access 
 	for (const card of ['Open risks', 'Need action', 'Highest exposure']) {
 		assert.match(route, new RegExp(card));
 	}
-	for (const removedCard of ['Draft risks', 'Need completion']) {
-		assert.doesNotMatch(route, new RegExp(removedCard));
-	}
+	const summaryCardsSource = route.match(/const summaryCards = \[[\s\S]*?\];/)?.[0] ?? '';
+	assert.doesNotMatch(summaryCardsSource, /Draft risks/);
+	assert.doesNotMatch(route, /Need completion/);
 	for (const helper of ['Active project risks', 'Red or Amber action state', 'Across active risks']) {
 		assert.match(route, new RegExp(helper));
 	}
@@ -2887,8 +2963,19 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(registerRoute, /data-risk-prompt-create-action=\{riskPromptDraftCreatePath\}/);
 	assert.match(registerRoute, /data-risk-prompt-can-create=\{canCreateRisk \? 'true' : 'false'\}/);
 	assert.match(registerRoute, /fetch\(endpoint/);
+	assert.match(registerRoute, /mode: 'preflight'/);
+	assert.match(registerRoute, /mode: 'create'/);
+	assert.match(registerRoute, /Create \$\{createableCount\} Draft \$\{createableCount === 1 \? 'risk' : 'risks'\}/);
+	assert.match(registerRoute, /No new Draft risks to create/);
+	assert.match(registerRoute, /data-risk-prompt-confirmation-view/);
+	assert.match(registerRoute, /data-risk-prompt-confirm-back/);
+	assert.match(registerRoute, /data-risk-prompt-view-existing/);
+	assert.match(registerRoute, /Already in this project/);
+	assert.doesNotMatch(registerRoute, /window\.confirm/);
 	assert.match(registerRoute, /nextUrl\.searchParams\.set\('view', 'draft'\)/);
 	assert.match(promptDraftRoute, /createDraftProjectRisksFromPrompts\(/);
+	assert.match(promptDraftRoute, /preflightDraftProjectRisksFromPrompts\(/);
+	assert.match(promptDraftRoute, /buildProjectRiskPath/);
 	assert.match(promptDraftRoute, /getServerAccessToken\(cookies\)/);
 	assert.match(promptDraftRoute, /isSupabaseAuthSessionError\(error\)/);
 

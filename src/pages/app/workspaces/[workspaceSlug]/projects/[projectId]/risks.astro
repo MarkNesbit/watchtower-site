@@ -893,6 +893,51 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 										<button class="button button--secondary" type="button" data-risk-prompt-browse-areas>Browse risk areas</button>
 									</div>
 								</section>
+
+								<section
+									class="risk-prompt-confirmation"
+									aria-labelledby="risk-prompt-confirmation-title"
+									data-risk-prompt-confirmation-view
+									tabindex="-1"
+									hidden
+								>
+									<div class="risk-prompt-confirmation__heading">
+										<p class="eyebrow">Guided risk identification</p>
+										<h3 id="risk-prompt-confirmation-title">Create Draft risks</h3>
+										<p data-risk-prompt-confirmation-copy>Watchtower will create 0 new risks in Draft for this project. 0 selected prompts already exist and will not be created again.</p>
+									</div>
+									<div class="risk-prompt-confirmation__metrics" aria-live="polite">
+										<div>
+											<strong data-risk-prompt-confirm-selected-count>0</strong>
+											<span>prompts selected</span>
+										</div>
+										<div>
+											<strong data-risk-prompt-confirm-create-count>0</strong>
+											<span>Draft risks will be created</span>
+										</div>
+										<div>
+											<strong data-risk-prompt-confirm-duplicate-count>0</strong>
+											<span>risks already exist in this project</span>
+										</div>
+									</div>
+									<p class="risk-prompt-confirmation__notice" data-risk-prompt-confirm-invalid-notice hidden></p>
+									<div class="risk-prompt-confirmation__sections">
+										<section class="risk-prompt-confirmation__section" data-risk-prompt-new-section>
+											<div class="risk-prompt-confirmation__section-heading">
+												<h4>New Draft risks</h4>
+												<p data-risk-prompt-new-count>0 risks</p>
+											</div>
+											<ul class="risk-prompt-confirmation__list" data-risk-prompt-new-list></ul>
+										</section>
+										<section class="risk-prompt-confirmation__section" data-risk-prompt-duplicate-section hidden>
+											<div class="risk-prompt-confirmation__section-heading">
+												<h4>Already in this project</h4>
+												<p data-risk-prompt-duplicate-list-count>0 risks</p>
+											</div>
+											<ul class="risk-prompt-confirmation__list" data-risk-prompt-duplicate-list></ul>
+										</section>
+									</div>
+								</section>
 							</div>
 
 							<div class="risk-prompt-modal__footer">
@@ -907,9 +952,21 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 									data-risk-prompt-review-toggle
 								>Show selected only</button>
 								<span class="visually-hidden" id="risk-prompt-show-selected-description">Review selected prompts when one or more prompts are selected.</span>
-								<form method="dialog">
+								<form method="dialog" data-risk-prompt-cancel-form>
 									<button class="button button--secondary" type="submit">Cancel</button>
 								</form>
+								<button
+									class="button button--secondary"
+									type="button"
+									data-risk-prompt-confirm-back
+									hidden
+								>Back to selection</button>
+								<a
+									class="button button--secondary"
+									href="#"
+									data-risk-prompt-view-existing
+									hidden
+								>View existing risks</a>
 								<button
 									class="button button--primary"
 									type="button"
@@ -918,6 +975,13 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 									data-risk-prompt-create-action={riskPromptDraftCreatePath}
 									data-risk-prompt-can-create={canCreateRisk ? 'true' : 'false'}
 								>Create risks</button>
+								<button
+									class="button button--primary"
+									type="button"
+									disabled
+									data-risk-prompt-confirm-create
+									hidden
+								>No new Draft risks to create</button>
 								<span class="visually-hidden" id="risk-prompt-create-disabled">{canCreateRisk ? 'Select one or more prompts to create draft risks.' : 'Viewer access is read-only. Risk creation is unavailable.'}</span>
 							</div>
 						</div>
@@ -952,17 +1016,50 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	const promptTabsContainer = document.querySelector('[data-risk-prompt-tabs]');
 	const promptReviewToggle = document.querySelector('[data-risk-prompt-review-toggle]');
 	const promptSelectedView = document.querySelector('[data-risk-prompt-selected-view]');
+	const promptConfirmationView = document.querySelector('[data-risk-prompt-confirmation-view]');
 	const promptSelectedEmpty = document.querySelector('[data-risk-prompt-selected-empty]');
 	const promptBrowseAreasButton = document.querySelector('[data-risk-prompt-browse-areas]');
 	const promptCreateButton = document.querySelector('[data-risk-prompt-create-action]');
+	const promptConfirmCreateButton = document.querySelector('[data-risk-prompt-confirm-create]');
+	const promptConfirmBackButton = document.querySelector('[data-risk-prompt-confirm-back]');
+	const promptViewExistingLink = document.querySelector('[data-risk-prompt-view-existing]');
+	const promptCancelForm = document.querySelector('[data-risk-prompt-cancel-form]');
 	const promptCreateStatus = document.querySelector('[data-risk-prompt-create-status]');
+	const promptConfirmationCopy = document.querySelector('[data-risk-prompt-confirmation-copy]');
+	const promptConfirmSelectedCount = document.querySelector('[data-risk-prompt-confirm-selected-count]');
+	const promptConfirmCreateCount = document.querySelector('[data-risk-prompt-confirm-create-count]');
+	const promptConfirmDuplicateCount = document.querySelector('[data-risk-prompt-confirm-duplicate-count]');
+	const promptConfirmInvalidNotice = document.querySelector('[data-risk-prompt-confirm-invalid-notice]');
+	const promptNewSection = document.querySelector('[data-risk-prompt-new-section]');
+	const promptNewCount = document.querySelector('[data-risk-prompt-new-count]');
+	const promptNewList = document.querySelector('[data-risk-prompt-new-list]');
+	const promptDuplicateSection = document.querySelector('[data-risk-prompt-duplicate-section]');
+	const promptDuplicateListCount = document.querySelector('[data-risk-prompt-duplicate-list-count]');
+	const promptDuplicateList = document.querySelector('[data-risk-prompt-duplicate-list]');
+	type RiskPromptConfirmationView = 'areas' | 'selected' | 'confirm';
+	type RiskPromptPreflight = {
+		selectedPromptCount: number;
+		createableCount: number;
+		duplicateCount: number;
+		invalidPromptCount: number;
+		createablePrompts: { riskPromptId: string; title: string }[];
+		duplicatePrompts: {
+			riskPromptId: string;
+			title: string;
+			existingRiskId?: string;
+			existingRiskRef?: string;
+			existingRiskTitle?: string;
+			existingRiskPath?: string;
+		}[];
+	};
 	let selectedPromptIds = createRiskPromptSelectionState();
 	let knownRiskPromptIds = new Set<string>();
 	let riskPromptAreaByPromptId = new Map<string, string>();
 	let promptModalTrigger = null;
-	let promptModalView: 'areas' | 'selected' = 'areas';
+	let promptModalView: RiskPromptConfirmationView = 'areas';
 	let activePromptTabBeforeReview: HTMLElement | null = null;
 	let isCreatingPromptDrafts = false;
+	let promptDraftPreflight: RiskPromptPreflight | null = null;
 
 	const promptTabs = () => Array.from(document.querySelectorAll('[data-risk-prompt-tab]'));
 	const promptPanels = () => Array.from(document.querySelectorAll('[data-risk-prompt-panel]'));
@@ -1028,7 +1125,8 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		if (!(promptReviewToggle instanceof HTMLButtonElement)) return;
 		const total = getSelectedPromptCount(selectedPromptIds);
 		const isReviewMode = promptModalView === 'selected';
-		promptReviewToggle.disabled = !isReviewMode && total === 0;
+		promptReviewToggle.hidden = promptModalView === 'confirm';
+		promptReviewToggle.disabled = promptModalView === 'confirm' || (!isReviewMode && total === 0);
 		promptReviewToggle.textContent = isReviewMode ? 'Show all risk areas' : 'Show selected only';
 		promptReviewToggle.setAttribute('aria-pressed', isReviewMode ? 'true' : 'false');
 		promptReviewToggle.setAttribute('aria-label', isReviewMode
@@ -1042,14 +1140,33 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		if (!(promptCreateButton instanceof HTMLButtonElement)) return;
 		const total = getSelectedPromptCount(selectedPromptIds);
 		const canCreate = promptCreateButton.dataset.riskPromptCanCreate === 'true';
-		promptCreateButton.disabled = isCreatingPromptDrafts || !canCreate || total === 0;
+		promptCreateButton.hidden = promptModalView === 'confirm';
+		promptCreateButton.disabled = promptModalView === 'confirm' || isCreatingPromptDrafts || !canCreate || total === 0;
 		if (isCreatingPromptDrafts) {
-			promptCreateButton.textContent = 'Creating draft risks...';
+			promptCreateButton.textContent = 'Checking selected prompts...';
 		} else if (total > 0) {
 			promptCreateButton.textContent = `Create ${total} draft ${total === 1 ? 'risk' : 'risks'}`;
 		} else {
 			promptCreateButton.textContent = 'Create risks';
 		}
+		if (promptConfirmCreateButton instanceof HTMLButtonElement) {
+			const createableCount = promptDraftPreflight?.createableCount ?? 0;
+			const canConfirm = promptCreateButton.dataset.riskPromptCanCreate === 'true';
+			promptConfirmCreateButton.hidden = promptModalView !== 'confirm';
+			promptConfirmCreateButton.disabled = isCreatingPromptDrafts || !canConfirm || createableCount === 0;
+			if (isCreatingPromptDrafts) {
+				promptConfirmCreateButton.textContent = 'Creating Draft risks...';
+			} else if (createableCount > 0) {
+				promptConfirmCreateButton.textContent = `Create ${createableCount} Draft ${createableCount === 1 ? 'risk' : 'risks'}`;
+			} else {
+				promptConfirmCreateButton.textContent = 'No new Draft risks to create';
+			}
+		}
+		if (promptConfirmBackButton instanceof HTMLButtonElement) {
+			promptConfirmBackButton.hidden = promptModalView !== 'confirm';
+			promptConfirmBackButton.disabled = isCreatingPromptDrafts;
+		}
+		if (promptCancelForm instanceof HTMLElement) promptCancelForm.hidden = promptModalView === 'confirm';
 	};
 
 	const updateRiskPromptCounts = () => {
@@ -1105,24 +1222,88 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		return promptReviewToggle instanceof HTMLElement ? promptReviewToggle : null;
 	};
 
-	const setRiskPromptModalView = (view: 'areas' | 'selected', focusTarget = true) => {
-		const nextView = view === 'selected' && getSelectedPromptCount(selectedPromptIds) > 0 ? 'selected' : 'areas';
+	const formatRiskPromptCount = (count: number, noun = 'risk') => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+	const replaceListItems = (list: Element | null, items: Element[]) => {
+		if (!(list instanceof HTMLElement)) return;
+		list.replaceChildren(...items);
+	};
+
+	const renderRiskPromptPreflight = (preflight: RiskPromptPreflight) => {
+		const selectedCount = Number(preflight.selectedPromptCount) || getSelectedPromptCount(selectedPromptIds);
+		const createableCount = Number(preflight.createableCount) || 0;
+		const duplicateCount = Number(preflight.duplicateCount) || 0;
+		const invalidCount = Number(preflight.invalidPromptCount) || 0;
+		if (promptConfirmationCopy) {
+			promptConfirmationCopy.textContent = `Watchtower will create ${createableCount} new risks in Draft for this project. ${duplicateCount} selected prompts already exist and will not be created again.`;
+		}
+		if (promptConfirmSelectedCount) promptConfirmSelectedCount.textContent = String(selectedCount);
+		if (promptConfirmCreateCount) promptConfirmCreateCount.textContent = String(createableCount);
+		if (promptConfirmDuplicateCount) promptConfirmDuplicateCount.textContent = String(duplicateCount);
+		if (promptConfirmInvalidNotice instanceof HTMLElement) {
+			promptConfirmInvalidNotice.textContent = invalidCount > 0
+				? `${invalidCount} selected ${invalidCount === 1 ? 'prompt is' : 'prompts are'} no longer active and will not be created.`
+				: '';
+			promptConfirmInvalidNotice.hidden = invalidCount === 0;
+		}
+		if (promptNewCount) promptNewCount.textContent = formatRiskPromptCount(createableCount);
+		replaceListItems(promptNewList, preflight.createablePrompts.map((prompt) => {
+			const item = document.createElement('li');
+			item.textContent = prompt.title;
+			return item;
+		}));
+		if (promptNewSection instanceof HTMLElement) promptNewSection.hidden = createableCount === 0;
+		if (promptDuplicateListCount) promptDuplicateListCount.textContent = formatRiskPromptCount(duplicateCount);
+		replaceListItems(promptDuplicateList, preflight.duplicatePrompts.map((prompt) => {
+			const item = document.createElement('li');
+			const text = document.createElement('span');
+			const ref = prompt.existingRiskRef || 'Existing risk';
+			text.textContent = `${ref} - ${prompt.existingRiskTitle || prompt.title}`;
+			item.append(text);
+			if (prompt.existingRiskPath) {
+				const link = document.createElement('a');
+				link.href = prompt.existingRiskPath;
+				link.textContent = 'Open';
+				link.className = 'text-link';
+				item.append(link);
+			}
+			return item;
+		}));
+		if (promptDuplicateSection instanceof HTMLElement) promptDuplicateSection.hidden = duplicateCount === 0;
+		const firstDuplicatePath = preflight.duplicatePrompts.find((prompt) => prompt.existingRiskPath)?.existingRiskPath || '';
+		if (promptViewExistingLink instanceof HTMLAnchorElement) {
+			promptViewExistingLink.hidden = duplicateCount === 0 || !firstDuplicatePath;
+			promptViewExistingLink.href = firstDuplicatePath || '#';
+		}
+	};
+
+	const setRiskPromptModalView = (view: RiskPromptConfirmationView, focusTarget = true) => {
+		const nextView = view === 'confirm'
+			? 'confirm'
+			: view === 'selected' && getSelectedPromptCount(selectedPromptIds) > 0
+				? 'selected'
+				: 'areas';
 		if (nextView === 'selected') {
 			const activeTab = document.querySelector('[data-risk-prompt-tab][aria-selected="true"]');
 			activePromptTabBeforeReview = activeTab instanceof HTMLElement ? activeTab : null;
 		}
 		promptModalView = nextView;
-		if (promptTabsContainer instanceof HTMLElement) promptTabsContainer.hidden = nextView === 'selected';
+		if (promptTabsContainer instanceof HTMLElement) promptTabsContainer.hidden = nextView !== 'areas';
 		promptPanels().forEach((panel) => {
-			if (panel instanceof HTMLElement) panel.hidden = nextView === 'selected' || panel.getAttribute('aria-labelledby') !== document.querySelector('[data-risk-prompt-tab][aria-selected="true"]')?.id;
+			if (panel instanceof HTMLElement) panel.hidden = nextView !== 'areas' || panel.getAttribute('aria-labelledby') !== document.querySelector('[data-risk-prompt-tab][aria-selected="true"]')?.id;
 		});
 		if (promptSelectedView instanceof HTMLElement) promptSelectedView.hidden = nextView !== 'selected';
+		if (promptConfirmationView instanceof HTMLElement) promptConfirmationView.hidden = nextView !== 'confirm';
 		updateRiskPromptCounts();
 		if (nextView === 'areas') {
 			const tabToRestore = activePromptTabBeforeReview && document.contains(activePromptTabBeforeReview)
 				? activePromptTabBeforeReview
 				: promptTabs()[0];
 			if (tabToRestore instanceof HTMLElement) setActiveRiskPromptTab(tabToRestore, focusTarget);
+			return;
+		}
+		if (nextView === 'confirm') {
+			if (focusTarget && promptConfirmationView instanceof HTMLElement) promptConfirmationView.focus();
 			return;
 		}
 		if (!focusTarget) return;
@@ -1133,6 +1314,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	const resetRiskPromptSelection = () => {
 		selectedPromptIds = clearRiskPromptSelections();
 		isCreatingPromptDrafts = false;
+		promptDraftPreflight = null;
 		setRiskPromptCreateStatus();
 		syncRiskPromptControls();
 		setRiskPromptModalView('areas', false);
@@ -1219,16 +1401,22 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		});
 	}
 
+	if (promptConfirmBackButton instanceof HTMLButtonElement) {
+		promptConfirmBackButton.addEventListener('click', () => {
+			if (isCreatingPromptDrafts) return;
+			setRiskPromptCreateStatus();
+			setRiskPromptModalView(getSelectedPromptCount(selectedPromptIds) > 0 ? 'selected' : 'areas');
+		});
+	}
+
 	if (promptCreateButton instanceof HTMLButtonElement) {
 		promptCreateButton.addEventListener('click', async () => {
 			const riskPromptIds = [...selectedPromptIds];
 			const endpoint = promptCreateButton.dataset.riskPromptCreateAction || '';
 			if (isCreatingPromptDrafts || riskPromptIds.length === 0 || !endpoint) return;
-			const confirmed = window.confirm(`Create ${riskPromptIds.length} draft ${riskPromptIds.length === 1 ? 'risk' : 'risks'} from the selected prompts?`);
-			if (!confirmed) return;
 
 			isCreatingPromptDrafts = true;
-			setRiskPromptCreateStatus('Creating draft risks...', 'neutral');
+			setRiskPromptCreateStatus('Checking selected prompts...', 'neutral');
 			updateRiskPromptCreateButton();
 
 			try {
@@ -1236,7 +1424,53 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 					method: 'POST',
 					credentials: 'same-origin',
 					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({ riskPromptIds }),
+					body: JSON.stringify({ mode: 'preflight', riskPromptIds }),
+				});
+				const payload = await response.json().catch(() => ({}));
+				if (response.status === 401 && typeof payload.loginPath === 'string') {
+					window.location.assign(payload.loginPath);
+					return;
+				}
+				if (!response.ok || payload.ok !== true) {
+					throw new Error(typeof payload.message === 'string' ? payload.message : 'Unable to create draft risks from the selected prompts.');
+				}
+
+				promptDraftPreflight = {
+					selectedPromptCount: Number(payload.selectedPromptCount) || riskPromptIds.length,
+					createableCount: Number(payload.createableCount) || 0,
+					duplicateCount: Number(payload.duplicateCount) || 0,
+					invalidPromptCount: Number(payload.invalidPromptCount) || 0,
+					createablePrompts: Array.isArray(payload.createablePrompts) ? payload.createablePrompts : [],
+					duplicatePrompts: Array.isArray(payload.duplicatePrompts) ? payload.duplicatePrompts : [],
+				};
+				renderRiskPromptPreflight(promptDraftPreflight);
+				setRiskPromptCreateStatus(promptDraftPreflight.createableCount > 0 ? '' : 'No new Draft risks to create', promptDraftPreflight.createableCount > 0 ? 'neutral' : 'warning');
+				setRiskPromptModalView('confirm');
+			} catch (error) {
+				setRiskPromptCreateStatus(error instanceof Error ? error.message : 'Unable to create draft risks from the selected prompts.', 'error');
+			} finally {
+				isCreatingPromptDrafts = false;
+				updateRiskPromptCreateButton();
+			}
+		});
+	}
+
+	if (promptConfirmCreateButton instanceof HTMLButtonElement && promptCreateButton instanceof HTMLButtonElement) {
+		promptConfirmCreateButton.addEventListener('click', async () => {
+			const riskPromptIds = [...selectedPromptIds];
+			const endpoint = promptCreateButton.dataset.riskPromptCreateAction || '';
+			if (isCreatingPromptDrafts || riskPromptIds.length === 0 || !endpoint || !promptDraftPreflight || promptDraftPreflight.createableCount === 0) return;
+
+			isCreatingPromptDrafts = true;
+			setRiskPromptCreateStatus('Creating Draft risks...', 'neutral');
+			updateRiskPromptCreateButton();
+
+			try {
+				const response = await fetch(endpoint, {
+					method: 'POST',
+					credentials: 'same-origin',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ mode: 'create', riskPromptIds }),
 				});
 				const payload = await response.json().catch(() => ({}));
 				if (response.status === 401 && typeof payload.loginPath === 'string') {
@@ -1259,7 +1493,14 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 					return;
 				}
 
-				setRiskPromptCreateStatus('No new draft risks were created because the selected prompts already have draft risks for this project.', 'warning');
+				promptDraftPreflight = {
+					...promptDraftPreflight,
+					createableCount: 0,
+					duplicateCount: Math.max(promptDraftPreflight.duplicateCount, skippedDuplicateCount),
+					createablePrompts: [],
+				};
+				renderRiskPromptPreflight(promptDraftPreflight);
+				setRiskPromptCreateStatus('No new Draft risks to create', 'warning');
 			} catch (error) {
 				setRiskPromptCreateStatus(error instanceof Error ? error.message : 'Unable to create draft risks from the selected prompts.', 'error');
 			} finally {
@@ -2285,6 +2526,155 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		display: none;
 	}
 
+	.risk-prompt-confirmation {
+		display: grid;
+		gap: 0.9rem;
+		min-height: 0;
+	}
+
+	.risk-prompt-confirmation[hidden] {
+		display: none;
+	}
+
+	.risk-prompt-confirmation:focus-visible {
+		outline: 3px solid rgba(56, 189, 248, 0.35);
+		outline-offset: 4px;
+	}
+
+	.risk-prompt-confirmation__heading {
+		display: grid;
+		gap: 0.35rem;
+	}
+
+	.risk-prompt-confirmation__heading h3 {
+		margin: 0;
+		font-size: clamp(1.35rem, 3vw, 1.8rem);
+		letter-spacing: 0;
+	}
+
+	.risk-prompt-confirmation__heading p {
+		max-width: 54rem;
+		margin: 0;
+		color: var(--muted-strong);
+		font-weight: 760;
+		line-height: 1.45;
+	}
+
+	.risk-prompt-confirmation__metrics {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.65rem;
+	}
+
+	.risk-prompt-confirmation__metrics div {
+		display: grid;
+		gap: 0.12rem;
+		border: 1px solid rgba(110, 181, 224, 0.26);
+		border-radius: 8px;
+		padding: 0.8rem;
+		background: rgba(15, 23, 42, 0.44);
+	}
+
+	.risk-prompt-confirmation__metrics strong {
+		color: var(--text);
+		font-size: 1.45rem;
+		font-weight: 950;
+		line-height: 1;
+	}
+
+	.risk-prompt-confirmation__metrics span {
+		color: var(--muted-strong);
+		font-size: 0.82rem;
+		font-weight: 850;
+		line-height: 1.25;
+	}
+
+	.risk-prompt-confirmation__notice {
+		margin: 0;
+		border: 1px solid rgba(250, 204, 21, 0.32);
+		border-radius: 8px;
+		padding: 0.7rem 0.8rem;
+		background: rgba(250, 204, 21, 0.1);
+		color: #fde68a;
+		font-size: 0.88rem;
+		font-weight: 820;
+	}
+
+	.risk-prompt-confirmation__sections {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+		gap: 0.75rem;
+		min-height: 0;
+	}
+
+	.risk-prompt-confirmation__section {
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
+		gap: 0.55rem;
+		min-height: 10rem;
+		border: 1px solid rgba(110, 181, 224, 0.24);
+		border-radius: 8px;
+		padding: 0.8rem;
+		background: rgba(8, 13, 23, 0.45);
+	}
+
+	.risk-prompt-confirmation__section[hidden] {
+		display: none;
+	}
+
+	.risk-prompt-confirmation__section-heading {
+		display: flex;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: 0.8rem;
+	}
+
+	.risk-prompt-confirmation__section-heading h4,
+	.risk-prompt-confirmation__section-heading p {
+		margin: 0;
+	}
+
+	.risk-prompt-confirmation__section-heading h4 {
+		color: var(--text);
+		font-size: 1rem;
+		font-weight: 900;
+	}
+
+	.risk-prompt-confirmation__section-heading p {
+		color: var(--muted-strong);
+		font-size: 0.82rem;
+		font-weight: 820;
+	}
+
+	.risk-prompt-confirmation__list {
+		display: grid;
+		gap: 0.45rem;
+		min-height: 0;
+		max-height: min(18rem, 34vh);
+		margin: 0;
+		padding: 0 0.2rem 0 0;
+		overflow: auto;
+		overscroll-behavior: contain;
+		scrollbar-width: thin;
+		list-style: none;
+	}
+
+	.risk-prompt-confirmation__list li {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		border: 1px solid rgba(148, 163, 184, 0.2);
+		border-radius: 8px;
+		padding: 0.62rem 0.7rem;
+		background: rgba(15, 23, 42, 0.48);
+		color: var(--text);
+		font-size: 0.9rem;
+		font-weight: 820;
+		line-height: 1.3;
+		overflow-wrap: anywhere;
+	}
+
 	.risk-prompt-panel__heading {
 		display: flex;
 		align-items: center;
@@ -2486,6 +2876,21 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	.risk-prompt-modal__footer [disabled] {
 		opacity: 0.62;
 		cursor: not-allowed;
+	}
+
+	@media (max-width: 760px), (max-height: 680px) {
+		.risk-prompt-confirmation__metrics,
+		.risk-prompt-confirmation__sections {
+			grid-template-columns: 1fr;
+		}
+
+		.risk-prompt-confirmation__section {
+			min-height: auto;
+		}
+
+		.risk-prompt-confirmation__list {
+			max-height: 14rem;
+		}
 	}
 
 	@media (max-width: 1420px) {
