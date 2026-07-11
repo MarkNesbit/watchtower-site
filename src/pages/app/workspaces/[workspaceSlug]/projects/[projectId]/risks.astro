@@ -915,34 +915,33 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 									<div class="risk-prompt-confirmation__heading">
 										<p class="eyebrow">Guided risk identification</p>
 										<h3 id="risk-prompt-confirmation-title">Create Draft risks</h3>
-										<p data-risk-prompt-confirmation-copy>Watchtower will create 0 new risks in Draft for this project. 0 selected prompts already exist and will not be created again.</p>
 									</div>
 									<div class="risk-prompt-confirmation__metrics" aria-live="polite">
-										<div>
+										<div class="risk-prompt-confirmation__metric risk-prompt-confirmation__metric--selected">
 											<strong data-risk-prompt-confirm-selected-count>0</strong>
 											<span>prompts selected</span>
 										</div>
-										<div>
+										<div class="risk-prompt-confirmation__metric risk-prompt-confirmation__metric--create">
 											<strong data-risk-prompt-confirm-create-count>0</strong>
 											<span>Draft risks will be created</span>
 										</div>
-										<div>
+										<div class="risk-prompt-confirmation__metric risk-prompt-confirmation__metric--duplicate">
 											<strong data-risk-prompt-confirm-duplicate-count>0</strong>
 											<span>risks already exist in this project</span>
 										</div>
 									</div>
 									<p class="risk-prompt-confirmation__notice" data-risk-prompt-confirm-invalid-notice hidden></p>
 									<div class="risk-prompt-confirmation__sections">
-										<section class="risk-prompt-confirmation__section" data-risk-prompt-new-section>
+										<section class="risk-prompt-confirmation__section risk-prompt-confirmation__section--create" data-risk-prompt-new-section>
 											<div class="risk-prompt-confirmation__section-heading">
-												<h4>New Draft risks</h4>
+												<h4><span class="risk-prompt-confirmation__section-icon" aria-hidden="true">+</span> New Draft risks</h4>
 												<p data-risk-prompt-new-count>0 risks</p>
 											</div>
 											<ul class="risk-prompt-confirmation__list" data-risk-prompt-new-list></ul>
 										</section>
-										<section class="risk-prompt-confirmation__section" data-risk-prompt-duplicate-section hidden>
+										<section class="risk-prompt-confirmation__section risk-prompt-confirmation__section--duplicate" data-risk-prompt-duplicate-section hidden>
 											<div class="risk-prompt-confirmation__section-heading">
-												<h4>Already in this project</h4>
+												<h4><span class="risk-prompt-confirmation__section-icon" aria-hidden="true">!</span> Already in this project</h4>
 												<p data-risk-prompt-duplicate-list-count>0 risks</p>
 											</div>
 											<ul class="risk-prompt-confirmation__list" data-risk-prompt-duplicate-list></ul>
@@ -972,12 +971,6 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 									data-risk-prompt-confirm-back
 									hidden
 								>Back to selection</button>
-								<a
-									class="button button--secondary"
-									href="#"
-									data-risk-prompt-view-existing
-									hidden
-								>View existing risks</a>
 								<button
 									class="button button--primary"
 									type="button"
@@ -1033,10 +1026,8 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	const promptCreateButton = document.querySelector('[data-risk-prompt-create-action]');
 	const promptConfirmCreateButton = document.querySelector('[data-risk-prompt-confirm-create]');
 	const promptConfirmBackButton = document.querySelector('[data-risk-prompt-confirm-back]');
-	const promptViewExistingLink = document.querySelector('[data-risk-prompt-view-existing]');
 	const promptCancelForm = document.querySelector('[data-risk-prompt-cancel-form]');
 	const promptCreateStatus = document.querySelector('[data-risk-prompt-create-status]');
-	const promptConfirmationCopy = document.querySelector('[data-risk-prompt-confirmation-copy]');
 	const promptConfirmSelectedCount = document.querySelector('[data-risk-prompt-confirm-selected-count]');
 	const promptConfirmCreateCount = document.querySelector('[data-risk-prompt-confirm-create-count]');
 	const promptConfirmDuplicateCount = document.querySelector('[data-risk-prompt-confirm-duplicate-count]');
@@ -1245,9 +1236,6 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		const createableCount = Number(preflight.createableCount) || 0;
 		const duplicateCount = Number(preflight.duplicateCount) || 0;
 		const invalidCount = Number(preflight.invalidPromptCount) || 0;
-		if (promptConfirmationCopy) {
-			promptConfirmationCopy.textContent = `Watchtower will create ${createableCount} new risks in Draft for this project. ${duplicateCount} selected prompts already exist and will not be created again.`;
-		}
 		if (promptConfirmSelectedCount) promptConfirmSelectedCount.textContent = String(selectedCount);
 		if (promptConfirmCreateCount) promptConfirmCreateCount.textContent = String(createableCount);
 		if (promptConfirmDuplicateCount) promptConfirmDuplicateCount.textContent = String(duplicateCount);
@@ -1267,25 +1255,30 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		if (promptDuplicateListCount) promptDuplicateListCount.textContent = formatRiskPromptCount(duplicateCount);
 		replaceListItems(promptDuplicateList, preflight.duplicatePrompts.map((prompt) => {
 			const item = document.createElement('li');
-			const text = document.createElement('span');
+			item.className = 'risk-prompt-confirmation__duplicate-item';
 			const ref = prompt.existingRiskRef || 'Existing risk';
-			text.textContent = `${ref} - ${prompt.existingRiskTitle || prompt.title}`;
-			item.append(text);
+			let reference: HTMLElement;
 			if (prompt.existingRiskPath) {
 				const link = document.createElement('a');
 				link.href = prompt.existingRiskPath;
-				link.textContent = 'Open';
-				link.className = 'text-link';
-				item.append(link);
+				link.target = '_blank';
+				link.rel = 'noopener noreferrer';
+				link.className = 'text-link risk-prompt-confirmation__risk-ref';
+				link.textContent = ref;
+				reference = link;
+			} else {
+				const fallback = document.createElement('span');
+				fallback.className = 'risk-prompt-confirmation__risk-ref';
+				fallback.textContent = ref;
+				reference = fallback;
 			}
+			const title = document.createElement('span');
+			title.className = 'risk-prompt-confirmation__risk-title';
+			title.textContent = prompt.existingRiskTitle || prompt.title;
+			item.append(reference, title);
 			return item;
 		}));
 		if (promptDuplicateSection instanceof HTMLElement) promptDuplicateSection.hidden = duplicateCount === 0;
-		const firstDuplicatePath = preflight.duplicatePrompts.find((prompt) => prompt.existingRiskPath)?.existingRiskPath || '';
-		if (promptViewExistingLink instanceof HTMLAnchorElement) {
-			promptViewExistingLink.hidden = duplicateCount === 0 || !firstDuplicatePath;
-			promptViewExistingLink.href = firstDuplicatePath || '#';
-		}
 	};
 
 	const setRiskPromptModalView = (view: RiskPromptConfirmationView, focusTarget = true) => {
@@ -2584,27 +2577,41 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		letter-spacing: 0;
 	}
 
-	.risk-prompt-confirmation__heading p {
-		max-width: 54rem;
-		margin: 0;
-		color: var(--muted-strong);
-		font-weight: 760;
-		line-height: 1.45;
-	}
-
 	.risk-prompt-confirmation__metrics {
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 0.65rem;
 	}
 
-	.risk-prompt-confirmation__metrics div {
+	.risk-prompt-confirmation__metric {
+		--risk-prompt-metric-border: rgba(110, 181, 224, 0.26);
+		--risk-prompt-metric-bg: rgba(15, 23, 42, 0.44);
+		--risk-prompt-metric-accent: var(--accent-strong);
 		display: grid;
 		gap: 0.12rem;
-		border: 1px solid rgba(110, 181, 224, 0.26);
+		border: 1px solid var(--risk-prompt-metric-border);
 		border-radius: 8px;
+		border-left: 4px solid var(--risk-prompt-metric-accent);
 		padding: 0.8rem;
-		background: rgba(15, 23, 42, 0.44);
+		background: var(--risk-prompt-metric-bg);
+	}
+
+	.risk-prompt-confirmation__metric--selected {
+		--risk-prompt-metric-border: rgba(56, 189, 248, 0.32);
+		--risk-prompt-metric-bg: rgba(14, 116, 144, 0.15);
+		--risk-prompt-metric-accent: #38bdf8;
+	}
+
+	.risk-prompt-confirmation__metric--create {
+		--risk-prompt-metric-border: rgba(74, 222, 128, 0.36);
+		--risk-prompt-metric-bg: rgba(22, 101, 52, 0.2);
+		--risk-prompt-metric-accent: #4ade80;
+	}
+
+	.risk-prompt-confirmation__metric--duplicate {
+		--risk-prompt-metric-border: rgba(248, 113, 113, 0.4);
+		--risk-prompt-metric-bg: rgba(127, 29, 29, 0.2);
+		--risk-prompt-metric-accent: #f87171;
 	}
 
 	.risk-prompt-confirmation__metrics strong {
@@ -2640,14 +2647,30 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	}
 
 	.risk-prompt-confirmation__section {
+		--risk-prompt-section-border: rgba(110, 181, 224, 0.24);
+		--risk-prompt-section-bg: rgba(8, 13, 23, 0.45);
+		--risk-prompt-section-accent: var(--accent-strong);
 		display: grid;
 		grid-template-rows: auto minmax(0, 1fr);
 		gap: 0.55rem;
 		min-height: 10rem;
-		border: 1px solid rgba(110, 181, 224, 0.24);
+		border: 1px solid var(--risk-prompt-section-border);
 		border-radius: 8px;
+		border-top: 4px solid var(--risk-prompt-section-accent);
 		padding: 0.8rem;
-		background: rgba(8, 13, 23, 0.45);
+		background: var(--risk-prompt-section-bg);
+	}
+
+	.risk-prompt-confirmation__section--create {
+		--risk-prompt-section-border: rgba(74, 222, 128, 0.32);
+		--risk-prompt-section-bg: rgba(22, 101, 52, 0.13);
+		--risk-prompt-section-accent: #4ade80;
+	}
+
+	.risk-prompt-confirmation__section--duplicate {
+		--risk-prompt-section-border: rgba(248, 113, 113, 0.36);
+		--risk-prompt-section-bg: rgba(127, 29, 29, 0.14);
+		--risk-prompt-section-accent: #f87171;
 	}
 
 	.risk-prompt-confirmation__section[hidden] {
@@ -2667,9 +2690,26 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	}
 
 	.risk-prompt-confirmation__section-heading h4 {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
 		color: var(--text);
 		font-size: 1rem;
 		font-weight: 900;
+	}
+
+	.risk-prompt-confirmation__section-icon {
+		display: inline-grid;
+		width: 1.45rem;
+		height: 1.45rem;
+		place-items: center;
+		border: 1px solid color-mix(in srgb, var(--risk-prompt-section-accent) 68%, transparent);
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--risk-prompt-section-accent) 16%, transparent);
+		color: var(--risk-prompt-section-accent);
+		font-size: 0.82rem;
+		font-weight: 950;
+		line-height: 1;
 	}
 
 	.risk-prompt-confirmation__section-heading p {
@@ -2705,6 +2745,22 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		font-weight: 820;
 		line-height: 1.3;
 		overflow-wrap: anywhere;
+	}
+
+	.risk-prompt-confirmation__duplicate-item {
+		align-items: flex-start;
+		justify-content: flex-start;
+		flex-wrap: wrap;
+	}
+
+	.risk-prompt-confirmation__risk-ref {
+		flex: 0 0 auto;
+		font-weight: 950;
+	}
+
+	.risk-prompt-confirmation__risk-title {
+		color: var(--muted-strong);
+		font-weight: 780;
 	}
 
 	.risk-prompt-panel__heading {
