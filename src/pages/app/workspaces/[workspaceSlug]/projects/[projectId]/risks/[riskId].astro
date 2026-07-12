@@ -153,6 +153,7 @@ const actionStateDrivers = risk ? getRiskActionStateDrivers(risk, new Date()) : 
 const referenceTone = risk ? deriveRiskReferenceTone(risk, new Date()) : 'neutral';
 const referenceStatus = risk ? riskReferenceStatusLabel(risk, new Date()) : 'Neutral';
 const actionStateSummary = actionStateDrivers[0]?.message ?? 'Risk action state could not be calculated safely.';
+const detailSuccessMessage = Astro.url.searchParams.get('created') === 'draft' ? 'Draft risk created.' : '';
 const riskIsDraft = risk ? isDraftRiskStatus(risk.status) : false;
 const riskIsActive = risk ? isActiveRiskStatus(risk.status) : false;
 const riskIsClosed = risk ? isClosedRiskStatus(risk.status) : false;
@@ -246,6 +247,8 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					<a class="button button--secondary" href={buildProjectRisksPath(workspaceSlug ?? '', project.slug)}>Back to Risk Register</a>
 					<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
 				</nav>
+
+				{detailSuccessMessage && <p class="form-message risk-detail-success" role="status" data-risk-detail-success>{detailSuccessMessage}</p>}
 
 				<ProjectControlPanel title="Current risk" headingId="risk-detail-controls-heading">
 					<p class="risk-action-state-summary" data-risk-action-state-summary>
