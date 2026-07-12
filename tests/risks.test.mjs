@@ -20,6 +20,7 @@ import {
 	deriveWatchtowerDefaultRiskExposure,
 	deriveRiskExposureTone,
 	deriveRiskReferenceTone,
+	deriveRiskReviewDateTone,
 	deriveWatchtowerDefaultRiskExposureTone,
 	filterAndSortRisksForRegister,
 	getActiveRiskExposureCounts,
@@ -55,6 +56,7 @@ import {
 	DRAFT_RISK_STATUSES,
 	RISK_REGISTER_EXPOSURE_FILTERS,
 	RISK_REGISTER_PAGE_SIZES,
+	RISK_REVIEW_DUE_SOON_WINDOW_DAYS,
 	riskDisplayLabel,
 	riskExposureTone,
 	riskExposureToneLabel,
@@ -1750,7 +1752,7 @@ test('Risk Register Needs Action priority is deterministic and uses exposure as 
 		risk_ref: 'Risk-HHH-004',
 		risk_sequence: 4,
 		title: 'Review due soon',
-		review_date: '2026-07-02',
+		review_date: '2026-07-01',
 	});
 	const highMissingMitigation = registerRisk({
 		risk_id: 'risk-5',
@@ -1894,6 +1896,44 @@ test('Risk assurance derives from governance and control quality signals', () =>
 	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'materialised' }), now), 'red');
 	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'escalated', owner_id: null }), now), 'red');
 	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'escalated' }), now), 'green');
+});
+
+test('Risk review-date tone uses the MVP three-calendar-day Amber window', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+
+	assert.equal(RISK_REVIEW_DUE_SOON_WINDOW_DAYS, 3);
+	assert.deepEqual(deriveRiskReviewDateTone(null, now), {
+		tone: 'amber',
+		value: 'No review date',
+		status: 'missing',
+	});
+	assert.equal(deriveRiskReviewDateTone('2026-07-11', now).tone, 'red');
+	assert.equal(deriveRiskReviewDateTone('2026-07-11', now).status, 'overdue');
+	assert.equal(deriveRiskReviewDateTone('2026-07-12', now).tone, 'amber');
+	assert.equal(deriveRiskReviewDateTone('2026-07-12', now).status, 'due-soon');
+	assert.equal(deriveRiskReviewDateTone('2026-07-13', now).tone, 'amber');
+	assert.equal(deriveRiskReviewDateTone('2026-07-13', now).status, 'due-soon');
+	assert.equal(deriveRiskReviewDateTone('2026-07-14', now).tone, 'amber');
+	assert.equal(deriveRiskReviewDateTone('2026-07-15', now).tone, 'amber');
+	assert.equal(deriveRiskReviewDateTone('2026-07-15', now).daysUntil, 3);
+	assert.equal(deriveRiskReviewDateTone('2026-07-16', now).tone, 'green');
+	assert.equal(deriveRiskReviewDateTone('2026-07-16', now).status, 'scheduled');
+});
+
+test('Review-date due-soon state feeds active action state without cumulative Amber escalation', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	const dueTomorrow = assuredRiskFacts({
+		review_date: '2026-07-13',
+		due_date: '2026-08-01',
+		updated_at: '2026-07-01T10:00:00Z',
+	});
+
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'draft', review_date: '2026-07-13' }), now), 'neutral');
+	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'closed', review_date: '2026-07-13' }), now), 'neutral');
+	assert.equal(deriveRiskAssuranceTone(dueTomorrow, now), 'amber');
+	assert.equal(deriveRiskActionStateTone(dueTomorrow, now), 'amber');
+	assert.equal(deriveRiskActionStateTone({ ...dueTomorrow, due_date: null }, now), 'amber');
+	assert.equal(deriveRiskActionStateTone({ ...dueTomorrow, owner_id: null }, now), 'red');
 });
 
 test('Risk action state uses governance assurance drivers separately from exposure', () => {
@@ -2047,6 +2087,26 @@ test('Active risk action state is consistent across detail register dashboard an
 	assert.equal(deriveProjectRiskDashboardAssuranceTone([redRisk], now), 'red');
 	assert.equal(deriveRiskTileAttentionSignal([redRisk], now), 'red');
 	assert.equal(deriveProjectActionState([redRisk], now), 'red');
+});
+
+test('Review-date due tomorrow is Amber across detail register dashboard and project attention consumers', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	const dueTomorrowRisk = registerRisk({
+		review_date: '2026-07-13',
+		due_date: '2026-08-01',
+		updated_at: '2026-07-01T10:00:00Z',
+	});
+	const reviewBlock = getRiskAssuranceBlocks(dueTomorrowRisk, now).find((block) => block.id === 'review-date');
+
+	assert.equal(reviewBlock?.tone, 'amber');
+	assert.equal(reviewBlock?.prompt, 'Review risk soon');
+	assert.equal(deriveRiskReferenceTone(dueTomorrowRisk, now), 'amber');
+	assert.equal(deriveRiskActionStateTone(dueTomorrowRisk, now), 'amber');
+	assert.equal(countRisksNeedingAction([dueTomorrowRisk], now), 1);
+	assert.deepEqual(getRiskActionItems(dueTomorrowRisk, now).map((item) => item.type), ['review-due-soon']);
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([dueTomorrowRisk], now), 'amber');
+	assert.equal(deriveRiskTileAttentionSignal([dueTomorrowRisk], now), 'amber');
+	assert.equal(deriveProjectActionState([dueTomorrowRisk], now), 'amber');
 });
 
 test('Draft and Closed risk display is neutral while exposure remains available', () => {
@@ -3014,8 +3074,11 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /riskProfileName\(risk\.owner, 'Unassigned'\)/);
 	assert.match(route, /risk-register-table__owner--missing/);
 	assert.match(route, /reviewDueState\(risk\)/);
+	assert.match(route, /deriveRiskReviewDateTone\(risk\.review_date, now\)/);
 	assert.match(route, /No review date/);
 	assert.match(route, /Overdue/);
+	assert.match(route, /Due soon/);
+	assert.doesNotMatch(route, /parseReviewDate/);
 	assert.match(route, /ariaLabel=\{exposure\.ariaLabel\}/);
 	assert.match(route, /tone=\{referenceTone\}/);
 	assert.match(route, /statusLabel=\{referenceStatusLabel\}/);
