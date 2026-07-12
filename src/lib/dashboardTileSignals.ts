@@ -1,5 +1,6 @@
 import type { ProjectDateCard } from './projectDates.ts';
 import {
+	deriveRiskAssuranceRollupTone,
 	deriveRiskAssuranceTone,
 	isDashboardActiveRiskStatus,
 	type ProjectRisk,
@@ -324,13 +325,8 @@ export function deriveRiskAreaSignal(
 	}
 
 	const attentionStates = activeRisks.map((risk) => deriveRiskAssuranceTone(risk, now));
-	const state = attentionStates.includes('red')
-		? 'red'
-		: attentionStates.includes('amber')
-			? 'amber'
-			: attentionStates.includes('green')
-				? 'green'
-				: 'unknown';
+	const rollupState = deriveRiskAssuranceRollupTone(attentionStates);
+	const state = rollupState === 'neutral' ? 'unknown' : rollupState;
 	const reasons = activeRisks
 		.map((risk, index) => ({ risk, state: attentionStates[index] }))
 		.filter((item) => item.state === 'red' || item.state === 'amber')

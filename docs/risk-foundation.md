@@ -1,6 +1,6 @@
 # Watchtower Risk Foundation
 
-**Status:** WT-RISK-LIFECYCLE-001 draft, active, closed and reopened risk handling
+**Status:** WT-RISK-LIFECYCLE-001 draft, active, closed and reopened risk handling; WT-RISK-LIFECYCLE-001A assessment complete; WT-RISK-LIFECYCLE-001B shared lifecycle/action-state contract hardened
 **Scope:** Database, Row Level Security, constraints, indexes, migration tests, Risk Register, risk assurance detail, risk create and risk edit pages
 
 ## Current lifecycle assessment status
@@ -8,6 +8,8 @@
 WT-RISK-LIFECYCLE-EPIC-001 is the parent Epic for unified Risk Capture, Assurance and Lifecycle Management across Watchtower.
 
 WT-RISK-LIFECYCLE-001A is an assessment-only slice. The current-state repository and data-model assessment is recorded in `docs/risk-lifecycle-impact-assessment.md`. No lifecycle behaviour, activation gate, risk action-state logic, Risk Register behaviour, Project Narrative behaviour, permissions, migrations or production data changed in that assessment slice. Implementation slices will follow review of the assessment and will remain traceable to WT-RISK-LIFECYCLE-EPIC-001.
+
+WT-RISK-LIFECYCLE-001B hardens the existing shared lifecycle and action-state contract under the same parent Epic. It makes the current forgiving Amber roll-up and Draft/Closed neutrality explicit in `src/lib/projectRisks.ts`, routes dashboard risk-area roll-up through that shared contract, and adds direct regression coverage. This slice does not introduce new lifecycle transitions, activation gates, creation defaults, Project Narrative behaviour, permissions, migrations, exposure rules, Project Health policy or production data changes.
 
 ## Purpose
 
@@ -105,6 +107,8 @@ The integration is intentionally narrow. It creates one entry when a risk is rai
 WT-RISK-LIFECYCLE-001 adds three central lifecycle categories in `src/lib/projectRisks.ts`: Draft (`draft`), Active (`open`, `monitoring`, `mitigating`, `escalated`, `materialised`) and Closed (`closed`, with `accepted`/`resolved` treated as closed compatibility values). Draft risks are raised basic-capture records: they are visible in the Risk Register and Draft tab, have a project risk identity and audit trail, and still need project-specific detail, assessment and ownership before becoming Active/Open. They can hold exposure and ownership/planning fields, but they display as neutral, stay out of active-only action calculations, do not drive dashboard or project-list attention, and do not create Project Narrative entries when saved. Opening/publishing a draft risk moves it to `open`, returns it to active assurance calculation, preserves its existing detail, and creates a source-linked `Risk opened:` Narrative entry.
 
 Closed risks remain auditable historical records. Closing an active risk changes its status to `closed`, optionally captures a closure note in `project_risk_notes`, creates a neutral source-linked `Risk closed:` Narrative entry, removes the risk from active assurance calculations, and keeps the historical exposure/detail fields intact. Reopening a closed risk changes it back to `open`, optionally captures a reopen note, creates a `Risk reopened:` Narrative entry, and makes the risk eligible for active assurance, dashboard and project-list attention again. Owner, Admin and Member roles can perform lifecycle transitions through the same server-side `risk.edit` permission; Viewers can see lifecycle state but cannot open/publish, close or reopen risks.
+
+WT-RISK-LIFECYCLE-001B records the authoritative lifecycle grouping used by active action-state consumers: Draft is `draft`; Active is `open`, `monitoring`, `mitigating`, `escalated` and `materialised`; Closed is `closed`, with `accepted`, `resolved`, `passed`, `retired`, `cancelled` and `rejected` retained as safe terminal compatibility values. Active risk action state rolls up from assurance areas as Red when any area is Red, Amber when one or more areas are Amber and none are Red, Green when all applicable areas are Green, and Neutral for Draft or Closed risks. Multiple Amber areas deliberately remain Amber for the MVP. Risk Detail, Risk Register Needs Action, the dashboard Risk tile and project-list attention aggregation consume this shared lifecycle/action-state contract rather than treating exposure, stored `rag_status`, lifecycle status or project health as substitutes. Follow-on slices remain: manual Draft alignment, a minimum activation gate, and Narrative live-state row-pill display.
 
 ## Dashboard and RAID future scope
 

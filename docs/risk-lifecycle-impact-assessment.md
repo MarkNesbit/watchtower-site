@@ -3,6 +3,7 @@
 **Parent Epic:** WT-RISK-LIFECYCLE-EPIC-001 - Unified Risk Capture, Assurance and Lifecycle Management
 **Assessment slice:** WT-RISK-LIFECYCLE-001A - Current-State Risk Lifecycle and Change-Impact Assessment
 **Status:** Assessment complete; no lifecycle behaviour changed
+**Implementation follow-up:** WT-RISK-LIFECYCLE-001B completed as the first dependency-led implementation slice, hardening the existing shared lifecycle/action-state contract without changing product behaviour
 **Repository assessed:** `watchtower-site`
 
 ## Executive summary
@@ -618,6 +619,8 @@ Delivery risk: Medium.
 ## Recommended first implementation slice
 
 Recommended first slice: WT-RISK-LIFECYCLE-001B - Shared lifecycle/action-state contract hardening.
+
+Status: completed after this assessment. The slice made the existing lifecycle grouping and forgiving Amber action-state roll-up explicit, routed dashboard risk roll-up through the shared contract, added regression coverage for Draft/Closed neutrality and cross-consumer consistency, and fixed date-sensitive tests without weakening overdue logic.
 
 Why first:
 

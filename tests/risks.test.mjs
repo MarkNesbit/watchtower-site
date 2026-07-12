@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
+	ACTIVE_RISK_STATUSES,
 	buildRiskReference,
+	CLOSED_RISK_STATUSES,
 	compareRisksForRegister,
 	countDraftRisks,
 	countOpenRisks,
@@ -10,6 +12,7 @@ import {
 	createDraftProjectRisksFromPrompts,
 	createProjectRiskComment,
 	createProjectRisk,
+	deriveRiskAssuranceRollupTone,
 	deriveRiskActionStateTone,
 	deriveProjectRiskDashboardAssuranceTone,
 	deriveRiskAssuranceTone,
@@ -49,6 +52,7 @@ import {
 	parseRiskRegisterPageSize,
 	preflightDraftProjectRisksFromPrompts,
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
+	DRAFT_RISK_STATUSES,
 	RISK_REGISTER_EXPOSURE_FILTERS,
 	RISK_REGISTER_PAGE_SIZES,
 	riskDisplayLabel,
@@ -68,6 +72,8 @@ import {
 	updateProjectRisk,
 	validateRiskFormInput,
 } from '../src/lib/projectRisks.ts';
+import { deriveRiskTileAttentionSignal } from '../src/lib/dashboardTileSignals.ts';
+import { deriveProjectActionState } from '../src/lib/projectAttention.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260620000100_create_project_risks.sql', import.meta.url);
 const migrationSql = async () => readFile(migrationUrl, 'utf8');
@@ -117,6 +123,13 @@ const registerRisk = (overrides = {}) => ({
 	actioner: { id: 'actioner-1', display_name: 'Ben Taylor', email: 'ben@example.com' },
 	...overrides,
 });
+
+function isoDateOffsetFromToday(days) {
+	const date = new Date();
+	date.setUTCHours(12, 0, 0, 0);
+	date.setUTCDate(date.getUTCDate() + days);
+	return date.toISOString().slice(0, 10);
+}
 
 function createRiskClient(rows = []) {
 	const calls = [];
@@ -736,21 +749,45 @@ test('Risk helper labels and profile fallbacks are stakeholder-friendly', () => 
 });
 
 test('Risk lifecycle helpers centralise Draft Active and Closed categorisation', () => {
+	assert.deepEqual([...DRAFT_RISK_STATUSES], ['draft']);
+	assert.deepEqual([...ACTIVE_RISK_STATUSES], ['open', 'monitoring', 'mitigating', 'escalated', 'materialised']);
+	assert.ok(CLOSED_RISK_STATUSES.includes('closed'));
+	assert.ok(CLOSED_RISK_STATUSES.includes('accepted'));
+	assert.ok(CLOSED_RISK_STATUSES.includes('resolved'));
+	assert.ok(CLOSED_RISK_STATUSES.includes('passed'));
+	assert.ok(CLOSED_RISK_STATUSES.includes('retired'));
+	assert.ok(CLOSED_RISK_STATUSES.includes('cancelled'));
+	assert.ok(CLOSED_RISK_STATUSES.includes('rejected'));
 	assert.equal(isDraftRiskStatus('draft'), true);
-	assert.equal(isActiveRiskStatus('open'), true);
-	assert.equal(isActiveRiskStatus('monitoring'), true);
-	assert.equal(isActiveRiskStatus('mitigating'), true);
-	assert.equal(isActiveRiskStatus('escalated'), true);
-	assert.equal(isActiveRiskStatus('materialised'), true);
-	assert.equal(isClosedRiskStatus('closed'), true);
-	assert.equal(isClosedRiskStatus('accepted'), true);
-	assert.equal(isClosedRiskStatus('resolved'), true);
+	for (const status of ACTIVE_RISK_STATUSES) {
+		assert.equal(isActiveRiskStatus(status), true);
+		assert.equal(riskLifecycleCategory(status), 'active');
+	}
+	for (const status of CLOSED_RISK_STATUSES) {
+		assert.equal(isClosedRiskStatus(status), true);
+		assert.equal(isActiveRiskStatus(status), false);
+		assert.equal(riskLifecycleCategory(status), 'closed');
+	}
 	assert.equal(riskLifecycleCategory('draft'), 'draft');
 	assert.equal(riskLifecycleCategory('open'), 'active');
 	assert.equal(riskLifecycleCategory('closed'), 'closed');
 	assert.equal(riskLifecycleLabel('draft'), 'Draft');
 	assert.equal(riskLifecycleLabel('monitoring'), 'Active');
 	assert.equal(riskLifecycleLabel('closed'), 'Closed');
+});
+
+test('Risk assurance roll-up follows the forgiving Amber contract', () => {
+	assert.equal(deriveRiskAssuranceRollupTone(['green']), 'green');
+	assert.equal(deriveRiskAssuranceRollupTone(['green', 'green']), 'green');
+	assert.equal(deriveRiskAssuranceRollupTone(['amber']), 'amber');
+	assert.equal(deriveRiskAssuranceRollupTone(['amber', 'green']), 'amber');
+	assert.equal(deriveRiskAssuranceRollupTone(['amber', 'amber']), 'amber');
+	assert.equal(deriveRiskAssuranceRollupTone(['amber', 'amber', 'amber']), 'amber');
+	assert.equal(deriveRiskAssuranceRollupTone(['red']), 'red');
+	assert.equal(deriveRiskAssuranceRollupTone(['red', 'amber']), 'red');
+	assert.equal(deriveRiskAssuranceRollupTone(['amber', 'red', 'green']), 'red');
+	assert.equal(deriveRiskAssuranceRollupTone(['neutral']), 'neutral');
+	assert.equal(deriveRiskAssuranceRollupTone([]), 'neutral');
 });
 
 test('Risk Register control helpers normalise tabs search and sort safely', () => {
@@ -1937,6 +1974,81 @@ test('Project dashboard risk icon excludes Draft and Closed risks', () => {
 	], now), 'green');
 });
 
+test('Draft and Closed risks remain neutral across active action-state consumers', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const inactiveRedDriverRisks = [
+		registerRisk({
+			risk_id: 'risk-draft',
+			risk_ref: 'Risk-HHH-010',
+			risk_sequence: 10,
+			status: 'draft',
+			owner_id: null,
+			actioner_id: null,
+			review_date: '2026-01-01',
+			due_date: '2026-01-01',
+			mitigation_plan: '',
+			contingency_plan: '',
+			probability: 'high',
+			impact: 'high',
+			updated_at: '2026-01-01T10:00:00Z',
+		}),
+		registerRisk({
+			risk_id: 'risk-closed',
+			risk_ref: 'Risk-HHH-011',
+			risk_sequence: 11,
+			status: 'closed',
+			owner_id: null,
+			actioner_id: null,
+			review_date: '2026-01-01',
+			due_date: '2026-01-01',
+			mitigation_plan: '',
+			contingency_plan: '',
+			probability: 'high',
+			impact: 'high',
+			updated_at: '2026-01-01T10:00:00Z',
+		}),
+	];
+
+	for (const risk of inactiveRedDriverRisks) {
+		assert.equal(deriveRiskAssuranceTone(risk, now), 'neutral');
+		assert.equal(deriveRiskReferenceTone(risk, now), 'neutral');
+		assert.equal(getRiskActionItems(risk, now).length, 0);
+	}
+	assert.deepEqual(inactiveRedDriverRisks.map((risk) => riskReferenceStatusLabel(risk, now)), ['Draft', 'Closed']);
+	assert.equal(countRisksNeedingAction(inactiveRedDriverRisks, now), 0);
+	assert.equal(deriveProjectRiskDashboardAssuranceTone(inactiveRedDriverRisks, now), 'neutral');
+	assert.equal(deriveRiskTileAttentionSignal(inactiveRedDriverRisks, now), 'neutral');
+	assert.equal(deriveProjectActionState(inactiveRedDriverRisks, now), 'green');
+});
+
+test('Active risk action state is consistent across detail register dashboard and project attention consumers', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const amberRisk = registerRisk({
+		due_date: null,
+	});
+	const redRisk = registerRisk({
+		risk_id: 'risk-2',
+		risk_ref: 'Risk-HHH-002',
+		risk_sequence: 2,
+		owner_id: null,
+		owner: null,
+	});
+
+	assert.equal(deriveRiskReferenceTone(amberRisk, now), 'amber');
+	assert.equal(countRisksNeedingAction([amberRisk], now), 1);
+	assert.deepEqual(getRiskActionItems(amberRisk, now).map((item) => item.type), ['set-due-date']);
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([amberRisk], now), 'amber');
+	assert.equal(deriveRiskTileAttentionSignal([amberRisk], now), 'amber');
+	assert.equal(deriveProjectActionState([amberRisk], now), 'amber');
+
+	assert.equal(deriveRiskReferenceTone(redRisk, now), 'red');
+	assert.equal(countRisksNeedingAction([redRisk], now), 1);
+	assert.ok(getRiskActionItems(redRisk, now).some((item) => item.type === 'assign-owner'));
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([redRisk], now), 'red');
+	assert.equal(deriveRiskTileAttentionSignal([redRisk], now), 'red');
+	assert.equal(deriveProjectActionState([redRisk], now), 'red');
+});
+
 test('Draft and Closed risk display is neutral while exposure remains available', () => {
 	const now = new Date('2026-06-28T12:00:00Z');
 	const draftRisk = assuredRiskFacts({
@@ -2251,6 +2363,8 @@ test('Risk comments use project risk notes as a scoped top-level comment stream'
 
 test('Risk create helper writes a project-scoped risk with a generated reference', async () => {
 	const client = createRiskMutationClient({ existingSequence: 1 });
+	const reviewDate = isoDateOffsetFromToday(14);
+	const dueDate = isoDateOffsetFromToday(30);
 	const risk = await createProjectRisk('alpha', 'delivery-hub', {
 		title: 'Supplier delay',
 		description: 'Critical supplier date is moving.',
@@ -2260,8 +2374,8 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		ragStatus: 'green',
 		ownerId: 'owner-1',
 		actionerId: 'actioner-1',
-		reviewDate: '2026-07-10',
-		dueDate: '2026-08-01',
+		reviewDate,
+		dueDate,
 		mitigationPlan: 'Confirm alternative supplier.',
 		contingencyPlan: 'Escalate to steering group.',
 	}, client);
@@ -2282,8 +2396,8 @@ test('Risk create helper writes a project-scoped risk with a generated reference
 		rag_status: 'green',
 		owner_id: 'owner-1',
 		actioner_id: 'actioner-1',
-		review_date: '2026-07-10',
-		due_date: '2026-08-01',
+		review_date: reviewDate,
+		due_date: dueDate,
 		mitigation_plan: 'Confirm alternative supplier.',
 		contingency_plan: 'Escalate to steering group.',
 	});
@@ -2571,6 +2685,8 @@ test('Creating a Red risk creates only the raised narrative entry', async () => 
 });
 
 test('Updating an existing non-Red risk to Red action state creates a source-linked narrative entry', async () => {
+	const reviewDate = isoDateOffsetFromToday(14);
+	const dueDate = isoDateOffsetFromToday(30);
 	const greenRisk = assuredRiskFacts({
 		title: 'Supplier delay',
 		risk_id: 'risk-1',
@@ -2581,6 +2697,8 @@ test('Updating an existing non-Red risk to Red action state creates a source-lin
 		rag_status: 'green',
 		created_by: 'user-1',
 		created_at: '2026-06-01T10:00:00Z',
+		review_date: reviewDate,
+		due_date: dueDate,
 	});
 	const client = createRiskMutationClient({ existingRisk: greenRisk });
 
@@ -2592,8 +2710,8 @@ test('Updating an existing non-Red risk to Red action state creates a source-lin
 		impact: 'high',
 		ownerId: '',
 		actionerId: 'actioner-1',
-		reviewDate: '2026-07-10',
-		dueDate: '2026-08-01',
+		reviewDate,
+		dueDate,
 		mitigationPlan: 'Confirm alternative supplier.',
 		contingencyPlan: 'Escalate to steering group.',
 	}, client);
@@ -2685,6 +2803,8 @@ test('Lifecycle transition helper opens closes and reopens risks with notes and 
 });
 
 test('Updating a Green risk to Amber does not create a narrative entry', async () => {
+	const reviewDate = isoDateOffsetFromToday(14);
+	const dueDate = isoDateOffsetFromToday(30);
 	const greenRisk = assuredRiskFacts({
 		title: 'Supplier delay',
 		risk_id: 'risk-1',
@@ -2695,6 +2815,8 @@ test('Updating a Green risk to Amber does not create a narrative entry', async (
 		rag_status: 'green',
 		created_by: 'user-1',
 		created_at: '2026-06-01T10:00:00Z',
+		review_date: reviewDate,
+		due_date: dueDate,
 	});
 	const client = createRiskMutationClient({ existingRisk: greenRisk });
 
@@ -2706,8 +2828,8 @@ test('Updating a Green risk to Amber does not create a narrative entry', async (
 		impact: 'low',
 		ownerId: 'owner-1',
 		actionerId: 'actioner-1',
-		reviewDate: '2026-07-10',
-		dueDate: '2026-08-01',
+		reviewDate,
+		dueDate: '',
 		mitigationPlan: 'Confirm alternative supplier.',
 		contingencyPlan: 'Escalate to steering group.',
 	}, client);
@@ -2716,6 +2838,9 @@ test('Updating a Green risk to Amber does not create a narrative entry', async (
 });
 
 test('Routine owner, actioner and review date edits do not create narrative entries while concern stays non-Red', async () => {
+	const reviewDate = isoDateOffsetFromToday(14);
+	const laterReviewDate = isoDateOffsetFromToday(21);
+	const dueDate = isoDateOffsetFromToday(30);
 	const greenRisk = assuredRiskFacts({
 		title: 'Supplier delay',
 		risk_id: 'risk-1',
@@ -2726,12 +2851,14 @@ test('Routine owner, actioner and review date edits do not create narrative entr
 		rag_status: 'green',
 		created_by: 'user-1',
 		created_at: '2026-06-01T10:00:00Z',
+		review_date: reviewDate,
+		due_date: dueDate,
 	});
 
 	for (const input of [
-		{ ownerId: 'owner-2', actionerId: 'actioner-1', reviewDate: '2026-07-10' },
-		{ ownerId: 'owner-1', actionerId: 'actioner-2', reviewDate: '2026-07-10' },
-		{ ownerId: 'owner-1', actionerId: 'actioner-1', reviewDate: '2026-07-20' },
+		{ ownerId: 'owner-2', actionerId: 'actioner-1', reviewDate },
+		{ ownerId: 'owner-1', actionerId: 'actioner-2', reviewDate },
+		{ ownerId: 'owner-1', actionerId: 'actioner-1', reviewDate: laterReviewDate },
 	]) {
 		const client = createRiskMutationClient({ existingRisk: greenRisk });
 		await updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
@@ -2743,7 +2870,7 @@ test('Routine owner, actioner and review date edits do not create narrative entr
 			ownerId: input.ownerId,
 			actionerId: input.actionerId,
 			reviewDate: input.reviewDate,
-			dueDate: '2026-08-01',
+			dueDate,
 			mitigationPlan: 'Confirm alternative supplier.',
 			contingencyPlan: 'Escalate to steering group.',
 		}, client);
