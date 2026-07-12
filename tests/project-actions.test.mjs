@@ -7,21 +7,36 @@ import {
 	ACTION_SOURCE_TYPES,
 	ACTION_STATUSES,
 	actionDisplayLabel,
+	amendProjectActionBrief,
+	assignProjectAction,
 	buildActionReference,
 	canBeAssignedActionerRole,
 	canHoldActionWorkflowRole,
 	canTakeOverActionAcceptanceRole,
+	cancelProjectAction,
+	changeProjectActionDueDate,
+	completeProjectAction,
+	createProjectAction,
 	isActionHistoryEventType,
 	isActionSourceType,
 	isActionStatus,
 	isTerminalActionStatus,
 	isValidActionReference,
+	mapProjectActionOperationError,
 	normaliseActionEvidenceUrl,
+	reissueProjectAction,
+	rejectProjectAction,
+	returnProjectActionToActioner,
+	returnProjectActionToRaiser,
+	submitProjectAction,
+	takeOverProjectActionAcceptance,
 } from '../src/lib/projectActions.ts';
 import { ACTION_PERMISSIONS, can } from '../src/lib/permissions.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260712000200_project_actions_schema_foundation.sql', import.meta.url);
+const lifecycleMigrationUrl = new URL('../supabase/migrations/20260712000300_project_actions_transactional_lifecycle.sql', import.meta.url);
 const migrationSql = async () => readFile(migrationUrl, 'utf8');
+const lifecycleMigrationSql = async () => readFile(lifecycleMigrationUrl, 'utf8');
 
 test('Project Action migration creates counters actions and immutable history tables', async () => {
 	const sql = await migrationSql();
@@ -244,4 +259,186 @@ test('Project Action role helpers keep assignment and takeover eligibility expli
 	assert.equal(canTakeOverActionAcceptanceRole('admin'), true);
 	assert.equal(canTakeOverActionAcceptanceRole('member'), false);
 	assert.equal(canTakeOverActionAcceptanceRole('viewer'), false);
+});
+
+test('Project Action lifecycle migration exposes explicit transactional RPCs only', async () => {
+	const sql = await lifecycleMigrationSql();
+	const rpcFunctions = [
+		'create_project_action',
+		'submit_project_action',
+		'return_project_action_to_raiser',
+		'reject_project_action',
+		'return_project_action_to_actioner',
+		'complete_project_action',
+		'cancel_project_action',
+		'assign_project_action',
+		'amend_project_action_brief',
+		'change_project_action_due_date',
+		'reissue_project_action',
+		'take_over_project_action_acceptance',
+	];
+
+	for (const functionName of rpcFunctions) {
+		assert.match(sql, new RegExp(`create or replace function public\\.${functionName}\\(`), `Expected ${functionName} RPC`);
+		assert.match(sql, new RegExp(`grant execute on function public\\.${functionName}`), `Expected authenticated grant for ${functionName}`);
+	}
+
+	assert.match(sql, /language plpgsql[\s\S]*security definer[\s\S]*set search_path = public/);
+	assert.match(sql, /create or replace function public\.project_action_insert_history/);
+	assert.match(sql, /insert into public\.project_action_history/);
+	assert.doesNotMatch(sql, /grant (?:insert|update|delete)[^;]*public\.project_actions[^;]*to authenticated/i);
+	assert.doesNotMatch(sql, /grant (?:insert|update|delete)[^;]*public\.project_action_history[^;]*to authenticated/i);
+});
+
+test('Project Action lifecycle migration enforces creation role assignment and atomic history rules', async () => {
+	const sql = await lifecycleMigrationSql();
+	assert.match(sql, /actor_id := public\.project_action_require_authenticated_actor\(\)/);
+	assert.match(sql, /public\.project_action_assert_actor_can_create\(project_organisation_id, actor_id\)/);
+	assert.match(sql, /public\.project_action_assert_assignable_actioner\(project_organisation_id, p_actioner_id\)/);
+	assert.match(sql, /om\.status = 'active'/);
+	assert.match(sql, /om\.role in \('owner', 'admin', 'member'\)/);
+	assert.match(sql, /raise exception 'WT_ACTION_PERMISSION_DENIED: Only active Owners, Admins and Members can create Actions\.'/);
+	assert.match(sql, /raise exception 'WT_ACTION_INELIGIBLE_ACTIONER: Actioner must be an active Owner, Admin or Member in this workspace\.'/);
+	assert.match(sql, /values \([\s\S]*p_project_id,[\s\S]*btrim\(p_brief\),[\s\S]*'open',[\s\S]*p_due_date,[\s\S]*actor_id,[\s\S]*p_actioner_id,[\s\S]*actor_id/);
+	assert.match(sql, /perform public\.project_action_insert_history\([\s\S]*new_action,[\s\S]*'created'/);
+});
+
+test('Project Action lifecycle migration locks rows and rejects stale or terminal operations', async () => {
+	const sql = await lifecycleMigrationSql();
+	assert.match(sql, /for update;/);
+	assert.match(sql, /create or replace function public\.project_action_assert_expected_state/);
+	assert.match(sql, /current_status is distinct from expected_status/);
+	assert.match(sql, /current_updated_at is distinct from expected_updated_at/);
+	assert.match(sql, /WT_ACTION_STALE: Action has changed since it was loaded\./);
+	assert.match(sql, /create or replace function public\.project_action_assert_non_terminal/);
+	assert.match(sql, /action_status in \('complete', 'cancelled'\)/);
+	assert.match(sql, /WT_ACTION_TERMINAL: Complete and cancelled Actions cannot be changed\./);
+	assert.match(sql, /create or replace function public\.project_action_assert_timestamp_expected/);
+	assert.match(sql, /Expected Action update timestamp is required for this operation/);
+});
+
+test('Project Action lifecycle migration implements the locked state transition matrix', async () => {
+	const sql = await lifecycleMigrationSql();
+	assert.match(sql, /current_action\.status not in \('open', 'returned_to_actioner'\)[\s\S]*Action can only be submitted/);
+	assert.match(sql, /set status = 'submitted'[\s\S]*submitted_at = now\(\)/);
+	assert.match(sql, /current_action\.status not in \('open', 'returned_to_actioner'\)[\s\S]*Action can only be returned to the raiser/);
+	assert.match(sql, /set status = 'returned_to_raiser'/);
+	assert.match(sql, /current_action\.status not in \('open', 'returned_to_actioner'\)[\s\S]*Action can only be rejected/);
+	assert.match(sql, /set status = 'rejected_by_actioner'/);
+	assert.match(sql, /current_action\.status <> 'submitted'[\s\S]*Only submitted Actions can be returned to the Actioner/);
+	assert.match(sql, /set status = 'returned_to_actioner'/);
+	assert.match(sql, /current_action\.status <> 'submitted'[\s\S]*Only submitted Actions can be completed/);
+	assert.match(sql, /set status = 'complete'[\s\S]*completed_at = now\(\)/);
+	assert.match(sql, /set status = 'cancelled'[\s\S]*cancelled_at = now\(\)/);
+	assert.match(sql, /current_action\.status not in \('returned_to_raiser', 'rejected_by_actioner'\)[\s\S]*Only returned or rejected Actions can be reissued/);
+	assert.match(sql, /set status = 'open'[\s\S]*latest_response = null,[\s\S]*latest_evidence_url = null,[\s\S]*submitted_at = null/);
+});
+
+test('Project Action lifecycle migration keeps actor authority distinct by role', async () => {
+	const sql = await lifecycleMigrationSql();
+	assert.match(sql, /project_action_assert_current_actioner\(current_action\.organisation_id, current_action\.actioner_id, actor_id\)/);
+	assert.match(sql, /expected_actioner_id is null or expected_actioner_id is distinct from actor_id/);
+	assert.match(sql, /project_action_assert_acceptance_owner\(current_action\.organisation_id, current_action\.acceptance_owner_id, actor_id\)/);
+	assert.match(sql, /expected_acceptance_owner_id is distinct from actor_id/);
+	assert.match(sql, /project_action_assert_owner_admin\(current_action\.organisation_id, actor_id\)/);
+	assert.match(sql, /has_active_organisation_role\(target_organisation_id, array\['owner', 'admin'\], actor_id\)/);
+	assert.match(sql, /acceptance_owner_id = actor_id/);
+	assert.match(sql, /'acceptance_owner_taken_over'/);
+	assert.match(sql, /'raiser_id', current_action\.raiser_id/);
+});
+
+test('Project Action lifecycle migration records before and after values for changes', async () => {
+	const sql = await lifecycleMigrationSql();
+	assert.match(sql, /event_type := case[\s\S]*'assigned'[\s\S]*'unassigned'[\s\S]*'reassigned'/);
+	assert.match(sql, /current_action\.status = 'submitted'[\s\S]*Reassignment is blocked while an Action is submitted/);
+	assert.match(sql, /'brief_amended'[\s\S]*jsonb_build_object\('brief', current_action\.brief\)[\s\S]*jsonb_build_object\('brief', updated_action\.brief\)/);
+	assert.match(sql, /'due_date_changed'[\s\S]*jsonb_build_object\('due_date', current_action\.due_date\)[\s\S]*jsonb_build_object\('due_date', updated_action\.due_date\)/);
+	assert.match(sql, /'reissued'[\s\S]*'latest_response', current_action\.latest_response[\s\S]*'latest_evidence_url', updated_action\.latest_evidence_url/);
+	assert.match(sql, /'acceptance_owner_taken_over'[\s\S]*'acceptance_owner_id', current_action\.acceptance_owner_id[\s\S]*'acceptance_owner_id', updated_action\.acceptance_owner_id/);
+});
+
+test('Project Action operation errors map controlled database failures for future UI', () => {
+	const expectations = [
+		['WT_ACTION_PERMISSION_DENIED: no', 'permission_denied'],
+		['WT_ACTION_INVALID_TRANSITION: no', 'invalid_transition'],
+		['WT_ACTION_INELIGIBLE_ACTIONER: no', 'ineligible_actioner'],
+		['WT_ACTION_STALE: no', 'stale_operation'],
+		['WT_ACTION_MISSING_RESPONSE: no', 'missing_response'],
+		['WT_ACTION_MISSING_REASON: no', 'missing_reason'],
+		['WT_ACTION_MISSING_BRIEF: no', 'missing_brief'],
+		['WT_ACTION_MISSING_DUE_DATE: no', 'missing_due_date'],
+		['WT_ACTION_UNSAFE_EVIDENCE_URL: no', 'unsafe_evidence_url'],
+		['WT_ACTION_TERMINAL: no', 'terminal_action'],
+		['WT_ACTION_SCOPE: no', 'cross_workspace_access'],
+		['WT_ACTION_INVALID_SOURCE: no', 'invalid_source'],
+	];
+
+	for (const [message, code] of expectations) {
+		assert.equal(mapProjectActionOperationError({ message }).code, code);
+	}
+	assert.equal(mapProjectActionOperationError({ message: 'database unavailable' }).code, 'unknown');
+});
+
+test('Project Action RPC wrappers call explicit lifecycle functions with expected state', async () => {
+	const calls = [];
+	const action = { id: 'action-1', status: 'open' };
+	const client = {
+		async rpc(functionName, args) {
+			calls.push({ functionName, args });
+			return { data: { ...action, functionName }, error: null };
+		},
+	};
+	const expected = { actionId: 'action-1', expectedStatus: 'open', expectedUpdatedAt: '2026-07-12T10:00:00.000Z' };
+
+	await createProjectAction(client, {
+		projectId: 'project-1',
+		brief: 'Confirm hosting fallback approach',
+		dueDate: '2026-07-20',
+		actionerId: null,
+		sourceType: 'project',
+	});
+	await submitProjectAction(client, { ...expected, response: 'Done', evidenceUrl: 'https://example.com/evidence' });
+	await returnProjectActionToRaiser(client, { ...expected, reason: 'Need clarification' });
+	await rejectProjectAction(client, { ...expected, reason: 'Cannot accept ownership' });
+	await returnProjectActionToActioner(client, { ...expected, reason: 'Please expand the evidence' });
+	await completeProjectAction(client, expected);
+	await cancelProjectAction(client, { ...expected, reason: 'No longer required' });
+	await assignProjectAction(client, { ...expected, actionerId: 'profile-2' });
+	await amendProjectActionBrief(client, { ...expected, brief: 'Updated brief' });
+	await changeProjectActionDueDate(client, { ...expected, dueDate: '2026-07-24' });
+	await reissueProjectAction(client, { ...expected, brief: 'Reissued brief', actionerId: null });
+	await takeOverProjectActionAcceptance(client, { ...expected, reason: 'Acceptance owner unavailable' });
+
+	assert.deepEqual(calls.map((call) => call.functionName), [
+		'create_project_action',
+		'submit_project_action',
+		'return_project_action_to_raiser',
+		'reject_project_action',
+		'return_project_action_to_actioner',
+		'complete_project_action',
+		'cancel_project_action',
+		'assign_project_action',
+		'amend_project_action_brief',
+		'change_project_action_due_date',
+		'reissue_project_action',
+		'take_over_project_action_acceptance',
+	]);
+	assert.equal(calls[1].args.p_expected_status, 'open');
+	assert.equal(calls[1].args.p_expected_updated_at, '2026-07-12T10:00:00.000Z');
+	assert.equal(calls[1].args.p_evidence_url, 'https://example.com/evidence');
+	assert.equal(calls[10].args.p_change_actioner, true);
+	assert.equal(calls[10].args.p_actioner_id, null);
+});
+
+test('Project Action RPC wrappers surface controlled operation errors', async () => {
+	const client = {
+		async rpc() {
+			return { data: null, error: { message: 'WT_ACTION_STALE: Action has changed since it was loaded.' } };
+		},
+	};
+
+	await assert.rejects(
+		() => completeProjectAction(client, { actionId: 'action-1', expectedStatus: 'submitted' }),
+		(error) => error.code === 'stale_operation',
+	);
 });

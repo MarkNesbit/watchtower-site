@@ -1,16 +1,19 @@
 # Project Actions
 
-**Status:** WT-ACTION-001A schema, references, RLS baseline and immutable history foundation
+**Status:** WT-ACTION-001B transactional lifecycle and permission enforcement
 
-**Migration:** `20260712000200_project_actions_schema_foundation.sql`
+**Migrations:**
 
-**Scope:** Database schema, project-scoped Action references, baseline read RLS, Action permission names, pure helper types, and immutable workflow history.
+- `20260712000200_project_actions_schema_foundation.sql`
+- `20260712000300_project_actions_transactional_lifecycle.sql`
+
+**Scope:** Database schema, project-scoped Action references, baseline read RLS, Action permission names, pure helper types, immutable workflow history, controlled transactional lifecycle RPCs, and TypeScript wrappers.
 
 ## Purpose
 
 Project Actions are authoritative project-level assurance records. An Action may be displayed from a register, Risk context, the Project Dashboard, or later Project Details and Narrative contexts, but it is stored once in `project_actions`.
 
-WT-ACTION-001A does not implement Action screens, creation forms, workflow transitions, dashboard signals, personal queues, Risk integration, Narrative generation, Project Details entry points, health scoring, attachments, notifications, recurrence, dependencies, sub-actions or general comments.
+WT-ACTION-001B does not implement Action screens, creation forms, dashboard signals, personal queues, Risk integration, Narrative generation, Project Details entry points, health scoring, attachments, notifications, recurrence, dependencies, sub-actions or general comments.
 
 ## Data Model
 
@@ -99,7 +102,7 @@ WT-ACTION-001A allows only the locked MVP source types:
 
 Future Issue, Dependency, Assumption or Decision source types should be added only when those authoritative modules exist.
 
-## Permissions and RLS
+## Permissions, RLS and RPCs
 
 The Action permission names are:
 
@@ -112,7 +115,86 @@ The Action permission names are:
 
 Viewer receives `action.view` only. Owner and Admin receive all Action permissions. Member receives normal non-takeover Action capabilities but not `action.takeover`, because MVP acceptance-owner takeover is restricted to Owner/Admin.
 
-Database RLS in this slice permits active workspace members to read Actions and Action history for their workspace. Authenticated users receive select grants only. Direct authenticated insert, update and delete grants are not introduced in WT-ACTION-001A; detailed creation and transition enforcement is deferred to WT-ACTION-001B.
+Database RLS permits active workspace members to read Actions and Action history for their workspace. Authenticated users receive select grants only. Direct authenticated insert, update and delete grants are not introduced.
+
+All material writes go through named `security definer` RPC functions with `search_path = public`:
+
+- `create_project_action`
+- `submit_project_action`
+- `return_project_action_to_raiser`
+- `reject_project_action`
+- `return_project_action_to_actioner`
+- `complete_project_action`
+- `cancel_project_action`
+- `assign_project_action`
+- `amend_project_action_brief`
+- `change_project_action_due_date`
+- `reissue_project_action`
+- `take_over_project_action_acceptance`
+
+The TypeScript service layer in `src/lib/projectActions.ts` exposes matching wrappers and central error mapping for permission, transition, stale-state, eligibility, terminal-state, missing-input and evidence URL failures.
+
+## Actor Authority
+
+The database derives the actor from `auth.uid()`. Callers cannot provide actor, raiser, workspace or acceptance-owner identity.
+
+Owner, Admin and Member can create Actions. Viewer cannot create or mutate Actions.
+
+An assigned Actioner must be an active Owner, Admin or Member in the same workspace. Viewer, suspended, removed and cross-workspace users are rejected for new assignment. If an existing Actioner later loses eligibility, the `actioner_id` remains for traceability but Actioner response RPCs are blocked with an ineligible-Actioner error.
+
+Only the current eligible Actioner can:
+
+- submit;
+- return to raiser;
+- reject.
+
+Only the current eligible acceptance owner can:
+
+- complete;
+- return to Actioner;
+- cancel;
+- assign, unassign or reassign;
+- amend brief;
+- change due date;
+- reissue.
+
+Owner/Admin takeover is separate from ordinary review authority. An active workspace Owner or Admin may take over acceptance ownership with a mandatory reason. Takeover writes immutable history and does not change the original raiser. Member and Viewer cannot take over.
+
+## Transition Matrix
+
+| From | Actor | Operation | To |
+| --- | --- | --- | --- |
+| none | authorised creator | create | `open` |
+| `open` | current eligible Actioner | submit | `submitted` |
+| `open` | current eligible Actioner | return to raiser | `returned_to_raiser` |
+| `open` | current eligible Actioner | reject | `rejected_by_actioner` |
+| `returned_to_actioner` | current eligible Actioner | submit | `submitted` |
+| `returned_to_actioner` | current eligible Actioner | return to raiser | `returned_to_raiser` |
+| `returned_to_actioner` | current eligible Actioner | reject | `rejected_by_actioner` |
+| `submitted` | acceptance owner | complete | `complete` |
+| `submitted` | acceptance owner | return to Actioner | `returned_to_actioner` |
+| `returned_to_raiser` | acceptance owner | reissue | `open` |
+| `rejected_by_actioner` | acceptance owner | reissue | `open` |
+| any non-terminal state | acceptance owner | cancel | `cancelled` |
+| any non-terminal state | Owner/Admin | take over acceptance | unchanged |
+
+Every other lifecycle transition is rejected.
+
+`complete` and `cancelled` are terminal states. No RPC can move a terminal Action.
+
+## Transaction and Concurrency Model
+
+Each lifecycle RPC validates, locks the target Action row with `FOR UPDATE`, checks the expected status, optionally checks the expected `updated_at`, applies the change, appends history and returns the updated Action. If the Action update or history insert fails, the database transaction rolls back both changes.
+
+Status-changing operations require an expected status. Status-neutral operations that could overwrite newer edits, such as reassignment, brief amendment, due-date change and takeover, also require the expected `updated_at` timestamp.
+
+Reissue returns a returned or rejected Action to `open`. It may update the brief, due date and Actioner. The current response fields `latest_response`, `latest_evidence_url` and `submitted_at` are cleared because those fields represent the active response cycle; prior responses remain preserved in immutable history.
+
+## Development Validation
+
+The repository unit tests assert the migration contract statically and exercise the TypeScript RPC wrappers with mocked clients. They do not run live Supabase RLS or transaction tests.
+
+Before wiring UI or source integrations to these RPCs, validate against a development Supabase database by applying all migrations, creating test users for Owner, Admin, Member and Viewer, and running the lifecycle matrix through authenticated RPC calls. Confirm that direct authenticated `insert`, `update` and `delete` attempts on `project_actions` and `project_action_history` still fail.
 
 ## URL and JSON Validation
 
@@ -120,15 +202,26 @@ Action and history evidence URLs must be null or use `http://` or `https://`.
 
 `source_context`, `old_values` and `new_values` must be JSON objects when present. This keeps future source context and before/after history structured without introducing generic task-management fields.
 
-## Deferred to WT-ACTION-001B
+## Still Deferred
 
-WT-ACTION-001B should add the controlled create and transition path, including:
+The following remain outside this foundation:
 
-- active Owner/Admin/Member assignment validation;
-- Viewer exclusion from Actioner selection;
-- transactional status updates;
-- history insertion with each material transition;
-- actioner-only Submit/Return/Reject enforcement;
-- raiser/current acceptance-owner review enforcement;
-- Owner/Admin acceptance-owner takeover with reason.
-
+- Actions Register page;
+- Action create modal;
+- Action detail page;
+- Risk integration;
+- Project Dashboard Action signals;
+- Personal dashboard;
+- health metrics;
+- Narrative events;
+- Project Details integration;
+- notifications;
+- file uploads and attachments;
+- Viewer contribution;
+- new roles;
+- archive/delete;
+- general comments;
+- working-day calculations;
+- recurring Actions;
+- sub-actions;
+- Action dependencies.
