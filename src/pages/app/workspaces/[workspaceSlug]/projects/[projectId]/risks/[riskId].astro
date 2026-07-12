@@ -11,9 +11,11 @@ import {
 	RISK_STATUSES,
 	createProjectRiskComment,
 	deriveRiskReferenceTone,
+	getRiskActivationReadiness,
 	getRiskActionStateDrivers,
 	getRiskAssuranceBlocks,
 	getProjectRisk,
+	isDraftRiskExposureUnassessed,
 	isActiveRiskStatus,
 	isClosedRiskStatus,
 	isDraftRiskStatus,
@@ -148,15 +150,18 @@ try {
 
 const canEditRisk = can(workspaceRole, 'risk.edit');
 const editHref = project && risk ? buildProjectRiskEditPath(workspaceSlug ?? '', project.slug, risk.risk_id) : '';
-const assuranceBlocks = risk ? getRiskAssuranceBlocks(risk, new Date()) : [];
-const actionStateDrivers = risk ? getRiskActionStateDrivers(risk, new Date()) : [];
-const referenceTone = risk ? deriveRiskReferenceTone(risk, new Date()) : 'neutral';
-const referenceStatus = risk ? riskReferenceStatusLabel(risk, new Date()) : 'Neutral';
+const now = new Date();
+const assuranceBlocks = risk ? getRiskAssuranceBlocks(risk, now) : [];
+const actionStateDrivers = risk ? getRiskActionStateDrivers(risk, now) : [];
+const referenceTone = risk ? deriveRiskReferenceTone(risk, now) : 'neutral';
+const referenceStatus = risk ? riskReferenceStatusLabel(risk, now) : 'Neutral';
 const actionStateSummary = actionStateDrivers[0]?.message ?? 'Risk action state could not be calculated safely.';
 const detailSuccessMessage = Astro.url.searchParams.get('created') === 'draft' ? 'Draft risk created.' : '';
 const riskIsDraft = risk ? isDraftRiskStatus(risk.status) : false;
 const riskIsActive = risk ? isActiveRiskStatus(risk.status) : false;
 const riskIsClosed = risk ? isClosedRiskStatus(risk.status) : false;
+const activationReadiness = risk && riskIsDraft ? getRiskActivationReadiness(risk, { now }) : null;
+const activationMissing = activationReadiness?.missing ?? [];
 const editActionLabel = riskIsDraft ? 'Continue editing' : 'Edit Risk';
 const blockValue = (block) => {
 	if (block.id === 'review-date') return formatDate(risk?.review_date, block.value);
@@ -193,8 +198,8 @@ const riskFormFields = risk ? {
 	title: risk.title ?? '',
 	description: risk.description ?? '',
 	status: risk.status ?? 'open',
-	probability: risk.probability ?? 'medium',
-	impact: risk.impact ?? 'medium',
+	probability: isDraftRiskExposureUnassessed(risk) ? '' : risk.probability ?? 'medium',
+	impact: isDraftRiskExposureUnassessed(risk) ? '' : risk.impact ?? 'medium',
 	owner_id: risk.owner_id ?? '',
 	actioner_id: risk.actioner_id ?? '',
 	review_date: risk.review_date ?? '',
@@ -275,15 +280,31 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					{canEditRisk && (
 						<div class="risk-lifecycle-actions" data-risk-lifecycle-actions>
 							{riskIsDraft && (
-								<form method="post" data-risk-lifecycle-form>
-									<input type="hidden" name="intent" value="risk-lifecycle" />
-									<input type="hidden" name="lifecycle_action" value="open" />
-									<label>
-										<span>Open note</span>
-										<textarea name="reason" rows="2" placeholder="Optional note for the risk history"></textarea>
-									</label>
-									<button class="button button--primary" type="submit" data-risk-open-action>Open / Publish risk</button>
-								</form>
+								<div class="risk-activation-readiness" data-risk-activation-readiness data-risk-activation-ready={activationReadiness?.ready ? 'true' : 'false'}>
+									<div>
+										<h3>Activation readiness</h3>
+										<p>{activationReadiness?.ready ? 'Minimum activation information is complete.' : 'Complete the minimum information before activating this Draft risk.'}</p>
+									</div>
+									{activationMissing.length > 0 && (
+										<ul>
+											{activationMissing.map((requirement) => (
+												<li data-risk-activation-missing={requirement.key}>
+													<strong>{requirement.label}</strong>
+													<span>{requirement.message}</span>
+												</li>
+											))}
+										</ul>
+									)}
+									<form method="post" data-risk-lifecycle-form>
+										<input type="hidden" name="intent" value="risk-lifecycle" />
+										<input type="hidden" name="lifecycle_action" value="open" />
+										<label>
+											<span>Open note</span>
+											<textarea name="reason" rows="2" placeholder="Optional note for the risk history"></textarea>
+										</label>
+										<button class="button button--primary" type="submit" disabled={!activationReadiness?.ready || undefined} aria-disabled={!activationReadiness?.ready ? 'true' : undefined} data-risk-open-action>Activate risk</button>
+									</form>
+								</div>
 							)}
 							{riskIsActive && (
 								<form method="post" data-risk-lifecycle-form>
@@ -415,18 +436,28 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 												)}
 
 												{modalHasField(block.id, 'status') && (
-													<label>
-														<span>Status</span>
-														<select name="status" required>
-															{RISK_STATUSES.map((status) => <option value={status} selected={riskFormFields.status === status}>{riskDisplayLabel(status)}</option>)}
-														</select>
-													</label>
+													riskIsDraft ? (
+														<div class="risk-action-form__readonly" data-risk-draft-status-readonly>
+															<span>Status</span>
+															<strong>Draft</strong>
+															<p>Use Activate risk when the minimum activation information is complete.</p>
+															<input type="hidden" name="status" value="draft" />
+														</div>
+													) : (
+														<label>
+															<span>Status</span>
+															<select name="status" required>
+																{RISK_STATUSES.map((status) => <option value={status} selected={riskFormFields.status === status}>{riskDisplayLabel(status)}</option>)}
+															</select>
+														</label>
+													)
 												)}
 
 												{modalHasField(block.id, 'probability') && (
 													<label>
 														<span>Probability</span>
-														<select name="probability" required>
+														<select name="probability" required={!riskIsDraft || undefined}>
+															{riskIsDraft && <option value="" selected={!riskFormFields.probability}>Unassessed</option>}
 															{RISK_LEVELS.map((level) => <option value={level} selected={riskFormFields.probability === level}>{riskDisplayLabel(level)}</option>)}
 														</select>
 													</label>
@@ -435,7 +466,8 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 												{modalHasField(block.id, 'impact') && (
 													<label>
 														<span>Impact</span>
-														<select name="impact" required>
+														<select name="impact" required={!riskIsDraft || undefined}>
+															{riskIsDraft && <option value="" selected={!riskFormFields.impact}>Unassessed</option>}
 															{RISK_LEVELS.map((level) => <option value={level} selected={riskFormFields.impact === level}>{riskDisplayLabel(level)}</option>)}
 														</select>
 													</label>
@@ -749,6 +781,40 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		align-items: end;
 	}
 
+	.risk-activation-readiness {
+		display: grid;
+		gap: 0.75rem;
+		border: 1px solid rgba(148, 163, 184, 0.24);
+		border-radius: 8px;
+		padding: 0.9rem;
+		background: rgba(4, 12, 24, 0.22);
+	}
+
+	.risk-activation-readiness h3 {
+		margin: 0 0 0.25rem;
+		font-size: 1rem;
+	}
+
+	.risk-activation-readiness p,
+	.risk-activation-readiness ul {
+		margin: 0;
+	}
+
+	.risk-activation-readiness ul {
+		display: grid;
+		gap: 0.45rem;
+		padding-left: 1.05rem;
+		color: var(--muted-strong);
+	}
+
+	.risk-activation-readiness li strong {
+		color: var(--text);
+	}
+
+	.risk-activation-readiness li span {
+		display: block;
+	}
+
 	.risk-lifecycle-actions label {
 		display: grid;
 		gap: 0.35rem;
@@ -765,6 +831,11 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		color: var(--text);
 		padding: 0.65rem 0.75rem;
 		resize: vertical;
+	}
+
+	.risk-lifecycle-actions button[disabled] {
+		cursor: not-allowed;
+		opacity: 0.58;
 	}
 
 	.risk-detail-summary-strip div {
@@ -1014,6 +1085,31 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		background: #040c18;
 		color: var(--text);
 		font: inherit;
+	}
+
+	.risk-action-form__readonly {
+		display: grid;
+		gap: 0.25rem;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 0.75rem 0.85rem;
+		background: rgba(255, 255, 255, 0.04);
+	}
+
+	.risk-action-form__readonly span {
+		color: var(--muted-strong);
+		font-size: 0.84rem;
+		font-weight: 850;
+	}
+
+	.risk-action-form__readonly strong {
+		color: var(--text);
+	}
+
+	.risk-action-form__readonly p {
+		margin: 0;
+		color: var(--muted-strong);
+		font-size: 0.84rem;
 	}
 
 	.risk-date-quick-actions {

@@ -8,6 +8,8 @@ import { getFeatureAccess, loadFeatureAccess } from '../../../../../../../../lib
 import { can } from '../../../../../../../../lib/permissions';
 import {
 	getProjectRisk,
+	isDraftRiskExposureUnassessed,
+	isDraftRiskStatus,
 	listRiskOwnerOptions,
 	updateProjectRisk,
 	validateRiskFormInput,
@@ -47,9 +49,9 @@ let formValues = {
 const formDataToValues = (formData) => ({
 	title: String(formData.get('title') ?? ''),
 	description: String(formData.get('description') ?? ''),
-	status: String(formData.get('status') ?? 'open'),
-	probability: String(formData.get('probability') ?? 'medium'),
-	impact: String(formData.get('impact') ?? 'medium'),
+	status: String(formData.get('status') ?? ''),
+	probability: String(formData.get('probability') ?? ''),
+	impact: String(formData.get('impact') ?? ''),
 	ownerId: String(formData.get('owner_id') ?? ''),
 	actionerId: String(formData.get('actioner_id') ?? ''),
 	reviewDate: String(formData.get('review_date') ?? ''),
@@ -58,19 +60,22 @@ const formDataToValues = (formData) => ({
 	contingencyPlan: String(formData.get('contingency_plan') ?? ''),
 });
 
-const riskToValues = (record) => ({
-	title: record?.title ?? '',
-	description: record?.description ?? '',
-	status: record?.status ?? 'open',
-	probability: record?.probability ?? 'medium',
-	impact: record?.impact ?? 'medium',
-	ownerId: record?.owner_id ?? '',
-	actionerId: record?.actioner_id ?? '',
-	reviewDate: record?.review_date ?? '',
-	dueDate: record?.due_date ?? '',
-	mitigationPlan: record?.mitigation_plan ?? '',
-	contingencyPlan: record?.contingency_plan ?? '',
-});
+const riskToValues = (record) => {
+	const isUnassessedDraft = record ? isDraftRiskExposureUnassessed(record) : false;
+	return {
+		title: record?.title ?? '',
+		description: record?.description ?? '',
+		status: record?.status ?? 'open',
+		probability: isUnassessedDraft ? '' : record?.probability ?? 'medium',
+		impact: isUnassessedDraft ? '' : record?.impact ?? 'medium',
+		ownerId: record?.owner_id ?? '',
+		actionerId: record?.actioner_id ?? '',
+		reviewDate: record?.review_date ?? '',
+		dueDate: record?.due_date ?? '',
+		mitigationPlan: record?.mitigation_plan ?? '',
+		contingencyPlan: record?.contingency_plan ?? '',
+	};
+};
 
 try {
 	if (!accessToken) return Astro.redirect(sessionRedirectPath);
@@ -130,7 +135,7 @@ try {
 					if (Astro.request.method === 'POST') {
 						const formData = await Astro.request.formData();
 						formValues = formDataToValues(formData);
-						formErrors = validateRiskFormInput(formValues);
+						formErrors = validateRiskFormInput(formValues, { mode: risk && isDraftRiskStatus(risk.status) ? 'draft' : 'edit' });
 
 						if (Object.keys(formErrors).length === 0) {
 							try {
@@ -188,6 +193,7 @@ try {
 						actionerOptions={ownerOptions}
 						projectRef={project.project_ref}
 						riskRef={risk.risk_ref}
+						isDraft={isDraftRiskStatus(risk.status)}
 						message={saveMessage}
 						cancelHref={buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id)}
 					/>

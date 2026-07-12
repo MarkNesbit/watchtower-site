@@ -83,6 +83,8 @@ WT-RISK-002A added the Risk Register and risk detail foundation behind the `risk
 
 WT-RISK-REG-UX-009 changes the register's default operational view from all lifecycle states to Active risks. Draft and Closed remain explicit tabs, but their reference pills are neutral reference-only controls rather than visible `NOT ACTIVE` indicators. Draft exposure is provisional Estimated exposure, compatibility-default Drafts display as Unassessed, and Closed rows show no current exposure. Tab-specific default sorting is now part of the register contract: Active by exposure, Need action by action need, Draft by estimated exposure then oldest first, and Closed by most recently updated/closed. This is display normalisation and does not require a Supabase migration.
 
+WT-RISK-LIFECYCLE-003 adds the minimum activation gate for Draft risks. Drafts must be activated to Open, cannot jump directly to another active status or Closed, and cannot activate until the required title, meaningful description, active owner, deliberate probability/impact assessment and non-overdue review date are complete. Actioner, due date, mitigation and contingency are deliberately handled as active assurance gaps after activation rather than gate blockers.
+
 Risk, Issue, Dependency, and Assumption records remain authoritative. Source-generated Narrative entries may reference them for assurance history, but must not become an alternative editing surface or a noisy audit feed. The full schema and permission boundary are documented in `docs/project-narrative.md`.
 
 ## Project relationship readiness

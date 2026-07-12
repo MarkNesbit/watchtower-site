@@ -27,6 +27,7 @@ import {
 	getExposureChartSummary,
 	getExposureDistribution,
 	getExposurePercentage,
+	getRiskActivationReadiness,
 	getRiskRegisterPageNumbers,
 	getRiskRegisterExposureDisplay,
 	getRiskRegisterPaginationRange,
@@ -54,6 +55,7 @@ import {
 	preflightDraftProjectRisksFromPrompts,
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
 	DRAFT_RISK_STATUSES,
+	RISK_ACTIVATION_DESCRIPTION_MIN_LENGTH,
 	RISK_REGISTER_EXPOSURE_FILTERS,
 	RISK_REGISTER_PAGE_SIZES,
 	RISK_REVIEW_DUE_SOON_WINDOW_DAYS,
@@ -613,6 +615,15 @@ test('Risk actioner migration adds a nullable profile reference without creating
 	assert.match(sql, /create index if not exists project_risks_actioner_id_idx/);
 	assert.match(sql, /Nullable primary risk actioner for MVP assignment/);
 	assert.doesNotMatch(sql, /create\s+table\s+(public\.)?project_risk_actions\b/i);
+});
+
+test('Risk assessment completion marker supports Draft activation without backfill', async () => {
+	const sql = await allMigrationSql();
+	const markerMigration = await readFile(new URL('../supabase/migrations/20260712000100_project_risk_assessment_completion.sql', import.meta.url), 'utf8');
+	assert.match(sql, /add column if not exists assessment_completed_at timestamptz/);
+	assert.match(sql, /add column if not exists assessment_completed_by uuid references public\.profiles\(id\) on delete set null/);
+	assert.match(sql, /Existing compatibility defaults are not backfilled/);
+	assert.doesNotMatch(markerMigration, /update\s+public\.project_risks[\s\S]*assessment_completed_at/i);
 });
 
 test('Risk prompt-created risks keep source traceability and project duplicate protection', async () => {
@@ -1860,6 +1871,51 @@ test('Risk create/edit validation covers references, required fields and dates',
 	});
 });
 
+test('Risk activation readiness requires minimum Draft activation information only', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	const readyDraft = registerRisk({
+		status: 'draft',
+		title: 'Supplier authority unclear',
+		description: 'Supplier authority is unclear and could delay project decisions.',
+		owner_id: 'owner-1',
+		probability: 'medium',
+		impact: 'high',
+		assessment_completed_at: '2026-07-12T10:00:00Z',
+		assessment_completed_by: 'user-1',
+		review_date: '2026-07-12',
+		actioner_id: null,
+		due_date: null,
+		mitigation_plan: '',
+		contingency_plan: '',
+	});
+
+	assert.deepEqual(getRiskActivationReadiness(readyDraft, { now }), { ready: true, missing: [] });
+	assert.equal(deriveRiskReferenceTone({ ...readyDraft, status: 'open' }, now), 'red');
+
+	const missing = getRiskActivationReadiness({
+		...readyDraft,
+		title: ' ',
+		description: 'short',
+		owner_id: null,
+		assessment_completed_at: null,
+		review_date: '',
+	}, { now });
+	assert.equal(missing.ready, false);
+	assert.deepEqual(missing.missing.map((requirement) => requirement.key), ['title', 'description', 'owner', 'assessment', 'review_date']);
+	assert.match(missing.missing.find((requirement) => requirement.key === 'description')?.message ?? '', new RegExp(String(RISK_ACTIVATION_DESCRIPTION_MIN_LENGTH)));
+
+	const overdue = getRiskActivationReadiness({ ...readyDraft, review_date: '2026-07-11' }, { now });
+	assert.deepEqual(overdue.missing.map((requirement) => requirement.key), ['review_date']);
+
+	const placeholderMedium = getRiskActivationReadiness({
+		...readyDraft,
+		probability: 'medium',
+		impact: 'medium',
+		assessment_completed_at: null,
+	}, { now });
+	assert.deepEqual(placeholderMedium.missing.map((requirement) => requirement.key), ['assessment']);
+});
+
 test('Risk exposure derives from probability and impact through the Watchtower default assessment', () => {
 	assert.equal(deriveWatchtowerDefaultRiskExposure('low', 'low'), 'low');
 	assert.equal(deriveWatchtowerDefaultRiskExposure('low', 'medium'), 'medium');
@@ -2605,7 +2661,10 @@ test('Risk create helper enforces Draft for crafted status payloads and retains 
 	assert.equal(risk.status, 'draft');
 	assert.equal(getRiskRegisterExposureDisplay(risk).value, 'high');
 	const insertCall = client.calls.find((call) => call[0] === 'insert' && call[1] === 'project_risks');
-	assert.deepEqual(insertCall[2], {
+	const { assessment_completed_at: assessmentCompletedAt, assessment_completed_by: assessmentCompletedBy, ...insertPayload } = insertCall[2];
+	assert.match(assessmentCompletedAt, /^\d{4}-\d{2}-\d{2}T/);
+	assert.equal(assessmentCompletedBy, 'user-1');
+	assert.deepEqual(insertPayload, {
 		organisation_id: 'workspace-1',
 		project_id: 'project-1',
 		risk_ref: 'Risk-HHH-002',
@@ -2948,6 +3007,8 @@ test('Updating an existing non-Red risk to Red action state creates a source-lin
 });
 
 test('Opening a Draft risk creates an opened narrative without a duplicate Red narrative', async () => {
+	const reviewDate = isoDateOffsetFromToday(14);
+	const dueDate = isoDateOffsetFromToday(30);
 	const draftRisk = assuredRiskFacts({
 		title: 'Supplier delay',
 		risk_id: 'risk-1',
@@ -2972,8 +3033,8 @@ test('Opening a Draft risk creates an opened narrative without a duplicate Red n
 		impact: 'high',
 		ownerId: 'owner-1',
 		actionerId: 'actioner-1',
-		reviewDate: '2026-07-10',
-		dueDate: '2026-08-01',
+		reviewDate,
+		dueDate,
 		mitigationPlan: 'Confirm alternative supplier.',
 		contingencyPlan: 'Escalate to steering group.',
 	}, client);
@@ -2987,7 +3048,19 @@ test('Opening a Draft risk creates an opened narrative without a duplicate Red n
 });
 
 test('Lifecycle transition helper opens closes and reopens risks with notes and source-linked narrative', async () => {
-	const draftClient = createRiskMutationClient({ existingRisk: { status: 'draft', rag_status: 'red' } });
+	const draftClient = createRiskMutationClient({
+		existingRisk: {
+			status: 'draft',
+			rag_status: 'red',
+			description: 'Supplier authority is unclear and could delay project decisions.',
+			owner_id: 'owner-1',
+			probability: 'high',
+			impact: 'high',
+			assessment_completed_at: '2026-07-12T10:00:00Z',
+			assessment_completed_by: 'user-1',
+			review_date: isoDateOffsetFromToday(14),
+		},
+	});
 	await transitionProjectRiskLifecycle('alpha', 'delivery-hub', 'risk-1', 'open', 'Ready for active management.', draftClient);
 	let updateCall = draftClient.calls.find((call) => call[0] === 'update' && call[1] === 'project_risks');
 	let noteCall = draftClient.calls.find((call) => call[0] === 'insert' && call[1] === 'project_risk_notes');
@@ -3017,6 +3090,62 @@ test('Lifecycle transition helper opens closes and reopens risks with notes and 
 	assert.equal(narrativeCall[2].title, 'Risk reopened: Risk-HHH-001');
 	assert.equal(narrativeCall[2].attention_level, 'neutral');
 	assert.match(narrativeCall[2].details, /Supplier date moved again/);
+});
+
+test('Draft activation gate blocks incomplete and crafted lifecycle changes before mutation or narrative', async () => {
+	const incompleteClient = createRiskMutationClient({
+		existingRisk: {
+			status: 'draft',
+			title: 'Supplier delay',
+			description: 'Too short',
+			owner_id: null,
+			probability: 'medium',
+			impact: 'medium',
+			assessment_completed_at: null,
+			review_date: null,
+		},
+	});
+	await assert.rejects(
+		transitionProjectRiskLifecycle('alpha', 'delivery-hub', 'risk-1', 'open', 'Ready?', incompleteClient),
+		/minimum activation information|Draft risk cannot be activated/,
+	);
+	assert.ok(!incompleteClient.calls.some((call) => call[0] === 'update' && call[1] === 'project_risks'));
+	assert.ok(!incompleteClient.calls.some((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries'));
+
+	for (const submittedStatus of ['monitoring', 'mitigating', 'escalated', 'materialised', 'closed']) {
+		const client = createRiskMutationClient({
+			existingRisk: {
+				status: 'draft',
+				description: 'Supplier authority is unclear and could delay project decisions.',
+				owner_id: 'owner-1',
+				probability: 'medium',
+				impact: 'high',
+				assessment_completed_at: '2026-07-12T10:00:00Z',
+				assessment_completed_by: 'user-1',
+				review_date: isoDateOffsetFromToday(14),
+			},
+		});
+		await assert.rejects(
+			updateProjectRisk('alpha', 'delivery-hub', 'risk-1', {
+				title: 'Supplier delay',
+				description: 'Supplier authority is unclear and could delay project decisions.',
+				status: submittedStatus,
+				probability: 'medium',
+				impact: 'high',
+				ownerId: 'owner-1',
+				actionerId: '',
+				reviewDate: isoDateOffsetFromToday(14),
+				dueDate: '',
+				mitigationPlan: '',
+				contingencyPlan: '',
+			}, client),
+			submittedStatus === 'closed'
+				? /cannot be closed before activation/
+				: /must be activated as Open/,
+		);
+		assert.ok(!client.calls.some((call) => call[0] === 'update' && call[1] === 'project_risks'));
+		assert.ok(!client.calls.some((call) => call[0] === 'insert' && call[1] === 'project_narrative_entries'));
+	}
 });
 
 test('Updating a Green risk to Amber does not create a narrative entry', async () => {
@@ -3345,8 +3474,8 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.doesNotMatch(route, /Risk assurance view/);
 	assert.match(route, /class="risk-detail-heading"/);
 	assert.match(route, /label=\{risk\.risk_ref\}/);
-	assert.match(route, /deriveRiskReferenceTone\(risk, new Date\(\)\)/);
-	assert.match(route, /riskReferenceStatusLabel\(risk, new Date\(\)\)/);
+	assert.match(route, /deriveRiskReferenceTone\(risk, now\)/);
+	assert.match(route, /riskReferenceStatusLabel\(risk, now\)/);
 	assert.match(route, /tone=\{referenceTone\}/);
 	assert.match(route, /statusLabel=\{referenceStatus\}/);
 	assert.doesNotMatch(route, /RISK_RAG_STATUSES/);
@@ -3362,8 +3491,8 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.match(route, /creatorName\(risk\)/);
 	assert.match(route, /updaterName\(risk\)/);
 	assert.doesNotMatch(route, /ownerName\(risk\)/);
-	assert.match(route, /getRiskAssuranceBlocks\(risk, new Date\(\)\)/);
-	assert.match(route, /getRiskActionStateDrivers\(risk, new Date\(\)\)/);
+	assert.match(route, /getRiskAssuranceBlocks\(risk, now\)/);
+	assert.match(route, /getRiskActionStateDrivers\(risk, now\)/);
 	assert.match(route, /data-risk-action-state-summary/);
 	assert.match(route, /data-risk-action-state-rationale/);
 	assert.match(route, /data-risk-assurance-blocks/);
@@ -3501,11 +3630,20 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(promptDraftRoute, /isSupabaseAuthSessionError\(error\)/);
 	assert.match(detailRoute, /Astro\.url\.searchParams\.get\('created'\) === 'draft' \? 'Draft risk created\.' : ''/);
 	assert.match(detailRoute, /data-risk-detail-success/);
+	assert.match(detailRoute, /getRiskActivationReadiness\(risk, \{ now \}\)/);
+	assert.match(detailRoute, /data-risk-activation-readiness/);
+	assert.match(detailRoute, /data-risk-activation-missing=\{requirement\.key\}/);
+	assert.match(detailRoute, /Complete the minimum information before activating this Draft risk\./);
+	assert.match(detailRoute, /Activate risk/);
+	assert.match(detailRoute, /disabled=\{!activationReadiness\?\.ready \|\| undefined\}/);
+	assert.match(detailRoute, /data-risk-draft-status-readonly/);
 
 	assert.match(editRoute, /data-risk-edit-route/);
 	assert.match(editRoute, /can\(workspace\.role, 'risk\.edit'\)/);
 	assert.match(editRoute, /getProjectRisk\(organisation\.id, data\.id, riskId, workspace\.role, serverSupabase\)/);
 	assert.match(editRoute, /updateProjectRisk\(workspaceSlug \?\? '', projectSlug \?\? '', risk\.risk_id, formValues, serverSupabase, accessToken\)/);
+	assert.match(editRoute, /validateRiskFormInput\(formValues, \{ mode: risk && isDraftRiskStatus\(risk\.status\) \? 'draft' : 'edit' \}\)/);
+	assert.match(editRoute, /isDraftRiskExposureUnassessed\(record\)/);
 	assert.match(editRoute, /buildLoginRedirectPath\(Astro\.url\.pathname\)/);
 	assert.match(editRoute, /isSupabaseAuthSessionError\(error\)[\s\S]*Astro\.redirect\(sessionRedirectPath\)/);
 	assert.match(editRoute, /Viewer access is read-only\. Risk editing is unavailable\./);
@@ -3513,7 +3651,9 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	for (const field of ['name="title"', 'name="description"', 'name="status"', 'name="probability"', 'name="impact"', 'name="owner_id"', 'name="actioner_id"', 'name="review_date"', 'name="due_date"', 'name="mitigation_plan"', 'name="contingency_plan"']) {
 		assert.match(form, new RegExp(field));
 	}
-	assert.match(form, /isEditMode \? \([\s\S]*name="status"[\s\S]*\) : \(/);
+	assert.match(form, /isEditMode && !isDraftEditMode \? \([\s\S]*name="status"[\s\S]*\) : \(/);
+	assert.match(form, /data-risk-draft-edit-status=\{isDraftEditMode \|\| undefined\}/);
+	assert.match(form, /Use Activate risk from the detail page when the minimum information is complete\./);
 	assert.match(form, /data-risk-create-draft-status/);
 	assert.match(form, /This risk will be created as a Draft for review and assessment\./);
 	assert.match(form, /<option value="" selected=\{!values\.probability\}>Unassessed<\/option>/);
@@ -3531,8 +3671,8 @@ test('Risk create and edit routes enforce permissions, validation and scoped mut
 	assert.match(editRoute, /actionerId: String\(formData\.get\('actioner_id'\) \?\? ''\)/);
 	assert.match(createRoute, /probability: String\(formData\.get\('probability'\) \?\? ''\)/);
 	assert.match(createRoute, /impact: String\(formData\.get\('impact'\) \?\? ''\)/);
-	assert.match(editRoute, /probability: record\?\.probability \?\? 'medium'/);
-	assert.match(editRoute, /impact: String\(formData\.get\('impact'\) \?\? 'medium'\)/);
+	assert.match(editRoute, /probability: isUnassessedDraft \? '' : record\?\.probability \?\? 'medium'/);
+	assert.match(editRoute, /impact: String\(formData\.get\('impact'\) \?\? ''\)/);
 	assert.match(form, /The actioner is responsible for carrying out mitigation, contingency, review, or follow-up activity\./);
 	assert.match(form, /data-review-date-offset="7"/);
 	assert.match(form, /data-review-date-offset="14"/);
