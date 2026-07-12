@@ -2,6 +2,7 @@
 import {
 	RISK_LEVELS,
 	RISK_STATUSES,
+	isDraftRiskStatus,
 	riskDisplayLabel,
 	riskProfileName,
 	type RiskOwnerOption,
@@ -23,6 +24,7 @@ type RiskFormValues = {
 
 const {
 	mode = 'create',
+	isDraft = false,
 	values,
 	errors = {},
 	ownerOptions = [],
@@ -33,6 +35,7 @@ const {
 	cancelHref = '',
 } = Astro.props as {
 	mode: 'create' | 'edit';
+	isDraft?: boolean;
 	values: RiskFormValues;
 	errors?: Record<string, string>;
 	ownerOptions?: RiskOwnerOption[];
@@ -51,6 +54,8 @@ const describedBy = [
 ].filter(Boolean).join(' ') || undefined;
 const isCreateMode = mode === 'create';
 const isEditMode = mode === 'edit';
+const isDraftEditMode = isEditMode && (isDraft || isDraftRiskStatus(values.status));
+const requiresAssessment = isEditMode && !isDraftEditMode;
 ---
 
 <form class="risk-form" method="post" novalidate data-risk-form data-risk-create-form={mode === 'create' || undefined} data-risk-edit-form={mode === 'edit' || undefined} aria-describedby={describedBy}>
@@ -103,7 +108,7 @@ const isEditMode = mode === 'edit';
 	{errors.description && <p class="field-error" id="risk-description-error">{errors.description}</p>}
 
 	<div class="risk-form__grid">
-		{isEditMode ? (
+		{isEditMode && !isDraftEditMode ? (
 			<div>
 				<label for="risk-status">Status <span aria-hidden="true">*</span></label>
 				<select
@@ -122,41 +127,42 @@ const isEditMode = mode === 'edit';
 			<div class="risk-form__draft-status" data-risk-create-draft-status>
 				<span>Lifecycle status</span>
 				<strong>Draft</strong>
-				<p>Draft risks stay neutral until they are reviewed and opened.</p>
+				<p>{isDraftEditMode ? 'Use Activate risk from the detail page when the minimum information is complete.' : 'Draft risks stay neutral until they are reviewed and opened.'}</p>
+				<input type="hidden" name="status" value="draft" data-risk-draft-edit-status={isDraftEditMode || undefined} />
 			</div>
 		)}
 
 		<div>
-			<label for="risk-probability">Probability {isEditMode && <span aria-hidden="true">*</span>}</label>
+			<label for="risk-probability">Probability {requiresAssessment && <span aria-hidden="true">*</span>}</label>
 			<select
 				id="risk-probability"
 				name="probability"
-				required={isEditMode || undefined}
-				aria-required={isEditMode ? 'true' : undefined}
+				required={requiresAssessment || undefined}
+				aria-required={requiresAssessment ? 'true' : undefined}
 				aria-invalid={Boolean(errors.probability) || undefined}
-				aria-describedby={errors.probability ? 'risk-probability-error' : isCreateMode ? 'risk-probability-help' : undefined}
+				aria-describedby={errors.probability ? 'risk-probability-error' : (isCreateMode || isDraftEditMode) ? 'risk-probability-help' : undefined}
 			>
-				{isCreateMode && <option value="" selected={!values.probability}>Unassessed</option>}
+				{(isCreateMode || isDraftEditMode) && <option value="" selected={!values.probability}>Unassessed</option>}
 				{RISK_LEVELS.map((level) => <option value={level} selected={values.probability === level}>{riskDisplayLabel(level)}</option>)}
 			</select>
-			{isCreateMode && <p class="form-help" id="risk-probability-help">Optional for Draft capture.</p>}
+			{(isCreateMode || isDraftEditMode) && <p class="form-help" id="risk-probability-help">Optional while the risk remains Draft.</p>}
 			{errors.probability && <p class="field-error" id="risk-probability-error">{errors.probability}</p>}
 		</div>
 
 		<div>
-			<label for="risk-impact">Impact {isEditMode && <span aria-hidden="true">*</span>}</label>
+			<label for="risk-impact">Impact {requiresAssessment && <span aria-hidden="true">*</span>}</label>
 			<select
 				id="risk-impact"
 				name="impact"
-				required={isEditMode || undefined}
-				aria-required={isEditMode ? 'true' : undefined}
+				required={requiresAssessment || undefined}
+				aria-required={requiresAssessment ? 'true' : undefined}
 				aria-invalid={Boolean(errors.impact) || undefined}
-				aria-describedby={errors.impact ? 'risk-impact-error' : isCreateMode ? 'risk-impact-help' : undefined}
+				aria-describedby={errors.impact ? 'risk-impact-error' : (isCreateMode || isDraftEditMode) ? 'risk-impact-help' : undefined}
 			>
-				{isCreateMode && <option value="" selected={!values.impact}>Unassessed</option>}
+				{(isCreateMode || isDraftEditMode) && <option value="" selected={!values.impact}>Unassessed</option>}
 				{RISK_LEVELS.map((level) => <option value={level} selected={values.impact === level}>{riskDisplayLabel(level)}</option>)}
 			</select>
-			{isCreateMode && <p class="form-help" id="risk-impact-help">Optional for Draft capture.</p>}
+			{(isCreateMode || isDraftEditMode) && <p class="form-help" id="risk-impact-help">Optional while the risk remains Draft.</p>}
 			{errors.impact && <p class="field-error" id="risk-impact-error">{errors.impact}</p>}
 		</div>
 

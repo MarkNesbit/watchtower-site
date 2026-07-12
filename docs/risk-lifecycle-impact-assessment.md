@@ -162,7 +162,7 @@ Recommended delivery approach: start with a small shared lifecycle/action-state 
 
 | Status | Current category | Appears in Register | Action state evaluated | Exposure displayed | Needs Action | Dashboard signal | Narrative generation | Current transitions |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `draft` | Draft | Draft tab | No, neutral | Yes, provisional/Unassessed | No | No | No on creation; Open creates entry | Lifecycle action: open only; edit path: any valid status |
+| `draft` | Draft | Draft tab | No, neutral | Yes, provisional/Unassessed | No | No | No on creation; Activate/Open creates entry | Lifecycle action: activate to open only after gate passes; edit path keeps Draft unless activating to Open |
 | `open` | Active | Active tab | Yes | Yes | Red/Amber only | Yes | Manual create creates raised entry; Draft -> Open creates opened entry | Lifecycle action: close; edit path: any valid status |
 | `monitoring` | Active | Active tab | Yes | Yes | Red/Amber only | Yes | Edit may create became-Red entry | Lifecycle action: close; edit path: any valid status |
 | `mitigating` | Active | Active tab | Yes | Yes | Red/Amber only | Yes | Edit may create became-Red entry | Lifecycle action: close; edit path: any valid status |
@@ -174,32 +174,32 @@ Recommended delivery approach: start with a small shared lifecycle/action-state 
 Current restrictions:
 
 - UI lifecycle buttons enforce Draft -> Open, Active -> Closed and Closed -> Open.
-- Server helper `transitionProjectRiskLifecycle` enforces those three action boundaries.
-- General update helper `updateProjectRisk` permits any `RISK_STATUSES` value, so a Draft can become `monitoring`, `mitigating`, `escalated`, `materialised` or `closed` if submitted through edit.
+- Server helper `transitionProjectRiskLifecycle` enforces those three action boundaries and applies Draft activation readiness before opening.
+- General update helper `updateProjectRisk` applies the same Draft activation readiness and rejects crafted Draft -> non-Open active or Draft -> Closed updates before mutation.
 - Database enforces only the allowed status list, not transition rules or activation readiness.
 - Active is not stored. It is a grouping produced by `riskLifecycleCategory` and `isActiveRiskStatus`.
 
-Recommended future activation boundary:
+Implemented activation boundary:
 
 - Keep `draft` as the only pre-active lifecycle state for MVP.
-- Server-side activation validation should live in `src/lib/projectRisks.ts` and be reused by `updateProjectRisk` and `transitionProjectRiskLifecycle`.
-- UI controls should reflect the same helper result; they should not be the only protection.
+- Server-side activation validation lives in `src/lib/projectRisks.ts` and is reused by `updateProjectRisk` and `transitionProjectRiskLifecycle`.
+- UI controls reflect the same helper result; they are not the only protection.
 - Database enforcement should be considered only after product decisions settle, because cross-field gate rules may be easier to maintain in application code initially.
 
 ## Assurance/action-state rule map
 
 | Assurance area | Green | Amber | Red | Applies to | Blocks activation? | Implementation location |
 | --- | --- | --- | --- | --- | --- | --- |
-| Description/summary | Description length at least 30 | Description present but short | Missing | Detail cards only for active risks | Decision required | `getRiskAssuranceBlocks` |
+| Description/summary | Description length at least 30 | Description present but short | Missing | Detail cards only for active risks | Yes, minimum 30 characters | `getRiskAssuranceBlocks`, `getRiskActivationReadiness` |
 | Lifecycle status | Active normal statuses | None currently | `materialised`; escalated without owner/actioner/current review in action state | Active risks | No current gate | `lifecycleStatusTone`, `deriveRiskAssuranceTone`, `getRiskActionStateDrivers` |
 | Exposure | Valid probability/impact derives Low/Medium/High/Critical | Not an action-state colour | Invalid/missing maps to Critical exposure | All display; active in action items | Decision required | `deriveWatchtowerDefaultRiskExposure` |
-| Owner | Owner assigned | None | Missing owner | Active risks | Decision required | `deriveRiskAssuranceTone`, `getRiskActionItems`, `getRiskActionStateDrivers` |
-| Actioner | Actioner assigned | None | Missing actioner on active risk | Active risks | Decision required | `actionerTone`, `deriveRiskAssuranceTone`, `getRiskActionItems` |
-| Review date | Present and not overdue | Missing | Overdue | Active risks | Decision required | `dateTone`, `deriveRiskAssuranceTone`, `getRiskActionItems` |
-| Due date | Present and not overdue | Missing | Overdue | Active risks | Likely no | `dateTone`, `deriveRiskAssuranceTone`, `getRiskActionItems` |
-| Mitigation | Present, or Low exposure missing | Missing for Medium/High exposure | Missing for Critical exposure | Active risks | Decision required | `deriveRiskAssuranceTone`, `getRiskActionItems`, `getRiskActionStateDrivers` |
-| Contingency | Present | None | Missing | Active risks | Decision required | `deriveRiskAssuranceTone`, `getRiskActionItems`, `getRiskActionStateDrivers` |
-| Assessment completeness | Valid probability and impact | None | Missing/invalid creates `assess-exposure` action item | Active risks | Decision required | `hasAssessedRiskExposure`, `getRiskActionItems` |
+| Owner | Owner assigned | None | Missing owner | Active risks | Yes, active workspace member required | `deriveRiskAssuranceTone`, `getRiskActionItems`, `getRiskActionStateDrivers`, `getRiskActivationReadiness` |
+| Actioner | Actioner assigned | None | Missing actioner on active risk | Active risks | No, post-activation assurance gap | `actionerTone`, `deriveRiskAssuranceTone`, `getRiskActionItems` |
+| Review date | Present and not overdue | Missing | Overdue | Active risks | Yes, date must exist and not be overdue | `dateTone`, `deriveRiskAssuranceTone`, `getRiskActionItems`, `getRiskActivationReadiness` |
+| Due date | Present and not overdue | Missing | Overdue | Active risks | No, post-activation assurance gap | `dateTone`, `deriveRiskAssuranceTone`, `getRiskActionItems` |
+| Mitigation | Present, or Low exposure missing | Missing for Medium/High exposure | Missing for Critical exposure | Active risks | No, post-activation assurance gap | `deriveRiskAssuranceTone`, `getRiskActionItems`, `getRiskActionStateDrivers` |
+| Contingency | Present | None | Missing | Active risks | No, post-activation assurance gap | `deriveRiskAssuranceTone`, `getRiskActionItems`, `getRiskActionStateDrivers` |
+| Assessment completeness | Valid probability and impact with `assessment_completed_at` marker | None | Missing/invalid creates `assess-exposure` action item | Active risks | Yes | `hasAssessedRiskExposure`, `getRiskActionItems`, `getRiskActivationReadiness` |
 | Update freshness | Updated <= 30 days | Updated > 30 days | Updated > 60 days | Active risks | No current gate | `staleUpdateTone` |
 | Draft/Closed lifecycle | Neutral | Neutral | Neutral | Draft and Closed | N/A | `deriveRiskReferenceTone`, `getRiskAssuranceBlocks` |
 
@@ -472,6 +472,8 @@ Delivery risk: Medium.
 
 ### WT-RISK-LIFECYCLE-003 - Minimum activation gate
 
+Status: completed. Draft activation readiness now lives in `src/lib/projectRisks.ts` and is enforced by both `transitionProjectRiskLifecycle` and `updateProjectRisk`. The detail page shows activation readiness, keeps the Activate risk action visible but disabled until ready, and Draft edit no longer exposes direct lifecycle/status selection. Drafts may activate only to `open`; crafted Draft -> Monitoring/Mitigating/Escalated/Materialised and Draft -> Closed updates are rejected before mutation or Narrative creation.
+
 Objective: Prevent Draft risks from becoming active until agreed minimum activation information is complete.
 
 Included scope:
@@ -489,7 +491,7 @@ Excluded scope:
 
 Dependencies: Product decisions on activation fields; WT-RISK-LIFECYCLE-001B; preferably WT-RISK-LIFECYCLE-002.
 
-Database impact: None initially; possible later if dedicated activation metadata is required.
+Database impact: migration `20260712000100_project_risk_assessment_completion.sql` adds nullable `assessment_completed_at` and `assessment_completed_by` fields. No backfill is applied, so existing compatibility Medium/Medium Drafts remain Unassessed until a deliberate assessment is recorded.
 
 Primary files likely affected: `projectRisks.ts`, risk detail route, edit route, tests, docs.
 
@@ -497,7 +499,7 @@ Test scope: Draft activation blocked/allowed, edit-route bypass prevention, life
 
 Manual validation focus: Incomplete Draft cannot open; complete Draft opens and creates expected Narrative entry.
 
-Delivery risk: High until product decisions are settled.
+Delivery risk: Medium. The MVP gate is implemented, while organisation-specific rules, approval chains and Governance Profiles remain deferred.
 
 ### WT-RISK-LIFECYCLE-004 - Risk Register lifecycle/readiness presentation
 
@@ -614,9 +616,9 @@ Delivery risk: Medium.
 
 | Slice | Parent Epic ID | Epic outcome supported | Dependencies on other slices | Requirements/product decisions addressed | Areas explicitly deferred |
 | --- | --- | --- | --- | --- | --- |
-| WT-RISK-LIFECYCLE-001B | WT-RISK-LIFECYCLE-EPIC-001 | One authoritative action-state model; consistency across surfaces | None | Forgiving Amber rule, action-state separation | Activation gate, Governance Profiles |
-| WT-RISK-LIFECYCLE-002 | WT-RISK-LIFECYCLE-EPIC-001 | Every creation route uses same model; lightweight capture | WT-RISK-LIFECYCLE-001B | Initial manual-create status, Draft default, title-only capture, optional details retained, no Draft Narrative | Activation gate, Medium/Medium ambiguity resolution |
-| WT-RISK-LIFECYCLE-003 | WT-RISK-LIFECYCLE-EPIC-001 | Draft risks cannot progress until minimum activation information is complete | WT-RISK-LIFECYCLE-001B, preferably WT-RISK-LIFECYCLE-002 | Minimum activation fields, owner/review/assessment decisions | Organisation-specific activation rules, approvals |
+| WT-RISK-LIFECYCLE-001B | WT-RISK-LIFECYCLE-EPIC-001 | One authoritative action-state model; consistency across surfaces | None | Forgiving Amber rule, action-state separation | Governance Profiles |
+| WT-RISK-LIFECYCLE-002 | WT-RISK-LIFECYCLE-EPIC-001 | Every creation route uses same model; lightweight capture | WT-RISK-LIFECYCLE-001B | Initial manual-create status, Draft default, title-only capture, optional details retained, no Draft Narrative | Activation enforcement |
+| WT-RISK-LIFECYCLE-003 | WT-RISK-LIFECYCLE-EPIC-001 | Draft risks cannot progress until minimum activation information is complete | WT-RISK-LIFECYCLE-001B, WT-RISK-LIFECYCLE-002 | Minimum activation fields, owner/review/assessment decisions, edit-route bypass prevention, no duplicate Narrative | Organisation-specific activation rules, approvals, Draft withdrawal |
 | WT-RISK-LIFECYCLE-004 | WT-RISK-LIFECYCLE-EPIC-001 | Risk Register consistency; lifecycle/exposure/action-state separation | WT-RISK-LIFECYCLE-003 | Readiness display and register behaviour | Portfolio aggregation redesign |
 | WT-RISK-LIFECYCLE-005 | WT-RISK-LIFECYCLE-EPIC-001 | Dashboard signals and health consumers remain consistent | WT-RISK-LIFECYCLE-001B | Project action-state versus Health separation | Project Health policy |
 | WT-RISK-LIFECYCLE-006 | WT-RISK-LIFECYCLE-EPIC-001 | Narrative entries preserve text while showing current linked risk state | WT-RISK-LIFECYCLE-001B | Missing/deleted linked risk display | Rewriting historical entries, audit snapshot model |
@@ -624,20 +626,22 @@ Delivery risk: Medium.
 
 ## Recommended next implementation slice
 
-Recommended next slice: WT-RISK-LIFECYCLE-003 - Minimum activation gate.
+Recommended next slice: WT-RISK-LIFECYCLE-004 - Risk Register lifecycle/readiness presentation.
 
-Status: WT-RISK-LIFECYCLE-001B and WT-RISK-LIFECYCLE-002 are complete. The shared lifecycle/action-state contract is hardened, and all current initial capture routes now create Draft risks. WT-RISK-LIFECYCLE-003 should define and enforce the minimum information required before a Draft can become Active/Open.
+Status: WT-RISK-LIFECYCLE-001B, WT-RISK-LIFECYCLE-002 and WT-RISK-LIFECYCLE-003 are complete. The shared lifecycle/action-state contract is hardened, all current initial capture routes create Draft risks, and Draft activation is blocked until the minimum activation information is complete.
 
 Defect follow-up: WT-RISK-LIFECYCLE-001B-FIX-001 records the MVP review-date window in the shared contract. Active risks with no review date are Amber, overdue review dates and review dates due today are Red, review dates due tomorrow or within the next three calendar days are Amber, and later review dates are Green. The three-day window is an MVP constant that can later move into configurable Governance Profiles. No database migration or production data change is required.
 
 Why first:
 
-- It is the next dependency after unified Draft capture.
-- It addresses the current gap where Drafts can still be opened without minimum activation information.
-- It can build on the central lifecycle/action-state contract and the unified Draft create path.
-- It should make the Medium/Medium compatibility ambiguity an explicit readiness/product decision.
+- It is the next dependency after the activation gate.
+- It can surface Draft readiness consistently in the Risk Register without changing activation rules.
+- It can build on the central lifecycle/action-state contract, unified Draft capture and shared activation-readiness helper.
+- It can keep Risk Register views consistent while Narrative live-state display remains a later slice.
 
-## Assessment constraints confirmation
+## WT-RISK-LIFECYCLE-001A assessment constraints confirmation
+
+The following constraints describe the original WT-RISK-LIFECYCLE-001A assessment-only slice, not later implementation slices recorded in this document:
 
 - No lifecycle redesign was implemented.
 - No migrations were added.
@@ -668,9 +672,11 @@ Current lifecycle map:
 
 Current activation behaviour:
 
-- No activation gate exists.
-- Lifecycle action Draft -> Open is allowed with no minimum information check.
-- Edit path can change Draft directly to any allowed status.
+- Draft activation requires title, meaningful description, active owner, deliberate probability/impact assessment and a review date that is not overdue.
+- Lifecycle action Draft -> Open and edit-route Draft -> Open both use the same server-side readiness helper.
+- Draft -> Monitoring/Mitigating/Escalated/Materialised and Draft -> Closed are rejected before mutation.
+- Blocked activation creates no risk update, no lifecycle note and no Narrative entry.
+- Successful activation creates the existing source-linked `Risk opened:` Narrative entry.
 
 Current assurance areas:
 

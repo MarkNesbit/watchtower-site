@@ -116,11 +116,31 @@ const RISK_ORGANISATION_REF_CONSTRAINT = 'project_risks_organisation_ref_key';
 const RISK_SOURCE_PROMPT_CONSTRAINT = 'project_risks_project_source_prompt_key';
 const MAX_RISK_REF_INSERT_ATTEMPTS = 3;
 export const RISK_REVIEW_DUE_SOON_WINDOW_DAYS = 3;
+export const RISK_ACTIVATION_DESCRIPTION_MIN_LENGTH = 30;
 
 export type RiskProfile = {
 	id: string;
 	display_name?: string | null;
 	email?: string | null;
+};
+
+export type RiskActivationRequirementKey =
+	| 'title'
+	| 'description'
+	| 'owner'
+	| 'assessment'
+	| 'review_date'
+	| 'activation_path';
+
+export type RiskActivationRequirement = {
+	key: RiskActivationRequirementKey;
+	label: string;
+	message: string;
+};
+
+export type RiskActivationReadiness = {
+	ready: boolean;
+	missing: RiskActivationRequirement[];
 };
 
 export type ProjectRisk = {
@@ -142,6 +162,8 @@ export type ProjectRisk = {
 	contingency_plan?: string | null;
 	review_date?: string | null;
 	due_date?: string | null;
+	assessment_completed_at?: string | null;
+	assessment_completed_by?: string | null;
 	created_by: string;
 	updated_by?: string | null;
 	created_at: string;
@@ -205,7 +227,18 @@ export type RiskFormInput = {
 	dueDate?: string;
 	mitigationPlan?: string;
 	contingencyPlan?: string;
+	assessmentCompleted?: string;
 };
+
+export class RiskActivationError extends Error {
+	missing: RiskActivationRequirement[];
+
+	constructor(message: string, missing: RiskActivationRequirement[]) {
+		super(message);
+		this.name = 'RiskActivationError';
+		this.missing = missing;
+	}
+}
 
 export type CreateDraftRisksFromPromptsResult = {
 	requestedCount: number;
@@ -264,6 +297,8 @@ const RISK_SELECT = [
 	'contingency_plan',
 	'review_date',
 	'due_date',
+	'assessment_completed_at',
+	'assessment_completed_by',
 	'created_by',
 	'updated_by',
 	'created_at',
@@ -421,16 +456,76 @@ export function buildRiskReference(projectRef: string, sequence: number): string
 	return `Risk-${projectRef}-${String(sequence).padStart(3, '0')}`;
 }
 
-export function validateRiskFormInput(input: RiskFormInput, options: { mode?: 'create' | 'edit' } = {}): Record<string, string> {
+export function validateRiskFormInput(input: RiskFormInput, options: { mode?: 'create' | 'draft' | 'edit' } = {}): Record<string, string> {
 	const errors: Record<string, string> = {};
 	const mode = options.mode ?? 'edit';
+	const requiresAssessment = mode === 'edit';
 	if (!input.title.trim()) errors.title = 'Risk title is required.';
 	if (mode !== 'create' && !isRiskStatus(input.status)) errors.status = 'Select a valid risk status.';
-	if (mode !== 'create' && !RISK_LEVELS.includes(input.probability as RiskLevel)) errors.probability = 'Select a valid probability.';
-	if (mode !== 'create' && !RISK_LEVELS.includes(input.impact as RiskLevel)) errors.impact = 'Select a valid impact.';
+	if (requiresAssessment && !RISK_LEVELS.includes(input.probability as RiskLevel)) errors.probability = 'Select a valid probability.';
+	if (requiresAssessment && !RISK_LEVELS.includes(input.impact as RiskLevel)) errors.impact = 'Select a valid impact.';
 	if (!isRiskReviewDate(input.reviewDate)) errors.reviewDate = 'Enter a valid review date.';
 	if (!isRiskReviewDate(input.dueDate)) errors.dueDate = 'Enter a valid due date.';
 	return errors;
+}
+
+function riskActivationRequirement(
+	key: RiskActivationRequirementKey,
+	label: string,
+	message: string,
+): RiskActivationRequirement {
+	return { key, label, message };
+}
+
+function hasCompletedRiskAssessment(risk: Pick<ProjectRisk, 'assessment_completed_at' | 'probability' | 'impact'>): boolean {
+	return Boolean(risk.assessment_completed_at)
+		&& RISK_LEVELS.includes(risk.probability as RiskLevel)
+		&& RISK_LEVELS.includes(risk.impact as RiskLevel);
+}
+
+function hasSubmittedRiskAssessment(input: Pick<RiskFormInput, 'probability' | 'impact'>): boolean {
+	return RISK_LEVELS.includes(input.probability as RiskLevel)
+		&& RISK_LEVELS.includes(input.impact as RiskLevel);
+}
+
+function hasMeaningfulRiskDescription(value: unknown): boolean {
+	return trimmedText(value).length >= RISK_ACTIVATION_DESCRIPTION_MIN_LENGTH;
+}
+
+export function getRiskActivationReadiness(
+	risk: Pick<ProjectRisk, 'title' | 'description' | 'owner_id' | 'probability' | 'impact' | 'review_date' | 'assessment_completed_at'>,
+	options: { now?: Date } = {},
+): RiskActivationReadiness {
+	const now = options.now ?? new Date();
+	const missing: RiskActivationRequirement[] = [];
+	const reviewDaysUntil = daysUntilUtcDate(risk.review_date, now);
+
+	if (!trimmedText(risk.title)) {
+		missing.push(riskActivationRequirement('title', 'Risk title', 'Add a risk title.'));
+	}
+	if (!hasMeaningfulRiskDescription(risk.description)) {
+		missing.push(riskActivationRequirement(
+			'description',
+			'Risk description',
+			`Add a project-specific risk description of at least ${RISK_ACTIVATION_DESCRIPTION_MIN_LENGTH} characters.`,
+		));
+	}
+	if (!risk.owner_id) {
+		missing.push(riskActivationRequirement('owner', 'Risk owner', 'Assign a risk owner.'));
+	}
+	if (!hasCompletedRiskAssessment(risk)) {
+		missing.push(riskActivationRequirement('assessment', 'Probability and impact assessment', 'Assess probability and impact.'));
+	}
+	if (reviewDaysUntil === null) {
+		missing.push(riskActivationRequirement('review_date', 'Review date', 'Set a review date.'));
+	} else if (reviewDaysUntil < 0) {
+		missing.push(riskActivationRequirement('review_date', 'Review date', 'Set a review date that is not overdue.'));
+	}
+
+	return {
+		ready: missing.length === 0,
+		missing,
+	};
 }
 
 export function riskRagTone(value: unknown): RiskRagStatus | 'neutral' {
@@ -466,14 +561,17 @@ export function riskExposureToneLabel(tone: RiskExposureTone): string {
 	return 'Low';
 }
 
-export function isDraftRiskExposureUnassessed(risk: Pick<ProjectRisk, 'status' | 'probability' | 'impact'>): boolean {
+export function isDraftRiskExposureUnassessed(
+	risk: Pick<ProjectRisk, 'status' | 'probability' | 'impact'> & Pick<Partial<ProjectRisk>, 'assessment_completed_at'>,
+): boolean {
 	return riskLifecycleCategory(risk.status) === 'draft'
+		&& !risk.assessment_completed_at
 		&& risk.probability === 'medium'
 		&& risk.impact === 'medium';
 }
 
 export function getRiskRegisterExposureDisplay(
-	risk: Pick<ProjectRisk, 'risk_ref' | 'status' | 'probability' | 'impact'>,
+	risk: Pick<ProjectRisk, 'risk_ref' | 'status' | 'probability' | 'impact'> & Pick<Partial<ProjectRisk>, 'assessment_completed_at'>,
 ): RiskRegisterExposureDisplay {
 	const lifecycle = riskLifecycleCategory(risk.status);
 	if (lifecycle === 'closed') {
@@ -1651,7 +1749,51 @@ async function getNextRiskSequence(organisationId: string, projectId: string, cl
 	return Number(data?.risk_sequence ?? 0) + 1;
 }
 
-function normaliseRiskPayload(input: RiskFormInput, now = new Date()) {
+async function getAuthenticatedRiskUserId(client): Promise<string | null> {
+	const { data, error } = await client.auth.getUser();
+	if (error) throw error;
+	return data?.user?.id ?? null;
+}
+
+function activationBlockedMessage(missing: RiskActivationRequirement[]): string {
+	const labels = missing.map((requirement) => requirement.label).join(', ');
+	return labels
+		? `Draft risk cannot be activated until these fields are complete: ${labels}.`
+		: 'Draft risk cannot be activated until the minimum activation information is complete.';
+}
+
+async function assertDraftActivationAllowed(
+	existingRisk: ProjectRisk,
+	nextRisk: ProjectRisk,
+	organisationId: string,
+	client,
+	now = new Date(),
+): Promise<void> {
+	if (riskLifecycleCategory(existingRisk.status) !== 'draft') return;
+
+	const nextLifecycle = riskLifecycleCategory(nextRisk.status);
+	if (nextLifecycle === 'draft') return;
+	if (nextLifecycle === 'closed') {
+		throw new RiskActivationError('Draft risks cannot be closed before activation.', [
+			riskActivationRequirement('activation_path', 'Activation path', 'Activate the Draft risk before closure.'),
+		]);
+	}
+	if (nextRisk.status !== 'open') {
+		throw new RiskActivationError('Draft risks must be activated as Open before moving to another active status.', [
+			riskActivationRequirement('activation_path', 'Activation path', 'Activate the Draft risk as Open before using another active status.'),
+		]);
+	}
+
+	await assertActiveRiskMember(organisationId, nextRisk.owner_id ?? null, client, 'risk owner');
+	const readiness = getRiskActivationReadiness(nextRisk, { now });
+	if (!readiness.ready) throw new RiskActivationError(activationBlockedMessage(readiness.missing), readiness.missing);
+}
+
+function normaliseRiskPayload(
+	input: RiskFormInput,
+	now = new Date(),
+	options: { assessmentCompletedBy?: string | null; clearAssessment?: boolean } = {},
+) {
 	const probability = RISK_LEVELS.includes(input.probability as RiskLevel) ? input.probability as RiskLevel : 'medium';
 	const impact = RISK_LEVELS.includes(input.impact as RiskLevel) ? input.impact as RiskLevel : 'medium';
 	const payload = {
@@ -1667,7 +1809,7 @@ function normaliseRiskPayload(input: RiskFormInput, now = new Date()) {
 		mitigation_plan: input.mitigationPlan?.trim() || null,
 		contingency_plan: input.contingencyPlan?.trim() || null,
 	};
-	return {
+	const normalised = {
 		...payload,
 		rag_status: isActiveRiskStatus(payload.status)
 			? deriveRiskActionStateTone({
@@ -1676,6 +1818,21 @@ function normaliseRiskPayload(input: RiskFormInput, now = new Date()) {
 			})
 			: 'blue',
 	};
+	if (options.assessmentCompletedBy) {
+		return {
+			...normalised,
+			assessment_completed_at: now.toISOString(),
+			assessment_completed_by: options.assessmentCompletedBy,
+		};
+	}
+	if (options.clearAssessment) {
+		return {
+			...normalised,
+			assessment_completed_at: null,
+			assessment_completed_by: null,
+		};
+	}
+	return normalised;
 }
 
 async function insertProjectRiskWithGeneratedReference(
@@ -1725,11 +1882,14 @@ export async function createProjectRisk(
 	await assertActiveRiskMember(organisation.id, ownerId, client, 'risk owner');
 	await assertActiveRiskMember(organisation.id, actionerId, client, 'risk actioner');
 	const eventTime = new Date();
+	const assessmentCompletedBy = hasSubmittedRiskAssessment(draftInput)
+		? await getAuthenticatedRiskUserId(client)
+		: null;
 	const risk = await insertProjectRiskWithGeneratedReference(
 		organisation.id,
 		project.id,
 		project.project_ref,
-		normaliseRiskPayload({ ...draftInput, ownerId, actionerId }, eventTime),
+		normaliseRiskPayload({ ...draftInput, ownerId, actionerId }, eventTime, { assessmentCompletedBy }),
 		client,
 	);
 	if (isActiveRiskStatus(risk.status)) {
@@ -1927,14 +2087,9 @@ export async function updateProjectRisk(
 	client,
 	accessToken?: string,
 ): Promise<ProjectRisk> {
-	const errors = validateRiskFormInput(input);
-	if (Object.keys(errors).length > 0) throw new Error(Object.values(errors)[0]);
-
 	const { workspace, organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.edit', client, accessToken);
 	const ownerId = input.ownerId?.trim() || null;
 	const actionerId = input.actionerId?.trim() || null;
-	await assertActiveRiskMember(organisation.id, ownerId, client, 'risk owner');
-	await assertActiveRiskMember(organisation.id, actionerId, client, 'risk actioner');
 	const eventTime = new Date();
 
 	const { data: existingRiskData, error: existingRiskError } = await client
@@ -1949,11 +2104,32 @@ export async function updateProjectRisk(
 
 	if (existingRiskError) throw existingRiskError;
 	if (!existingRiskData) throw new Error('Risk not found or you do not have access.');
-	const previousActionState = deriveRiskActionStateTone(existingRiskData as ProjectRisk, eventTime);
+	const existingRisk = existingRiskData as ProjectRisk;
+	const validationMode = riskLifecycleCategory(existingRisk.status) === 'draft' ? 'draft' : 'edit';
+	const isExistingDraft = validationMode === 'draft';
+	const errors = validateRiskFormInput(input, { mode: validationMode });
+	if (Object.keys(errors).length > 0) throw new Error(Object.values(errors)[0]);
+	await assertActiveRiskMember(organisation.id, ownerId, client, 'risk owner');
+	await assertActiveRiskMember(organisation.id, actionerId, client, 'risk actioner');
+
+	const assessmentCompletedBy = isExistingDraft && hasSubmittedRiskAssessment(input)
+		? await getAuthenticatedRiskUserId(client)
+		: null;
+	const nextPayload = normaliseRiskPayload({ ...input, ownerId, actionerId }, eventTime, {
+		assessmentCompletedBy,
+		clearAssessment: isExistingDraft && !hasSubmittedRiskAssessment(input),
+	});
+	const proposedRisk = {
+		...existingRisk,
+		...nextPayload,
+		updated_at: eventTime.toISOString(),
+	} as ProjectRisk;
+	await assertDraftActivationAllowed(existingRisk, proposedRisk, organisation.id, client, eventTime);
+	const previousActionState = deriveRiskActionStateTone(existingRisk, eventTime);
 
 	const { data, error } = await client
 		.from('project_risks')
-		.update(normaliseRiskPayload({ ...input, ownerId, actionerId }, eventTime))
+		.update(nextPayload)
 		.eq('organisation_id', organisation.id)
 		.eq('project_id', project.id)
 		.eq('risk_id', riskId)
@@ -1965,7 +2141,7 @@ export async function updateProjectRisk(
 	if (error) throw error;
 	if (!data) throw new Error('Risk not found or you do not have access.');
 	const nextActionState = deriveRiskActionStateTone(data as ProjectRisk, eventTime);
-	const previousLifecycle = riskLifecycleCategory((existingRiskData as ProjectRisk).status);
+	const previousLifecycle = riskLifecycleCategory(existingRisk.status);
 	const nextLifecycle = riskLifecycleCategory((data as ProjectRisk).status);
 	if (previousLifecycle === 'draft' && nextLifecycle === 'active') {
 		await createRiskOpenedNarrativeEntry(data as ProjectRisk, workspace.role, client, eventTime);
@@ -2001,6 +2177,15 @@ export async function transitionProjectRiskLifecycle(
 	if (action === 'reopen' && currentLifecycle !== 'closed') throw new Error('Only closed risks can be reopened.');
 
 	const eventTime = new Date();
+	if (action === 'open') {
+		await assertDraftActivationAllowed(
+			existingRisk,
+			{ ...existingRisk, status: nextStatus, updated_at: eventTime.toISOString() },
+			organisation.id,
+			client,
+			eventTime,
+		);
+	}
 	const nextPayload = {
 		status: nextStatus,
 		rag_status: deriveRiskActionStateTone({ ...existingRisk, status: nextStatus, updated_at: eventTime.toISOString() }, eventTime),
