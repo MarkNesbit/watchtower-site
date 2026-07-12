@@ -6,6 +6,7 @@
 **Implementation follow-up:** WT-RISK-LIFECYCLE-001B completed as the first dependency-led implementation slice, hardening the existing shared lifecycle/action-state contract without changing product behaviour
 **Defect follow-up:** WT-RISK-LIFECYCLE-001B-FIX-001 corrected active-risk review-date due-soon Amber handling in the shared contract; no migration required
 **Implementation follow-up:** WT-RISK-LIFECYCLE-002 completed manual and prompt Draft capture alignment; no migration required
+**Implementation follow-up:** WT-RISK-LIFECYCLE-004 completed Draft Register readiness and age presentation; no migration required
 **Implementation follow-up:** WT-RISK-LIFECYCLE-006 completed Narrative current-state linked-risk row pills; no migration required
 **Repository assessed:** `watchtower-site`
 
@@ -504,6 +505,8 @@ Delivery risk: Medium. The MVP gate is implemented, while organisation-specific 
 
 ### WT-RISK-LIFECYCLE-004 - Risk Register lifecycle/readiness presentation
 
+Status: completed. The Risk Register Draft tab now shows activation readiness and Draft age without changing Draft action-state neutrality. Readiness display uses the same activation-readiness helper as the detail page and server-side activation gate, showing `Ready to activate` or the count/list of missing requirements. Draft age is calculated from `created_at` using calendar-day semantics, and Drafts aged 14 or more days show a neutral `Review Draft` backlog hygiene challenge.
+
 Objective: Reflect activation readiness and action-state rules consistently in the register without changing the underlying gate.
 
 Included scope:
@@ -522,11 +525,11 @@ Dependencies: WT-RISK-LIFECYCLE-003.
 
 Database impact: None expected.
 
-Primary files likely affected: risk register route, `projectRisks.ts`, tests.
+Primary files affected: risk register route, `projectRisks.ts`, tests and docs.
 
 Test scope: Register tabs, filters, sorting, Draft readiness, Needs Action.
 
-Manual validation focus: Draft, Active, Need action and Closed tabs remain coherent.
+Manual validation focus: Draft, Active, Need action and Closed tabs remain coherent; Draft readiness matches detail-page activation readiness; old Drafts show the neutral review challenge only.
 
 Delivery risk: Medium.
 
@@ -622,25 +625,25 @@ Delivery risk: Medium.
 | WT-RISK-LIFECYCLE-001B | WT-RISK-LIFECYCLE-EPIC-001 | One authoritative action-state model; consistency across surfaces | None | Forgiving Amber rule, action-state separation | Governance Profiles |
 | WT-RISK-LIFECYCLE-002 | WT-RISK-LIFECYCLE-EPIC-001 | Every creation route uses same model; lightweight capture | WT-RISK-LIFECYCLE-001B | Initial manual-create status, Draft default, title-only capture, optional details retained, no Draft Narrative | Activation enforcement |
 | WT-RISK-LIFECYCLE-003 | WT-RISK-LIFECYCLE-EPIC-001 | Draft risks cannot progress until minimum activation information is complete | WT-RISK-LIFECYCLE-001B, WT-RISK-LIFECYCLE-002 | Minimum activation fields, owner/review/assessment decisions, edit-route bypass prevention, no duplicate Narrative | Organisation-specific activation rules, approvals, Draft withdrawal |
-| WT-RISK-LIFECYCLE-004 | WT-RISK-LIFECYCLE-EPIC-001 | Risk Register consistency; lifecycle/exposure/action-state separation | WT-RISK-LIFECYCLE-003 | Readiness display and register behaviour | Portfolio aggregation redesign |
+| WT-RISK-LIFECYCLE-004 | WT-RISK-LIFECYCLE-EPIC-001 | Risk Register consistency; lifecycle/exposure/action-state separation | WT-RISK-LIFECYCLE-003 | Draft readiness display, Draft age, 14-day backlog review challenge | Draft withdrawal, portfolio aggregation redesign, configurable age threshold |
 | WT-RISK-LIFECYCLE-005 | WT-RISK-LIFECYCLE-EPIC-001 | Dashboard signals and health consumers remain consistent | WT-RISK-LIFECYCLE-001B | Project action-state versus Health separation | Project Health policy |
 | WT-RISK-LIFECYCLE-006 | WT-RISK-LIFECYCLE-EPIC-001 | Narrative entries preserve text while showing current linked risk state | WT-RISK-LIFECYCLE-001B | Missing/deleted linked risk display | Rewriting historical entries, audit snapshot model |
 | WT-RISK-LIFECYCLE-007 | WT-RISK-LIFECYCLE-EPIC-001 | Lifecycle closure and audit evidence are supportable | WT-RISK-LIFECYCLE-003 | Closure requirements, lifecycle evidence | Approval chains, automated escalation |
 
 ## Recommended next implementation slice
 
-Recommended next slice: WT-RISK-LIFECYCLE-004 - Risk Register lifecycle/readiness presentation.
+Recommended next slice: WT-RISK-LIFECYCLE-005 - Dashboard and project-signal alignment.
 
-Status: WT-RISK-LIFECYCLE-001B, WT-RISK-LIFECYCLE-002, WT-RISK-LIFECYCLE-003 and WT-RISK-LIFECYCLE-006 are complete. The shared lifecycle/action-state contract is hardened, all current initial capture routes create Draft risks, Draft activation is blocked until the minimum activation information is complete, and risk-linked Narrative row pills now show current linked-risk state without rewriting historical entries.
+Status: WT-RISK-LIFECYCLE-001B, WT-RISK-LIFECYCLE-002, WT-RISK-LIFECYCLE-003, WT-RISK-LIFECYCLE-004 and WT-RISK-LIFECYCLE-006 are complete. The shared lifecycle/action-state contract is hardened, all current initial capture routes create Draft risks, Draft activation is blocked until the minimum activation information is complete, the Draft Register tab exposes readiness and age without changing Draft neutrality, and risk-linked Narrative row pills now show current linked-risk state without rewriting historical entries.
 
 Defect follow-up: WT-RISK-LIFECYCLE-001B-FIX-001 records the MVP review-date window in the shared contract. Active risks with no review date are Amber, overdue review dates and review dates due today are Red, review dates due tomorrow or within the next three calendar days are Amber, and later review dates are Green. The three-day window is an MVP constant that can later move into configurable Governance Profiles. No database migration or production data change is required.
 
 Why first:
 
-- It is the next dependency after the activation gate.
-- It can surface Draft readiness consistently in the Risk Register without changing activation rules.
-- It can build on the central lifecycle/action-state contract, unified Draft capture and shared activation-readiness helper.
-- It can keep Risk Register views consistent while building on the completed Narrative live-state display slice.
+- It is the next remaining consumer-alignment slice after Register and Narrative presentation have been addressed.
+- It can verify parent/dashboard/project-list consumers continue to use the shared active-risk contract.
+- It can keep Project Health separate while preserving Draft/Closed neutrality.
+- It can build on the completed Draft readiness, activation and Narrative live-state slices.
 
 ## WT-RISK-LIFECYCLE-001A assessment constraints confirmation
 

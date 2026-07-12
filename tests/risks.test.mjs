@@ -24,6 +24,8 @@ import {
 	deriveWatchtowerDefaultRiskExposureTone,
 	filterAndSortRisksForRegister,
 	getActiveRiskExposureCounts,
+	getDraftRiskAgeInDays,
+	getDraftRiskRegisterReadinessDisplay,
 	getExposureChartSummary,
 	getExposureDistribution,
 	getExposurePercentage,
@@ -54,6 +56,7 @@ import {
 	parseRiskRegisterPageSize,
 	preflightDraftProjectRisksFromPrompts,
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
+	DRAFT_RISK_REVIEW_CHALLENGE_AGE_DAYS,
 	DRAFT_RISK_STATUSES,
 	RISK_ACTIVATION_DESCRIPTION_MIN_LENGTH,
 	RISK_REGISTER_EXPOSURE_FILTERS,
@@ -1133,6 +1136,17 @@ test('Risk Register applies tab-specific default sorting for Draft and Closed vi
 		impact: 'low',
 		created_at: '2026-06-02T10:00:00Z',
 	});
+	const draftMedium = registerRisk({
+		risk_id: 'risk-8',
+		risk_ref: 'Risk-HHH-008',
+		risk_sequence: 8,
+		status: 'draft',
+		probability: 'medium',
+		impact: 'medium',
+		assessment_completed_at: '2026-06-03T10:00:00Z',
+		assessment_completed_by: 'user-1',
+		created_at: '2026-06-03T10:00:00Z',
+	});
 	const draftHighOlder = registerRisk({
 		risk_id: 'risk-3',
 		risk_ref: 'Risk-HHH-003',
@@ -1178,11 +1192,12 @@ test('Risk Register applies tab-specific default sorting for Draft and Closed vi
 		updated_at: '2026-06-20T10:00:00Z',
 	});
 
-	const risks = [draftUnassessed, draftLow, draftHighNewer, closedOlder, draftCritical, closedNewer, draftHighOlder];
+	const risks = [draftUnassessed, draftLow, draftHighNewer, closedOlder, draftCritical, closedNewer, draftHighOlder, draftMedium];
 	assert.deepEqual(filterAndSortRisksForRegister(risks, { view: 'draft' }, now).map((risk) => risk.risk_ref), [
 		'Risk-HHH-005',
 		'Risk-HHH-003',
 		'Risk-HHH-004',
+		'Risk-HHH-008',
 		'Risk-HHH-002',
 		'Risk-HHH-001',
 	]);
@@ -1918,6 +1933,77 @@ test('Risk activation readiness requires minimum Draft activation information on
 		assessment_completed_at: null,
 	}, { now });
 	assert.deepEqual(placeholderMedium.missing.map((requirement) => requirement.key), ['assessment']);
+});
+
+test('Risk Register Draft readiness display reuses activation requirements and exposes Draft age', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	const readyDraft = registerRisk({
+		status: 'draft',
+		title: 'Supplier authority unclear',
+		description: 'Supplier authority is unclear and could delay project decisions.',
+		owner_id: 'owner-1',
+		probability: 'medium',
+		impact: 'high',
+		assessment_completed_at: '2026-07-12T10:00:00Z',
+		assessment_completed_by: 'user-1',
+		review_date: '2026-07-12',
+		created_at: '2026-07-12T08:30:00Z',
+	});
+	const missingOne = getDraftRiskRegisterReadinessDisplay({ ...readyDraft, review_date: '' }, now);
+	const missingTwo = getDraftRiskRegisterReadinessDisplay({
+		...readyDraft,
+		owner_id: null,
+		assessment_completed_at: null,
+	}, now);
+	const missingAllDraft = {
+		...readyDraft,
+		title: '',
+		description: 'short',
+		owner_id: null,
+		assessment_completed_at: null,
+		review_date: '',
+	};
+	const missingAll = getDraftRiskRegisterReadinessDisplay(missingAllDraft, now);
+
+	assert.deepEqual(getDraftRiskRegisterReadinessDisplay(readyDraft, now), {
+		ready: true,
+		label: 'Ready to activate',
+		missingCount: 0,
+		missing: [],
+		missingSummary: 'All minimum activation requirements are complete.',
+		ageDays: 0,
+		ageLabel: '0 days',
+		reviewChallenge: false,
+		reviewLabel: '',
+		reviewDescription: '0 days old.',
+	});
+	assert.equal(missingOne.label, '1 requirement missing');
+	assert.deepEqual(missingOne.missing.map((requirement) => requirement.label), ['Review date']);
+	assert.equal(missingTwo.label, '2 requirements missing');
+	assert.deepEqual(missingTwo.missing.map((requirement) => requirement.label), ['Risk owner', 'Probability and impact assessment']);
+	assert.equal(missingAll.label, '5 requirements missing');
+	assert.deepEqual(missingAll.missing.map((requirement) => requirement.key), ['title', 'description', 'owner', 'assessment', 'review_date']);
+	assert.deepEqual(getRiskActivationReadiness(missingAllDraft, { now }), {
+		ready: false,
+		missing: missingAll.missing,
+	});
+
+	assert.equal(getDraftRiskAgeInDays('2026-07-12T00:00:00Z', now), 0);
+	assert.equal(getDraftRiskAgeInDays('2026-07-11T23:59:59Z', now), 1);
+	assert.equal(getDraftRiskAgeInDays('2026-06-29T12:00:00Z', now), 13);
+	assert.equal(getDraftRiskAgeInDays('2026-06-28T12:00:00Z', now), DRAFT_RISK_REVIEW_CHALLENGE_AGE_DAYS);
+	assert.equal(getDraftRiskAgeInDays('2026-06-21T12:00:00Z', now), 21);
+	assert.equal(getDraftRiskRegisterReadinessDisplay({ ...readyDraft, created_at: '2026-06-29T12:00:00Z' }, now).reviewChallenge, false);
+	assert.deepEqual(
+		[
+			getDraftRiskRegisterReadinessDisplay({ ...readyDraft, created_at: '2026-06-28T12:00:00Z' }, now),
+			getDraftRiskRegisterReadinessDisplay({ ...readyDraft, created_at: '2026-06-21T12:00:00Z' }, now),
+		].map((display) => [display.ageLabel, display.reviewChallenge, display.reviewLabel]),
+		[
+			['14 days', true, 'Review Draft'],
+			['21 days', true, 'Review Draft'],
+		],
+	);
 });
 
 test('Risk exposure derives from probability and impact through the Watchtower default assessment', () => {
@@ -3430,10 +3516,13 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug \?\? '', accessToken\)/);
 	assert.match(route, /data-risk-register-table/);
 	for (const heading of ['Ref', 'Risk', 'Exposure', 'Lifecycle / Status', 'Owner', 'Review due', 'Updated']) {
-		assert.match(route, new RegExp(`<th scope="col">${heading}</th>`));
+		assert.match(route, new RegExp(`<th scope="col"[^>]*>${heading}</th>`));
+	}
+	for (const draftHeading of ['Readiness', 'Draft age']) {
+		assert.match(route, new RegExp(`showDraftColumns && <th scope="col"[^>]*>${draftHeading}</th>`));
 	}
 	for (const removedHeading of ['RAG', 'Actioner', 'Action state', 'Actions']) {
-		assert.doesNotMatch(route, new RegExp(`<th scope="col">${removedHeading}</th>`));
+		assert.doesNotMatch(route, new RegExp(`<th scope="col"[^>]*>${removedHeading}</th>`));
 	}
 	assert.match(route, /No risks have been recorded for this project yet\./);
 	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
@@ -3442,6 +3531,7 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /data-risk-lifecycle=\{lifecycleCategory\}/);
 	assert.match(route, /normaliseRiskRegisterViewTab\(registerParams\.get\('view'\)\)/);
 	assert.match(route, /selectedSort = requestedSort \? normaliseRiskRegisterSort\(requestedSort\) : defaultSort/);
+	assert.match(route, /showDraftColumns = selectedView === 'draft'/);
 	assert.match(route, /parseRiskRegisterPage\(registerParams\.get\('page'\)\)/);
 	assert.match(route, /parseRiskRegisterPageSize\(registerParams\.get\('pageSize'\)\)/);
 	assert.match(route, /paginateRisksForRegister\(filteredRisks, requestedPage, selectedPageSize\)/);
@@ -3466,6 +3556,14 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.doesNotMatch(route, /data-closed-risk-register/);
 	assert.doesNotMatch(route, /data-closed-risks-section/);
 	assert.match(route, /getRiskRegisterExposureDisplay\(risk\)/);
+	assert.match(route, /getDraftRiskRegisterReadinessDisplay\(risk, registerNow\)/);
+	assert.match(route, /data-risk-draft-readiness/);
+	assert.match(route, /<details class="risk-register-draft-readiness__details">/);
+	assert.match(route, /Show missing activation requirements/);
+	assert.match(route, /risk-register-draft-readiness__label--ready/);
+	assert.match(route, /Open the Draft risk detail page to complete these fields\./);
+	assert.match(route, /data-risk-draft-age/);
+	assert.match(route, /risk-register-draft-age--challenge/);
 	assert.doesNotMatch(route, /statusLabel="Exposure"/);
 	assert.match(route, /getRiskReferencePillPresentation\(risk, registerNow\)/);
 	assert.doesNotMatch(route, /actionStateFor\(risk\)/);
@@ -3522,7 +3620,7 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /No risks currently need action\./);
 	assert.match(route, /No draft risks\./);
 	assert.match(route, /No closed risks\./);
-	assert.match(route, /<strong title=\{risk\.title\}>\{risk\.title\}<\/strong>/);
+	assert.match(route, /<a class="risk-register-title-link" href=\{riskHref\} title=\{risk\.title\}>\{risk\.title\}<\/a>/);
 	assert.doesNotMatch(route, /risk-register-table__open/);
 	assert.doesNotMatch(route, />Open<\/a>/);
 	assert.match(route, /pagedRisks\.map\(\(risk\) =>/);

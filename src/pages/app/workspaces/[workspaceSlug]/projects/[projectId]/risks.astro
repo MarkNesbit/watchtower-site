@@ -12,6 +12,7 @@ import {
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
 	defaultRiskRegisterSortForView,
 	filterAndSortRisksForRegister,
+	getDraftRiskRegisterReadinessDisplay,
 	getExposureDistribution,
 	getRiskRegisterExposureDisplay,
 	getRiskRegisterPageNumbers,
@@ -139,6 +140,7 @@ const registerParams = registerUrl.searchParams;
 const riskPromptDraftCreatePath = `${registerPath.replace(/\/$/, '')}/prompt-drafts`;
 const registerNow = new Date();
 const selectedView = normaliseRiskRegisterViewTab(registerParams.get('view'));
+const showDraftColumns = selectedView === 'draft';
 const requestedSort = registerParams.get('sort');
 const defaultSort = defaultRiskRegisterSortForView(selectedView);
 const selectedSort = requestedSort ? normaliseRiskRegisterSort(requestedSort) : defaultSort;
@@ -525,13 +527,15 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 													<table class="simple-table risk-register-table" data-risk-register-table>
 														<thead>
 															<tr>
-																<th scope="col">Ref</th>
-																<th scope="col">Risk</th>
-																<th scope="col">Exposure</th>
-																<th scope="col">Lifecycle / Status</th>
-																<th scope="col">Owner</th>
-																<th scope="col">Review due</th>
-																<th scope="col">Updated</th>
+																<th scope="col" class="risk-register-table__col-ref">Ref</th>
+																<th scope="col" class="risk-register-table__col-risk">Risk</th>
+																<th scope="col" class="risk-register-table__col-exposure">Exposure</th>
+																<th scope="col" class="risk-register-table__col-status">Lifecycle / Status</th>
+																{showDraftColumns && <th scope="col" class="risk-register-table__col-readiness">Readiness</th>}
+																{showDraftColumns && <th scope="col" class="risk-register-table__col-age">Draft age</th>}
+																<th scope="col" class="risk-register-table__col-owner">Owner</th>
+																<th scope="col" class="risk-register-table__col-review">Review due</th>
+																<th scope="col" class="risk-register-table__col-updated">Updated</th>
 															</tr>
 														</thead>
 														<tbody>
@@ -544,6 +548,8 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 																const lifecycle = riskLifecycleLabel(risk.status);
 																const referencePill = getRiskReferencePillPresentation(risk, registerNow);
 																const referenceAriaLabel = `Open ${referencePill.ariaLabel}`;
+																const draftReadiness = showDraftColumns ? getDraftRiskRegisterReadinessDisplay(risk, registerNow) : null;
+																const draftReadinessId = `risk-draft-readiness-${risk.risk_id}`;
 																return (
 																	<tr data-risk-lifecycle={lifecycleCategory}>
 																		<td>
@@ -563,7 +569,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 																			</a>
 																		</td>
 																		<td class="risk-register-table__risk">
-																			<strong title={risk.title}>{risk.title}</strong>
+																			<a class="risk-register-title-link" href={riskHref} title={risk.title}>{risk.title}</a>
 																		</td>
 																		<td>
 																			<RagReferencePill
@@ -579,6 +585,46 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 																				<span>{riskDisplayLabel(risk.status)}</span>
 																			</span>
 																		</td>
+																		{showDraftColumns && draftReadiness && (
+																			<td>
+																				<div class="risk-register-draft-readiness" data-risk-draft-readiness>
+																					{draftReadiness.ready ? (
+																						<span
+																							class="risk-register-draft-readiness__label risk-register-draft-readiness__label--ready"
+																							title={draftReadiness.missingSummary}
+																							aria-label={`${risk.risk_ref}: ${draftReadiness.label}. ${draftReadiness.missingSummary}`}
+																						>{draftReadiness.label}</span>
+																					) : (
+																						<details class="risk-register-draft-readiness__details">
+																							<summary aria-controls={draftReadinessId} aria-label={`${risk.risk_ref}: ${draftReadiness.label}. Show missing activation requirements.`}>
+																								<span>{draftReadiness.label}</span>
+																							</summary>
+																							<div id={draftReadinessId} class="risk-register-draft-readiness__panel">
+																								<ul>
+																									{draftReadiness.missing.map((requirement) => (
+																										<li><strong>{requirement.label}</strong><span>{requirement.message}</span></li>
+																									))}
+																								</ul>
+																								<p>Open the Draft risk detail page to complete these fields.</p>
+																							</div>
+																						</details>
+																					)}
+																				</div>
+																			</td>
+																		)}
+																		{showDraftColumns && draftReadiness && (
+																			<td>
+																				<span
+																					class={`risk-register-draft-age${draftReadiness.reviewChallenge ? ' risk-register-draft-age--challenge' : ''}`}
+																					aria-label={`${risk.risk_ref}: Draft age ${draftReadiness.reviewDescription}`}
+																					title={draftReadiness.reviewDescription}
+																					data-risk-draft-age
+																				>
+																					<span>{draftReadiness.ageLabel}</span>
+																					{draftReadiness.reviewChallenge && <strong>{draftReadiness.reviewLabel}</strong>}
+																				</span>
+																			</td>
+																		)}
 																		<td>
 																			<span class={`risk-register-table__owner${risk.owner_id ? '' : ' risk-register-table__owner--missing'}`}>
 																				{ownerLabel}
@@ -2110,31 +2156,39 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		table-layout: fixed;
 	}
 
-	.risk-register-table th:first-child {
+	.risk-register-table__col-ref {
 		width: 11.75rem;
 	}
 
-	.risk-register-table th:nth-child(2) {
+	.risk-register-table__col-risk {
 		width: 23rem;
 	}
 
-	.risk-register-table th:nth-child(3) {
+	.risk-register-table__col-exposure {
 		width: 9.25rem;
 	}
 
-	.risk-register-table th:nth-child(4) {
+	.risk-register-table__col-status {
 		width: 10rem;
 	}
 
-	.risk-register-table th:nth-child(5) {
+	.risk-register-table__col-readiness {
+		width: 13.5rem;
+	}
+
+	.risk-register-table__col-age {
+		width: 9.75rem;
+	}
+
+	.risk-register-table__col-owner {
 		width: 10rem;
 	}
 
-	.risk-register-table th:nth-child(6) {
+	.risk-register-table__col-review {
 		width: 9rem;
 	}
 
-	.risk-register-table th:nth-child(7) {
+	.risk-register-table__col-updated {
 		width: 11rem;
 	}
 
@@ -2177,6 +2231,24 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		line-height: 1.35;
 	}
 
+	.risk-register-title-link {
+		display: block;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--text);
+		font-weight: 850;
+		line-height: 1.35;
+		text-decoration: none;
+	}
+
+	.risk-register-title-link:hover,
+	.risk-register-title-link:focus-visible {
+		color: var(--accent-strong);
+		text-decoration: underline;
+		text-underline-offset: 0.16em;
+	}
+
 	.risk-register-table__status,
 	.risk-register-table__exposure-note,
 	.risk-register-table__review {
@@ -2202,6 +2274,99 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		font-size: 0.72rem;
 		font-weight: 820;
 		line-height: 1.2;
+	}
+
+	.risk-register-draft-readiness,
+	.risk-register-draft-age {
+		display: grid;
+		gap: 0.22rem;
+		align-items: start;
+		font-size: 0.82rem;
+		line-height: 1.25;
+	}
+
+	.risk-register-draft-readiness__label,
+	.risk-register-draft-readiness__details summary,
+	.risk-register-draft-age > span {
+		color: var(--text);
+		font-weight: 850;
+	}
+
+	.risk-register-draft-readiness__label,
+	.risk-register-draft-readiness__details summary {
+		display: inline-flex;
+		width: fit-content;
+		max-width: 100%;
+		border-radius: 999px;
+		border: 1px solid rgba(148, 163, 184, 0.34);
+		padding: 0.22rem 0.54rem;
+		background: rgba(148, 163, 184, 0.08);
+		cursor: pointer;
+	}
+
+	.risk-register-draft-readiness__label--ready {
+		border-color: rgba(56, 189, 248, 0.46);
+		background: rgba(56, 189, 248, 0.12);
+		color: var(--accent-strong);
+		cursor: default;
+	}
+
+	.risk-register-draft-readiness__details summary {
+		list-style: none;
+	}
+
+	.risk-register-draft-readiness__details summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.risk-register-draft-readiness__details summary:focus-visible {
+		outline: 3px solid var(--accent-strong);
+		outline-offset: 3px;
+	}
+
+	.risk-register-draft-readiness__panel {
+		width: min(20rem, 68vw);
+		margin-top: 0.42rem;
+		border: 1px solid rgba(148, 163, 184, 0.28);
+		border-radius: 0.5rem;
+		padding: 0.72rem;
+		background: var(--panel);
+		box-shadow: 0 18px 38px rgba(2, 6, 23, 0.32);
+		color: var(--text);
+	}
+
+	.risk-register-draft-readiness__panel ul {
+		display: grid;
+		gap: 0.44rem;
+		margin: 0;
+		padding-left: 1rem;
+	}
+
+	.risk-register-draft-readiness__panel li {
+		padding-left: 0.1rem;
+	}
+
+	.risk-register-draft-readiness__panel li span,
+	.risk-register-draft-readiness__panel p {
+		display: block;
+		margin: 0.08rem 0 0;
+		color: var(--muted-strong);
+		font-size: 0.78rem;
+	}
+
+	.risk-register-draft-readiness__panel p {
+		margin-top: 0.6rem;
+	}
+
+	.risk-register-draft-age--challenge strong {
+		width: fit-content;
+		border-radius: 999px;
+		border: 1px solid rgba(56, 189, 248, 0.44);
+		padding: 0.18rem 0.48rem;
+		color: var(--accent-strong);
+		background: rgba(56, 189, 248, 0.1);
+		font-size: 0.72rem;
+		line-height: 1.1;
 	}
 
 	.risk-register-table__owner--missing,
