@@ -17,7 +17,7 @@ import { can } from '../../../../../lib/permissions';
 import { deriveProjectActionState, projectActionStateLabel } from '../../../../../lib/projectAttention';
 import { buildProjectDateCards, listProjectDates, type ProjectDateCard } from '../../../../../lib/projectDates';
 import { getUnseenProjectNarrativeCount } from '../../../../../lib/projectNarrative';
-import { buildProjectDetailsPath, buildProjectNarrativePath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
+import { buildProjectActionsPath, buildProjectDetailsPath, buildProjectNarrativePath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
 import { buildRiskRegisterViewPath, deriveProjectRiskSignal, listProjectRisks, riskRegisterViewForProjectRiskSignal, type ProjectRisk, type RiskRegisterViewTab } from '../../../../../lib/projectRisks';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../lib/supabaseServer';
 
@@ -60,7 +60,7 @@ type ProjectTile = {
 	statusLabel?: string;
 	ariaLabel?: string;
 	href: string | null;
-	destination?: 'details' | 'narrative' | 'risks';
+	destination?: 'details' | 'narrative' | 'risks' | 'actions';
 	featureKey?: FeatureKey;
 };
 
@@ -92,7 +92,7 @@ const projectTiles: ProjectTile[] = [
 	{ title: 'Dependencies', icon: '↔', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Dependencies, Unknown state', href: '#dependencies' },
 	{ title: 'Assumptions', icon: '?', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Assumptions, Unknown state', href: '#assumptions' },
 	{ title: 'Decisions', icon: '⚖', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Decisions, Unknown state', href: '#decisions' },
-	{ title: 'Actions', icon: '☑', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Actions, Unknown state', href: '#actions' },
+	{ title: 'Actions', icon: '☑', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Actions, Unknown state', href: null, destination: 'actions' },
 ];
 
 const gatedFeatureKeys = [...new Set(projectTiles.flatMap((tile) => tile.featureKey ? [tile.featureKey] : []))];
@@ -216,7 +216,9 @@ const visibleProjectTiles = projectTiles.flatMap((tile) => {
 			? buildProjectNarrativePath(workspaceSlug ?? '', project.slug)
 			: project && tile.destination === 'details'
 				? buildProjectDetailsPath(workspaceSlug ?? '', project.slug)
-				: tile.href;
+				: project && tile.destination === 'actions'
+					? buildProjectActionsPath(workspaceSlug ?? '', project.slug)
+					: tile.href;
 	const isAccessible = Boolean(href) && (!featureAccess || featureAccess.isAccessible);
 	const unavailableReason = featureAccess && !featureAccess.isAccessible
 		? featureAccess.unavailableReason
@@ -234,7 +236,9 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => {
 			? projectNarrativeTileSignal
 			: tile.destination === 'risks'
 				? riskTileSignal
-				: tile.attentionTone ?? 'unknown';
+				: tile.destination === 'actions'
+					? projectActionState
+					: tile.attentionTone ?? 'unknown';
 	return {
 		...tile,
 		iconTone: tileSignal,

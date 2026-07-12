@@ -1,0 +1,546 @@
+---
+import AuthenticatedLayout from '../../../../../../../layouts/AuthenticatedLayout.astro';
+import EmptyState from '../../../../../../../components/app/EmptyState.astro';
+import ProjectContentPanel from '../../../../../../../components/app/ProjectContentPanel.astro';
+import ProjectControlPanel from '../../../../../../../components/app/ProjectControlPanel.astro';
+import ProjectPageHero from '../../../../../../../components/app/ProjectPageHero.astro';
+import { can } from '../../../../../../../lib/permissions';
+import {
+	ACTION_DISPLAY_LABELS,
+	ACTION_SOURCE_DISPLAY_LABELS,
+	actionProfileName,
+	actionTimingDisplayLabel,
+	amendProjectActionBrief,
+	assignProjectAction,
+	canManageProjectAction,
+	canTakeOverProjectAction,
+	cancelProjectAction,
+	changeProjectActionDueDate,
+	completeProjectAction,
+	deriveActionTimingState,
+	getProjectAction,
+	listEligibleActioners,
+	listProjectActionHistory,
+	reissueProjectAction,
+	returnProjectActionToActioner,
+	sourceLabelForAction,
+	takeOverProjectActionAcceptance,
+	type ProjectAction,
+} from '../../../../../../../lib/projectActions';
+import { buildLoginRedirectPath, createSupabaseServerClient, getServerAccessToken, isSupabaseAuthSessionError } from '../../../../../../../lib/supabaseServer';
+import { buildProjectActionPath, buildProjectActionsPath, buildProjectDetailsPath, buildProjectNarrativePath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../../lib/projects';
+
+const projectSlug = Astro.params.projectId;
+const workspaceSlug = Astro.params.workspaceSlug;
+const actionId = Astro.params.actionId;
+const accessToken = getServerAccessToken(Astro.cookies);
+const sessionRedirectPath = buildLoginRedirectPath(Astro.url.pathname);
+let project = null;
+let action: ProjectAction | null = null;
+let history = [];
+let eligibleActioners = [];
+let workspaceName = '';
+let workspaceRole = '';
+let actorId = '';
+let message = '';
+let actionError = '';
+let successMessage = Astro.url.searchParams.get('created') === '1' ? 'Action created.' : '';
+
+const formatDate = (value, fallback = 'Not available') => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${String(value).slice(0, 10)}T00:00:00Z`))
+	: fallback;
+const formatDateTime = (value, fallback = 'Not available') => value
+	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
+	: fallback;
+const timingTone = (state) => state === 'overdue' || state === 'due_today'
+	? 'red'
+	: ['due_soon', 'unassigned', 'reassignment_required'].includes(state)
+		? 'amber'
+		: state === 'complete'
+			? 'green'
+			: state === 'cancelled'
+				? 'grey'
+				: 'blue';
+const sourceHref = (record, projectRecord) => {
+	if (!workspaceSlug || !projectRecord) return '';
+	if (record.source_type === 'project') return buildProjectPath(workspaceSlug, projectRecord.slug);
+	if (record.source_type === 'project_details') return buildProjectDetailsPath(workspaceSlug, projectRecord.slug);
+	if (record.source_type === 'narrative') return buildProjectNarrativePath(workspaceSlug, projectRecord.slug);
+	if (record.source_type === 'risk' && record.source_record_id) return buildProjectRiskPath(workspaceSlug, projectRecord.slug, record.source_record_id);
+	return '';
+};
+const safeEvidenceHref = (value) => {
+	const text = String(value ?? '').trim();
+	return /^https?:\/\//i.test(text) ? text : '';
+};
+const jsonSummary = (value) => {
+	if (!value || typeof value !== 'object') return '';
+	return Object.entries(value)
+		.map(([key, item]) => `${key.replaceAll('_', ' ')}: ${item ?? 'None'}`)
+		.join('; ');
+};
+
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug ?? '', accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+	const { data: userData } = accessToken
+		? await serverSupabase.auth.getUser(accessToken)
+		: await serverSupabase.auth.getUser();
+	actorId = userData?.user?.id ?? '';
+
+	if (!workspace || !organisation) {
+		message = 'Action not found or you do not have access.';
+		Astro.response.status = 404;
+	} else if (!can(workspace.role, 'action.view')) {
+		message = 'You do not have permission to view project Actions.';
+		Astro.response.status = 403;
+	} else {
+		workspaceName = organisation.name;
+		workspaceRole = workspace.role;
+		const { data, error } = await serverSupabase
+			.from('projects')
+			.select('id, name, project_ref, slug')
+			.eq('slug', projectSlug)
+			.eq('organisation_id', organisation.id)
+			.is('deleted_at', null)
+			.is('archived_at', null)
+			.maybeSingle();
+		if (error) throw error;
+
+		if (!data) {
+			message = 'Action not found or you do not have access.';
+			Astro.response.status = 404;
+		} else {
+			project = data;
+			action = actionId ? await getProjectAction(organisation.id, data.id, actionId, workspace.role, serverSupabase) : null;
+			if (!action) {
+				message = 'Action not found or you do not have access.';
+				Astro.response.status = 404;
+			} else {
+				if (Astro.request.method === 'POST') {
+					if (!accessToken) return Astro.redirect(sessionRedirectPath);
+					const formData = await Astro.request.formData();
+					const intent = String(formData.get('intent') ?? '');
+					const expectedStatus = String(formData.get('expected_status') ?? action.status);
+					const expectedUpdatedAt = String(formData.get('expected_updated_at') ?? action.updated_at);
+					const detailPath = buildProjectActionPath(workspaceSlug ?? '', data.slug, action.id);
+					try {
+						if (intent === 'amend-brief') {
+							await amendProjectActionBrief(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, brief: String(formData.get('brief') ?? '') });
+						} else if (intent === 'change-due-date') {
+							await changeProjectActionDueDate(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, dueDate: String(formData.get('due_date') ?? '') });
+						} else if (intent === 'assign-actioner') {
+							const nextActioner = String(formData.get('actioner_id') ?? '');
+							await assignProjectAction(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, actionerId: nextActioner || null });
+						} else if (intent === 'reissue') {
+							const nextActioner = String(formData.get('actioner_id') ?? '');
+							await reissueProjectAction(serverSupabase, {
+								actionId: action.id,
+								expectedStatus,
+								expectedUpdatedAt,
+								brief: String(formData.get('brief') ?? '') || null,
+								dueDate: String(formData.get('due_date') ?? '') || null,
+								actionerId: nextActioner || null,
+							});
+						} else if (intent === 'complete') {
+							await completeProjectAction(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt });
+						} else if (intent === 'return-to-actioner') {
+							await returnProjectActionToActioner(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, reason: String(formData.get('reason') ?? '') });
+						} else if (intent === 'cancel') {
+							await cancelProjectAction(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, reason: String(formData.get('reason') ?? '') });
+						} else if (intent === 'takeover') {
+							await takeOverProjectActionAcceptance(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, reason: String(formData.get('reason') ?? '') });
+						} else {
+							throw new Error('Select a valid Action operation.');
+						}
+						return Astro.redirect(`${detailPath}?updated=1`);
+					} catch (error) {
+						if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
+						actionError = error instanceof Error ? error.message : 'Unable to update Action.';
+					}
+				}
+
+				if (Astro.url.searchParams.get('updated') === '1') successMessage = 'Action updated.';
+				try {
+					eligibleActioners = await listEligibleActioners(organisation.id, workspace.role, serverSupabase);
+				} catch {
+					eligibleActioners = [];
+				}
+				history = await listProjectActionHistory(organisation.id, data.id, action.id, workspace.role, serverSupabase);
+			}
+		}
+	}
+} catch (error) {
+	if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
+	message = error instanceof Error ? error.message : 'Unable to load Action detail.';
+	Astro.response.status = 500;
+}
+
+const timing = action ? deriveActionTimingState(action, new Date()) : 'open';
+const canManage = action ? canManageProjectAction(action, actorId, workspaceRole) : false;
+const canTakeover = action ? canTakeOverProjectAction(action, actorId, workspaceRole) : false;
+const canReturnToActioner = canManage && action?.status === 'submitted';
+const canComplete = canManage && action?.status === 'submitted';
+const canReissue = canManage && ['returned_to_raiser', 'rejected_by_actioner'].includes(action?.status ?? '');
+const canAssign = canManage && action?.status !== 'submitted';
+const canCancel = canManage;
+const actionerWorkflowDeferred = action?.actioner_id === actorId && ['open', 'returned_to_actioner'].includes(action.status);
+const actionsBackHref = project ? buildProjectActionsPath(workspaceSlug ?? '', project.slug) : workspaceSlug && projectSlug ? buildProjectActionsPath(workspaceSlug, projectSlug) : '/app/projects';
+const sourceUrl = action && project ? sourceHref(action, project) : '';
+---
+<AuthenticatedLayout title={action && project ? `${action.action_ref} — ${project.name} | WatchTower` : 'Action detail | WatchTower'}>
+	<section class="action-detail-page" data-action-detail-route>
+		{project && action ? (
+			<>
+				<ProjectPageHero
+					workspaceName={workspaceName}
+					projectName={project.name}
+					projectRef={project.project_ref}
+					title={action.action_ref}
+					description={action.brief}
+					headingId="action-detail-heading"
+				/>
+
+				<ProjectControlPanel title="Action controls" status={can(workspaceRole, 'action.create') ? 'Create and edit enabled' : 'Read-only access'} headingId="action-detail-controls-heading">
+					<p class="action-detail-copy">Workflow, timing, responsibility and immutable history are shown separately.</p>
+				</ProjectControlPanel>
+
+				<ProjectContentPanel title="Current Action" helper="Inspect the source-of-truth Action record and available management controls." headingId="action-detail-current-heading">
+					<div slot="action" class="action-detail-actions">
+						<a class="button button--secondary" href={actionsBackHref}>Back to Actions</a>
+						<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
+					</div>
+
+					{successMessage && <p class="action-detail-success" role="status">{successMessage}</p>}
+					{actionError && <p class="action-detail-error" role="alert">{actionError}</p>}
+
+					<div class="action-detail-grid">
+						<section class="action-detail-card action-detail-card--wide">
+							<div class="action-detail-heading-row">
+								<h3>{action.action_ref}</h3>
+								<div>
+									<span class={`actions-pill actions-pill--workflow actions-pill--${action.status}`}>{ACTION_DISPLAY_LABELS[action.status]}</span>
+									<span class={`actions-pill actions-pill--${timingTone(timing)}`}>{actionTimingDisplayLabel(timing)}</span>
+								</div>
+							</div>
+							<p>{action.brief}</p>
+						</section>
+
+						<section class="action-detail-card">
+							<h3>Responsibility</h3>
+							<dl>
+								<div><dt>Actioner</dt><dd>{action.actioner_id ? actionProfileName(action.actioner, 'Workspace member') : 'Unassigned'}</dd></div>
+								<div><dt>Raiser</dt><dd>{actionProfileName(action.raiser, 'Workspace member')}</dd></div>
+								<div><dt>Acceptance owner</dt><dd>{actionProfileName(action.acceptance_owner, 'Workspace member')}</dd></div>
+							</dl>
+						</section>
+
+						<section class="action-detail-card">
+							<h3>Timing</h3>
+							<dl>
+								<div><dt>Due date</dt><dd>{formatDate(action.due_date)}</dd></div>
+								<div><dt>Created</dt><dd>{formatDateTime(action.created_at)}</dd></div>
+								<div><dt>Updated</dt><dd>{formatDateTime(action.updated_at)}</dd></div>
+								{action.submitted_at && <div><dt>Submitted</dt><dd>{formatDateTime(action.submitted_at)}</dd></div>}
+								{action.completed_at && <div><dt>Completed</dt><dd>{formatDateTime(action.completed_at)}</dd></div>}
+								{action.cancelled_at && <div><dt>Cancelled</dt><dd>{formatDateTime(action.cancelled_at)}</dd></div>}
+							</dl>
+						</section>
+
+						<section class="action-detail-card">
+							<h3>Source</h3>
+							<p>{ACTION_SOURCE_DISPLAY_LABELS[action.source_type]}</p>
+							<p>{sourceUrl ? <a class="text-link" href={sourceUrl}>{sourceLabelForAction(action)}</a> : sourceLabelForAction(action)}</p>
+						</section>
+
+						{action.latest_response && (
+							<section class="action-detail-card action-detail-card--wide">
+								<h3>Current response</h3>
+								<p>{action.latest_response}</p>
+								{safeEvidenceHref(action.latest_evidence_url) && <a class="text-link" href={safeEvidenceHref(action.latest_evidence_url)} target="_blank" rel="noreferrer">Open evidence link<span class="visually-hidden"> in a new tab</span></a>}
+							</section>
+						)}
+					</div>
+
+					{actionerWorkflowDeferred && (
+						<EmptyState title="Actioner response controls arrive in the next workflow slice." data-actioner-workflow-deferred>
+							<p>You are the assigned Actioner. Submit, return to raiser and reject response forms are intentionally deferred to WT-ACTION-003.</p>
+						</EmptyState>
+					)}
+
+					<section class="action-management" aria-labelledby="action-management-heading" data-action-management>
+						<h3 id="action-management-heading">Management controls</h3>
+						{!canManage && !canTakeover ? (
+							<p class="action-detail-muted" data-action-read-only-state>{can(workspaceRole, 'action.view') && !can(workspaceRole, 'action.manage') ? 'Viewer access is read-only.' : 'No management controls are available for your current authority on this Action.'}</p>
+						) : (
+							<div class="action-management-grid">
+								{canManage && (
+									<form method="post" class="action-management-form">
+										<input type="hidden" name="intent" value="amend-brief" />
+										<input type="hidden" name="expected_status" value={action.status} />
+										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
+										<label><span>Amend brief</span><textarea name="brief" rows="3" required>{action.brief}</textarea></label>
+										<button class="button button--secondary" type="submit">Save brief</button>
+									</form>
+								)}
+								{canManage && (
+									<form method="post" class="action-management-form">
+										<input type="hidden" name="intent" value="change-due-date" />
+										<input type="hidden" name="expected_status" value={action.status} />
+										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
+										<label><span>Change due date</span><input type="date" name="due_date" value={action.due_date} required /></label>
+										<button class="button button--secondary" type="submit">Save due date</button>
+									</form>
+								)}
+								{canAssign && (
+									<form method="post" class="action-management-form">
+										<input type="hidden" name="intent" value="assign-actioner" />
+										<input type="hidden" name="expected_status" value={action.status} />
+										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
+										<label><span>Assign or reassign</span><select name="actioner_id">
+											<option value="" selected={!action.actioner_id}>Unassigned</option>
+											{eligibleActioners.map((person) => <option value={person.id} selected={action.actioner_id === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
+										</select></label>
+										<button class="button button--secondary" type="submit">{action.actioner_id ? 'Save assignment' : 'Assign'}</button>
+									</form>
+								)}
+								{canReissue && (
+									<form method="post" class="action-management-form">
+										<input type="hidden" name="intent" value="reissue" />
+										<input type="hidden" name="expected_status" value={action.status} />
+										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
+										<label><span>Reissue brief</span><textarea name="brief" rows="3">{action.brief}</textarea></label>
+										<label><span>Due date</span><input type="date" name="due_date" value={action.due_date} /></label>
+										<label><span>Actioner</span><select name="actioner_id">
+											<option value="" selected={!action.actioner_id}>Unassigned</option>
+											{eligibleActioners.map((person) => <option value={person.id} selected={action.actioner_id === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
+										</select></label>
+										<button class="button button--secondary" type="submit">Reissue Action</button>
+									</form>
+								)}
+								{canReturnToActioner && (
+									<form method="post" class="action-management-form">
+										<input type="hidden" name="intent" value="return-to-actioner" />
+										<input type="hidden" name="expected_status" value={action.status} />
+										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
+										<label><span>Return to Actioner reason</span><textarea name="reason" rows="3" required></textarea></label>
+										<button class="button button--secondary" type="submit">Return to Actioner</button>
+									</form>
+								)}
+								{canComplete && (
+									<form method="post" class="action-management-form">
+										<input type="hidden" name="intent" value="complete" />
+										<input type="hidden" name="expected_status" value={action.status} />
+										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
+										<button class="button button--primary" type="submit">Complete Action</button>
+									</form>
+								)}
+								{canCancel && (
+									<form method="post" class="action-management-form">
+										<input type="hidden" name="intent" value="cancel" />
+										<input type="hidden" name="expected_status" value={action.status} />
+										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
+										<label><span>Cancel reason</span><textarea name="reason" rows="3" required></textarea></label>
+										<button class="button button--secondary" type="submit">Cancel Action</button>
+									</form>
+								)}
+								{canTakeover && (
+									<form method="post" class="action-management-form action-management-form--takeover">
+										<input type="hidden" name="intent" value="takeover" />
+										<input type="hidden" name="expected_status" value={action.status} />
+										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
+										<label><span>Takeover reason</span><textarea name="reason" rows="3" required></textarea></label>
+										<button class="button button--secondary" type="submit">Take over acceptance</button>
+									</form>
+								)}
+							</div>
+						)}
+					</section>
+
+					<section class="action-history" aria-labelledby="action-history-heading" data-action-history>
+						<h3 id="action-history-heading">Immutable history</h3>
+						{history.length === 0 ? (
+							<p>No history events are available for this Action.</p>
+						) : (
+							<ol>
+								{history.map((event) => (
+									<li>
+										<div>
+											<strong>{String(event.event_type).replaceAll('_', ' ')}</strong>
+											<time datetime={event.created_at}>{formatDateTime(event.created_at)}</time>
+										</div>
+										<p>Actor: {actionProfileName(event.actor, 'System or unavailable user')}</p>
+										{event.from_status || event.to_status ? <p>State: {event.from_status ? ACTION_DISPLAY_LABELS[event.from_status] ?? event.from_status : 'None'} → {event.to_status ? ACTION_DISPLAY_LABELS[event.to_status] ?? event.to_status : 'None'}</p> : null}
+										{event.reason && <p>Reason: {event.reason}</p>}
+										{event.response && <p>Response: {event.response}</p>}
+										{safeEvidenceHref(event.evidence_url) && <p><a class="text-link" href={safeEvidenceHref(event.evidence_url)} target="_blank" rel="noreferrer">Open evidence link<span class="visually-hidden"> in a new tab</span></a></p>}
+										{jsonSummary(event.old_values) && <p>Before: {jsonSummary(event.old_values)}</p>}
+										{jsonSummary(event.new_values) && <p>After: {jsonSummary(event.new_values)}</p>}
+									</li>
+								))}
+							</ol>
+						)}
+					</section>
+				</ProjectContentPanel>
+			</>
+		) : (
+			<section class="content-card" data-action-unavailable-message>
+				<p class="eyebrow">Project Actions</p>
+				<h1>Action unavailable</h1>
+				<p>{message}</p>
+				<a class="button button--secondary" href={actionsBackHref}>Back to Actions</a>
+			</section>
+		)}
+	</section>
+</AuthenticatedLayout>
+
+<style>
+	.action-detail-page {
+		display: grid;
+		gap: 1rem;
+	}
+	.action-detail-copy,
+	.action-detail-muted {
+		margin: 0.6rem 0 0;
+		color: var(--muted-strong);
+	}
+	.action-detail-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		justify-content: flex-end;
+	}
+	.action-detail-success,
+	.action-detail-error {
+		border-radius: 0.55rem;
+		padding: 0.7rem;
+	}
+	.action-detail-success {
+		border: 1px solid rgba(76, 212, 126, 0.45);
+		background: rgba(76, 212, 126, 0.08);
+	}
+	.action-detail-error {
+		border: 1px solid rgba(255, 91, 91, 0.45);
+		background: rgba(255, 91, 91, 0.08);
+		color: #ffb8b8;
+	}
+	.action-detail-grid {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 1rem;
+	}
+	.action-detail-card {
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 1rem;
+		background: rgba(5, 15, 28, 0.58);
+	}
+	.action-detail-card--wide {
+		grid-column: 1 / -1;
+	}
+	.action-detail-heading-row {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+		align-items: flex-start;
+	}
+	.action-detail-card h3,
+	.action-management h3,
+	.action-history h3 {
+		margin-top: 0;
+	}
+	.action-detail-card dl {
+		display: grid;
+		gap: 0.65rem;
+		margin: 0;
+	}
+	.action-detail-card dl div {
+		display: grid;
+		gap: 0.15rem;
+	}
+	.action-detail-card dt {
+		color: var(--muted-strong);
+		font-size: 0.82rem;
+		font-weight: 850;
+	}
+	.action-detail-card dd {
+		margin: 0;
+	}
+	.actions-pill {
+		display: inline-flex;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		padding: 0.18rem 0.55rem;
+		font-size: 0.78rem;
+		font-weight: 850;
+		white-space: nowrap;
+	}
+	.actions-pill--blue { border-color: rgba(0, 160, 255, 0.45); color: var(--accent-strong); background: rgba(0, 160, 255, 0.1); }
+	.actions-pill--amber { border-color: rgba(255, 176, 32, 0.55); color: #ffb020; background: rgba(255, 176, 32, 0.1); }
+	.actions-pill--red { border-color: rgba(255, 91, 91, 0.55); color: #ff5b5b; background: rgba(255, 91, 91, 0.1); }
+	.actions-pill--green { border-color: rgba(76, 212, 126, 0.45); color: #4cd47e; background: rgba(76, 212, 126, 0.1); }
+	.actions-pill--grey { border-color: rgba(159, 174, 194, 0.32); color: var(--muted-strong); background: rgba(159, 174, 194, 0.08); }
+	.action-management,
+	.action-history {
+		margin-top: 1rem;
+	}
+	.action-management-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 1rem;
+	}
+	.action-management-form {
+		display: grid;
+		gap: 0.65rem;
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 1rem;
+		background: rgba(5, 15, 28, 0.42);
+	}
+	.action-management-form label {
+		display: grid;
+		gap: 0.3rem;
+		color: var(--muted-strong);
+		font-size: 0.85rem;
+		font-weight: 850;
+	}
+	.action-management-form textarea,
+	.action-management-form input,
+	.action-management-form select {
+		width: 100%;
+		border: 1px solid var(--border);
+		border-radius: 0.45rem;
+		padding: 0.55rem 0.65rem;
+		background: rgba(2, 8, 16, 0.76);
+		color: var(--text);
+	}
+	.action-history ol {
+		display: grid;
+		gap: 0.8rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	.action-history li {
+		border: 1px solid var(--border);
+		border-radius: 0.75rem;
+		padding: 1rem;
+		background: rgba(5, 15, 28, 0.42);
+	}
+	.action-history li > div {
+		display: flex;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+	.action-history p {
+		margin: 0.35rem 0 0;
+		color: var(--muted-strong);
+	}
+	@media (max-width: 920px) {
+		.action-detail-grid,
+		.action-management-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+</style>

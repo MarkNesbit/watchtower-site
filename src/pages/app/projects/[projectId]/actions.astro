@@ -1,0 +1,36 @@
+---
+import AuthenticatedLayout from '../../../../layouts/AuthenticatedLayout.astro';
+import { buildProjectActionsPath, getAccessibleProjectsBySlug } from '../../../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../../lib/supabaseServer';
+
+const projectSlug = Astro.params.projectId;
+const accessToken = getServerAccessToken(Astro.cookies);
+let projects = [];
+let message = 'Project not found or you do not have access.';
+
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	projects = await getAccessibleProjectsBySlug(serverSupabase, projectSlug ?? '', accessToken);
+	if (projects.length === 1) {
+		return Astro.redirect(buildProjectActionsPath(projects[0].workspace.slug, projects[0].slug));
+	}
+	if (projects.length > 1) message = 'This project exists in more than one workspace. Choose the workspace-specific Actions Register.';
+} catch (error) {
+	message = error instanceof Error ? error.message : 'Unable to open Actions Register.';
+}
+---
+<AuthenticatedLayout title="Actions Register | WatchTower">
+	<section class="content-card">
+		<p class="eyebrow">Project Actions</p>
+		<h1>Choose a workspace</h1>
+		<p>{message}</p>
+		{projects.length > 1 && (
+			<ul>
+				{projects.map((project) => (
+					<li><a class="text-link" href={buildProjectActionsPath(project.workspace.slug, project.slug)}>{project.name} in {project.workspace.name}</a></li>
+				))}
+			</ul>
+		)}
+		<a class="button button--secondary" href="/app/projects">Back to projects</a>
+	</section>
+</AuthenticatedLayout>

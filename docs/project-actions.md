@@ -1,19 +1,19 @@
 # Project Actions
 
-**Status:** WT-ACTION-001B transactional lifecycle and permission enforcement
+**Status:** WT-ACTION-002 Actions Register, creation and detail experience
 
 **Migrations:**
 
 - `20260712000200_project_actions_schema_foundation.sql`
 - `20260712000300_project_actions_transactional_lifecycle.sql`
 
-**Scope:** Database schema, project-scoped Action references, baseline read RLS, Action permission names, pure helper types, immutable workflow history, controlled transactional lifecycle RPCs, and TypeScript wrappers.
+**Scope:** Database schema, project-scoped Action references, baseline read RLS, Action permission names, pure helper types, immutable workflow history, controlled transactional lifecycle RPCs, TypeScript wrappers, project Actions Register, direct project Action creation and Action detail/history pages.
 
 ## Purpose
 
-Project Actions are authoritative project-level assurance records. An Action may be displayed from a register, Risk context, the Project Dashboard, or later Project Details and Narrative contexts, but it is stored once in `project_actions`.
+Project Actions are authoritative project-level assurance records. An Action may be displayed from the Actions Register, Risk context, the Project Dashboard, or later Project Details and Narrative contexts, but it is stored once in `project_actions`.
 
-WT-ACTION-001B does not implement Action screens, creation forms, dashboard signals, personal queues, Risk integration, Narrative generation, Project Details entry points, health scoring, attachments, notifications, recurrence, dependencies, sub-actions or general comments.
+WT-ACTION-002 introduces the first authenticated Actions interface. It does not implement the complete Actioner response journey, Risk-context creation, Project Details creation, Narrative generation, personal queues, health scoring, attachments, notifications, recurrence, dependencies, sub-actions or general comments.
 
 ## Data Model
 
@@ -101,6 +101,94 @@ WT-ACTION-001A allows only the locked MVP source types:
 - `narrative`
 
 Future Issue, Dependency, Assumption or Decision source types should be added only when those authoritative modules exist.
+
+## Routes and Navigation
+
+The workspace-safe Actions route is:
+
+```text
+/app/workspaces/{workspaceSlug}/projects/{projectSlug}/actions
+```
+
+Action detail pages use:
+
+```text
+/app/workspaces/{workspaceSlug}/projects/{projectSlug}/actions/{actionId}
+```
+
+Legacy `/app/projects/{projectSlug}/actions` routes redirect only when the project slug resolves to one accessible workspace. The Project Dashboard Actions tile now opens the workspace-safe Actions Register.
+
+## Actions Register
+
+The register follows the Risk Register visual pattern: project hero, Action controls strip, summary cards, tabs, compact filters, table-led register, pagination, right-side support panels, guidance text and a Back to project link.
+
+Tabs are:
+
+- Outstanding: `open`, `returned_to_raiser`, `rejected_by_actioner`, `returned_to_actioner`
+- Awaiting review: `submitted`
+- Complete: `complete`
+- Cancelled: `cancelled`
+- All: every status
+
+The default tab is Outstanding and selected tab/filter/page state is stored in the query string.
+
+Search covers Action reference, brief, Actioner name, raiser name, source reference and source label. Filters cover timing, workflow status, Actioner, raiser and source type. Sorting supports urgency, due date, updated date, Action reference and Actioner.
+
+Summary cards are project-level and unaffected by table filters:
+
+- Open Actions: non-terminal Actions.
+- Need Action: Actions requiring intervention.
+- Highest urgency: the most urgent current timing state across open Actions.
+
+The Needs Action panel is also project-level and prioritises overdue, due today, reassignment required, rejected, returned to raiser, unassigned, awaiting review and due soon items. The Action distribution panel shows Open, Awaiting review, Complete and Cancelled counts and is not a health indicator.
+
+## Timing Rules
+
+Timing state is derived separately from workflow status:
+
+- `complete`: Green.
+- `cancelled`: Grey.
+- `overdue`: Red.
+- `due_today`: Red.
+- `reassignment_required`: Amber.
+- `unassigned`: Amber.
+- `due_soon`: Amber when due within three calendar days.
+- `open`: Blue/neutral.
+
+Ordinary open Actions are not shown as Green simply because they are not near their due date.
+
+If an assigned Actioner later becomes Viewer, suspended, removed or inactive, their ID remains visible for traceability and timing becomes reassignment required unless due today or overdue takes precedence.
+
+## Creation
+
+Owner, Admin and Member can create Actions from the register using the New Action dialog. Direct register creation requires:
+
+- brief;
+- due date;
+- optional eligible Actioner.
+
+The source defaults to Project. Arbitrary source linking is not exposed in this slice. Viewer sees the New Action button disabled with read-only guidance, and server-side RPC enforcement remains the security boundary.
+
+Successful creation redirects to the new Action detail page. Form values are preserved after validation or server errors.
+
+## Detail and History
+
+The detail page shows the Action reference, workflow state, timing state, brief, due date, Actioner, raiser, acceptance owner, source, timestamps, current response where present, safe evidence links and immutable history.
+
+History is read-only and structured by event type, actor, timestamp, state change, reason, response, evidence link and before/after values. It remains workflow history, not a comments stream.
+
+Management controls are shown only when the current user has record authority and the operation is valid for the current state:
+
+- amend brief;
+- change due date;
+- assign/reassign/unassign;
+- reissue;
+- complete;
+- return to Actioner;
+- cancel;
+- Owner/Admin acceptance takeover.
+
+Actioner submit, return-to-raiser and reject response forms are intentionally deferred to WT-ACTION-003. Assigned Actioners see a note on the detail page where those controls will arrive.
 
 ## Permissions, RLS and RPCs
 
@@ -206,9 +294,6 @@ Action and history evidence URLs must be null or use `http://` or `https://`.
 
 The following remain outside this foundation:
 
-- Actions Register page;
-- Action create modal;
-- Action detail page;
 - Risk integration;
 - Project Dashboard Action signals;
 - Personal dashboard;

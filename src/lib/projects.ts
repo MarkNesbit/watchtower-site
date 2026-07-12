@@ -1,5 +1,7 @@
 import { assertCan } from './permissions.ts';
 import {
+	buildProjectActionPath,
+	buildProjectActionsPath,
 	buildProjectDetailsPath,
 	buildProjectEditPath,
 	buildProjectNarrativePath,
@@ -51,6 +53,8 @@ export type ProjectInformationInput = {
 };
 
 export {
+	buildProjectActionPath,
+	buildProjectActionsPath,
 	buildProjectDetailsPath,
 	buildProjectEditPath,
 	buildProjectNarrativePath,

@@ -14,6 +14,14 @@ export function buildProjectRisksPath(workspaceSlug: string, projectSlug: string
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/risks`;
 }
 
+export function buildProjectActionsPath(workspaceSlug: string, projectSlug: string): string {
+	return `${buildProjectPath(workspaceSlug, projectSlug)}/actions`;
+}
+
+export function buildProjectActionPath(workspaceSlug: string, projectSlug: string, actionId: string): string {
+	return `${buildProjectActionsPath(workspaceSlug, projectSlug)}/${encodeURIComponent(actionId)}`;
+}
+
 export function buildProjectNewRiskPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectRisksPath(workspaceSlug, projectSlug)}/new`;
 }
