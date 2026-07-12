@@ -128,7 +128,7 @@ test('Project list action-state helper aggregates project-area signals without c
 	assert.equal(deriveProjectActionState([greenRisk, amberRisk, redRisk], now), 'red');
 	assert.equal(deriveProjectActionState([greenRisk, amberRisk], now), 'amber');
 	assert.equal(deriveProjectActionState([greenRisk], now), 'green');
-	assert.equal(deriveProjectActionState([], now), 'green');
+	assert.equal(deriveProjectActionState([], now), 'neutral');
 	assert.equal(deriveProjectActionState(null, now), 'unknown');
 	assert.equal(projectActionStateLabel('red'), 'Red');
 
@@ -136,7 +136,7 @@ test('Project list action-state helper aggregates project-area signals without c
 		attentionRiskFacts({ status: 'closed', owner_id: null }),
 		attentionRiskFacts({ status: 'draft', contingency_plan: '' }),
 	];
-	assert.equal(deriveProjectActionState(closedAndDraftRedRisks, now), 'green');
+	assert.equal(deriveProjectActionState(closedAndDraftRedRisks, now), 'neutral');
 
 	const managedHighExposureRisk = attentionRiskFacts({
 		probability: 'high',
@@ -586,7 +586,11 @@ test('Project dashboard Risk tile uses shared RAG assurance state styling', asyn
 	assert.match(detailSource, /let riskTileSignal: DashboardTileSignalState = 'neutral'/);
 	assert.match(detailSource, /riskFeatureAccess\.isAccessible && can\(workspace\.role, 'risk\.view'\)/);
 	assert.match(detailSource, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
-	assert.match(detailSource, /riskTileSignal = deriveRiskTileAttentionSignal\(risks, new Date\(\)\)/);
+	assert.match(detailSource, /const riskSignalNow = new Date\(\)/);
+	assert.match(detailSource, /const riskSignal = deriveProjectRiskSignal\(risks, riskSignalNow\)/);
+	assert.match(detailSource, /riskTileSignal = deriveRiskTileAttentionSignal\(risks, riskSignalNow\)/);
+	assert.match(detailSource, /riskRegisterDestinationView = riskRegisterViewForProjectRiskSignal\(riskSignal\)/);
+	assert.match(detailSource, /buildRiskRegisterViewPath\(buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\), riskRegisterDestinationView\)/);
 	assert.match(detailSource, /projectRisksForActionState: ProjectRisk\[\] \| null = \[\]/);
 	assert.match(detailSource, /projectRisksForActionState = null/);
 	assert.match(detailSource, /projectActionState = deriveProjectActionState\(\{/);

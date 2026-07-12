@@ -71,7 +71,8 @@ function deriveRiskOnlyAttentionState(
 	risks: ProjectAttentionRisk[] | null | undefined,
 	now: Date,
 ): ProjectAttentionState {
-	return aggregateProjectAreaSignalState([deriveRiskAreaSignal(risks, now)]);
+	const riskSignal = deriveRiskAreaSignal(risks, now);
+	return riskSignal.state === 'disabled' ? 'neutral' : riskSignal.state;
 }
 
 export function deriveProjectAreaSignals(

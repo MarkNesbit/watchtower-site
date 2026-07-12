@@ -34,6 +34,13 @@ export type RiskDashboardAssuranceTone = RiskAssuranceTone;
 export type RiskDisplayTone = RiskAssuranceTone | RiskExposureTone;
 export const RISK_REGISTER_VIEW_TABS = ['active', 'need-action', 'draft', 'closed'] as const;
 export type RiskRegisterViewTab = (typeof RISK_REGISTER_VIEW_TABS)[number];
+export type ProjectRiskSignal = {
+	state: RiskDashboardAssuranceTone;
+	activeCount: number;
+	redCount: number;
+	amberCount: number;
+	greenCount: number;
+};
 export const RISK_REGISTER_SORTS = ['highest-exposure', 'action-needed', 'review-due', 'recently-updated'] as const;
 export type RiskRegisterSort = (typeof RISK_REGISTER_SORTS)[number];
 export const RISK_REGISTER_PAGE_SIZES = [10, 25, 50] as const;
@@ -671,6 +678,24 @@ export function riskDisplayLabel(value: unknown, fallback = 'Unknown'): string {
 
 export function normaliseRiskRegisterViewTab(value: unknown): RiskRegisterViewTab {
 	return RISK_REGISTER_VIEW_TABS.includes(value as RiskRegisterViewTab) ? value as RiskRegisterViewTab : 'active';
+}
+
+export function parseRiskRegisterReturnTab(value: unknown): RiskRegisterViewTab | null {
+	return RISK_REGISTER_VIEW_TABS.includes(value as RiskRegisterViewTab) ? value as RiskRegisterViewTab : null;
+}
+
+export function buildRiskRegisterViewPath(basePath: string, view: unknown): string {
+	const selectedView = normaliseRiskRegisterViewTab(view);
+	if (selectedView === 'active') return basePath;
+	const params = new URLSearchParams({ view: selectedView });
+	return `${basePath}?${params.toString()}`;
+}
+
+export function buildRiskDetailReturnPath(detailPath: string, returnTab: unknown): string {
+	const selectedTab = parseRiskRegisterReturnTab(returnTab);
+	if (!selectedTab) return detailPath;
+	const params = new URLSearchParams({ returnTab: selectedTab });
+	return `${detailPath}?${params.toString()}`;
 }
 
 export function normaliseRiskRegisterSort(value: unknown): RiskRegisterSort {
@@ -1311,9 +1336,42 @@ export function deriveProjectRiskDashboardAssuranceTone(
 	>>,
 	now = new Date(),
 ): RiskDashboardAssuranceTone {
-	const activeRisks = risks.filter((risk) => isDashboardActiveRiskStatus(risk.status));
-	if (activeRisks.length === 0) return 'neutral';
-	return deriveRiskAssuranceRollupTone(activeRisks.map((risk) => deriveRiskAssuranceTone(risk, now)));
+	return deriveProjectRiskSignal(risks, now).state;
+}
+
+export function deriveProjectRiskSignal(
+	risks: Array<Pick<ProjectRisk,
+		'status' | 'owner_id' | 'actioner_id' | 'review_date' | 'due_date' | 'mitigation_plan' | 'contingency_plan' | 'probability' | 'impact' | 'updated_at'
+	>>,
+	now = new Date(),
+): ProjectRiskSignal {
+	const signal: ProjectRiskSignal = {
+		state: 'neutral',
+		activeCount: 0,
+		redCount: 0,
+		amberCount: 0,
+		greenCount: 0,
+	};
+	for (const risk of risks) {
+		if (!isDashboardActiveRiskStatus(risk.status)) continue;
+		signal.activeCount += 1;
+		const state = deriveRiskAssuranceTone(risk, now);
+		if (state === 'red') signal.redCount += 1;
+		if (state === 'amber') signal.amberCount += 1;
+		if (state === 'green') signal.greenCount += 1;
+	}
+	signal.state = signal.activeCount === 0
+		? 'neutral'
+		: signal.redCount > 0
+			? 'red'
+			: signal.amberCount > 0
+				? 'amber'
+				: 'green';
+	return signal;
+}
+
+export function riskRegisterViewForProjectRiskSignal(signal: Pick<ProjectRiskSignal, 'state'>): RiskRegisterViewTab {
+	return signal.state === 'red' || signal.state === 'amber' ? 'need-action' : 'active';
 }
 
 export function deriveRiskRedNarrativeReason(risk: Pick<ProjectRisk,

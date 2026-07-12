@@ -17,6 +17,7 @@ import {
 	getRiskRegisterExposureDisplay,
 	getRiskRegisterPageNumbers,
 	getTopRiskActionItems,
+	buildRiskDetailReturnPath,
 	listProjectRisks,
 	normaliseRiskRegisterSort,
 	normaliseRiskRegisterViewTab,
@@ -249,6 +250,10 @@ const buildRegisterPath = (overrides = {}) => {
 	const query = params.toString();
 	return query ? `${registerPath}?${query}` : registerPath;
 };
+const buildRiskDetailPath = (riskId, returnTab = selectedView) => buildRiskDetailReturnPath(
+	buildProjectRiskPath(workspaceSlug ?? '', project.slug, riskId),
+	returnTab,
+);
 const needsActionHref = buildRegisterPath({
 	view: 'need-action',
 	q: '',
@@ -543,7 +548,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 																const exposure = getRiskRegisterExposureDisplay(risk);
 																const reviewDue = reviewDueState(risk);
 																const ownerLabel = riskProfileName(risk.owner, 'Unassigned');
-																const riskHref = buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id);
+																const riskHref = buildRiskDetailPath(risk.risk_id);
 																const lifecycleCategory = riskLifecycleCategory(risk.status);
 																const lifecycle = riskLifecycleLabel(risk.status);
 																const referencePill = getRiskReferencePillPresentation(risk, registerNow);
@@ -702,7 +707,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 									) : (
 										<ul class="risk-register-needs-action__list">
 											{needsActionItems.map((item) => {
-												const riskHref = buildProjectRiskPath(workspaceSlug ?? '', project.slug, item.riskId);
+												const riskHref = buildRiskDetailPath(item.riskId, 'need-action');
 												return (
 													<li class={`risk-register-needs-action__item risk-register-needs-action__item--${item.tone}`}>
 														<a href={riskHref} aria-label={`${item.label} for ${item.riskReference}: ${item.riskTitle}`}>

@@ -18,7 +18,7 @@ import { deriveProjectActionState, projectActionStateLabel } from '../../../../.
 import { buildProjectDateCards, listProjectDates, type ProjectDateCard } from '../../../../../lib/projectDates';
 import { getUnseenProjectNarrativeCount } from '../../../../../lib/projectNarrative';
 import { buildProjectDetailsPath, buildProjectNarrativePath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../lib/projects';
-import { listProjectRisks, type ProjectRisk } from '../../../../../lib/projectRisks';
+import { buildRiskRegisterViewPath, deriveProjectRiskSignal, listProjectRisks, riskRegisterViewForProjectRiskSignal, type ProjectRisk, type RiskRegisterViewTab } from '../../../../../lib/projectRisks';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../lib/supabaseServer';
 
 const projectSlug = Astro.params.projectId;
@@ -37,6 +37,7 @@ let unseenProjectNarrativeEntries: number | null = null;
 let riskTileSignal: DashboardTileSignalState = 'neutral';
 let projectActionState: DashboardTileSignalState = 'unknown';
 let projectRisksForActionState: ProjectRisk[] | null = [];
+let riskRegisterDestinationView: RiskRegisterViewTab = 'active';
 
 const formatDate = (value) => value ? new Date(value).toLocaleString() : 'Not available';
 const formatValue = (value, fallback = 'Not available') => value || fallback;
@@ -180,10 +181,14 @@ try {
 				try {
 					const risks = await listProjectRisks(organisation.id, project.id, workspace.role, serverSupabase);
 					projectRisksForActionState = risks;
-					riskTileSignal = deriveRiskTileAttentionSignal(risks, new Date());
+					const riskSignalNow = new Date();
+					const riskSignal = deriveProjectRiskSignal(risks, riskSignalNow);
+					riskTileSignal = deriveRiskTileAttentionSignal(risks, riskSignalNow);
+					riskRegisterDestinationView = riskRegisterViewForProjectRiskSignal(riskSignal);
 				} catch {
 					projectRisksForActionState = null;
 					riskTileSignal = 'unknown';
+					riskRegisterDestinationView = 'active';
 				}
 			}
 			projectActionState = deriveProjectActionState({
@@ -206,7 +211,7 @@ const visibleProjectTiles = projectTiles.flatMap((tile) => {
 	if (featureAccess && !featureAccess.isVisible) return [];
 
 	const href = project && tile.destination === 'risks'
-		? buildProjectRisksPath(workspaceSlug ?? '', project.slug)
+		? buildRiskRegisterViewPath(buildProjectRisksPath(workspaceSlug ?? '', project.slug), riskRegisterDestinationView)
 		: project && tile.destination === 'narrative'
 			? buildProjectNarrativePath(workspaceSlug ?? '', project.slug)
 			: project && tile.destination === 'details'

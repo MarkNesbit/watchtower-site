@@ -12,8 +12,11 @@ import {
 	createDraftProjectRisksFromPrompts,
 	createProjectRiskComment,
 	createProjectRisk,
+	buildRiskDetailReturnPath,
+	buildRiskRegisterViewPath,
 	deriveRiskAssuranceRollupTone,
 	deriveRiskActionStateTone,
+	deriveProjectRiskSignal,
 	deriveProjectRiskDashboardAssuranceTone,
 	deriveRiskAssuranceTone,
 	defaultRiskRegisterSortForView,
@@ -51,6 +54,7 @@ import {
 	normaliseRiskRegisterSearch,
 	normaliseRiskRegisterSort,
 	normaliseRiskRegisterViewTab,
+	parseRiskRegisterReturnTab,
 	paginateRisksForRegister,
 	parseRiskRegisterPage,
 	parseRiskRegisterPageSize,
@@ -72,6 +76,7 @@ import {
 	riskMatchesRegisterView,
 	riskProfileName,
 	riskReferenceStatusLabel,
+	riskRegisterViewForProjectRiskSignal,
 	riskRagTone,
 	rankRiskActionItems,
 	summarizeRiskRegister,
@@ -813,6 +818,15 @@ test('Risk assurance roll-up follows the forgiving Amber contract', () => {
 test('Risk Register control helpers normalise tabs search and sort safely', () => {
 	assert.equal(normaliseRiskRegisterViewTab('need-action'), 'need-action');
 	assert.equal(normaliseRiskRegisterViewTab('unexpected'), 'active');
+	assert.equal(parseRiskRegisterReturnTab('need-action'), 'need-action');
+	assert.equal(parseRiskRegisterReturnTab('closed'), 'closed');
+	assert.equal(parseRiskRegisterReturnTab('/app/projects'), null);
+	assert.equal(parseRiskRegisterReturnTab('https://example.com'), null);
+	assert.equal(buildRiskRegisterViewPath('/app/workspaces/acme/projects/hub/risks', 'need-action'), '/app/workspaces/acme/projects/hub/risks?view=need-action');
+	assert.equal(buildRiskRegisterViewPath('/app/workspaces/acme/projects/hub/risks', 'active'), '/app/workspaces/acme/projects/hub/risks');
+	assert.equal(buildRiskRegisterViewPath('/app/workspaces/acme/projects/hub/risks', 'unsafe'), '/app/workspaces/acme/projects/hub/risks');
+	assert.equal(buildRiskDetailReturnPath('/app/workspaces/acme/projects/hub/risks/risk-1', 'draft'), '/app/workspaces/acme/projects/hub/risks/risk-1?returnTab=draft');
+	assert.equal(buildRiskDetailReturnPath('/app/workspaces/acme/projects/hub/risks/risk-1', '/app/projects'), '/app/workspaces/acme/projects/hub/risks/risk-1');
 	assert.equal(defaultRiskRegisterSortForView('active'), 'highest-exposure');
 	assert.equal(defaultRiskRegisterSortForView('need-action'), 'action-needed');
 	assert.equal(defaultRiskRegisterSortForView('draft'), 'highest-exposure');
@@ -2277,6 +2291,37 @@ test('Project dashboard risk icon derives highest active risk assurance state on
 	assert.equal(deriveProjectRiskDashboardAssuranceTone([], now), 'neutral');
 });
 
+test('Project risk signal follows the active-only dashboard and project signal contract', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const greenRisk = assuredRiskFacts();
+	const oneAmber = assuredRiskFacts({ due_date: null });
+	const secondAmber = assuredRiskFacts({ review_date: null });
+	const thirdAmber = assuredRiskFacts({ probability: 'medium', impact: 'medium', mitigation_plan: '' });
+	const redRisk = assuredRiskFacts({ owner_id: null });
+
+	assert.deepEqual(deriveProjectRiskSignal([], now), {
+		state: 'neutral',
+		activeCount: 0,
+		redCount: 0,
+		amberCount: 0,
+		greenCount: 0,
+	});
+	assert.equal(deriveProjectRiskSignal([greenRisk], now).state, 'green');
+	assert.equal(deriveProjectRiskSignal([oneAmber], now).state, 'amber');
+	assert.equal(deriveProjectRiskSignal([oneAmber, secondAmber], now).state, 'amber');
+	assert.equal(deriveProjectRiskSignal([oneAmber, secondAmber, thirdAmber], now).state, 'amber');
+	assert.equal(deriveProjectRiskSignal([greenRisk, oneAmber, redRisk], now).state, 'red');
+	assert.equal(deriveProjectRiskSignal([oneAmber, redRisk], now).state, 'red');
+	assert.equal(deriveProjectRiskSignal([
+		assuredRiskFacts({ status: 'draft', owner_id: null }),
+		assuredRiskFacts({ status: 'closed', owner_id: null }),
+	], now).state, 'neutral');
+	assert.equal(riskRegisterViewForProjectRiskSignal(deriveProjectRiskSignal([oneAmber], now)), 'need-action');
+	assert.equal(riskRegisterViewForProjectRiskSignal(deriveProjectRiskSignal([redRisk], now)), 'need-action');
+	assert.equal(riskRegisterViewForProjectRiskSignal(deriveProjectRiskSignal([greenRisk], now)), 'active');
+	assert.equal(riskRegisterViewForProjectRiskSignal(deriveProjectRiskSignal([], now)), 'active');
+});
+
 test('Project dashboard risk icon excludes Draft and Closed risks', () => {
 	const now = new Date('2026-06-28T12:00:00Z');
 	const excludedRedRisks = [
@@ -2335,7 +2380,7 @@ test('Draft and Closed risks remain neutral across active action-state consumers
 	assert.equal(countRisksNeedingAction(inactiveRedDriverRisks, now), 0);
 	assert.equal(deriveProjectRiskDashboardAssuranceTone(inactiveRedDriverRisks, now), 'neutral');
 	assert.equal(deriveRiskTileAttentionSignal(inactiveRedDriverRisks, now), 'neutral');
-	assert.equal(deriveProjectActionState(inactiveRedDriverRisks, now), 'green');
+	assert.equal(deriveProjectActionState(inactiveRedDriverRisks, now), 'neutral');
 });
 
 test('Active risk action state is consistent across detail register dashboard and project attention consumers', () => {
@@ -2814,7 +2859,7 @@ test('Risk create helper writes a title-only manual Draft with generated referen
 	assert.equal(deriveRiskReferenceTone(risk), 'neutral');
 	assert.equal(deriveProjectRiskDashboardAssuranceTone([risk]), 'neutral');
 	assert.equal(deriveRiskTileAttentionSignal([risk]), 'neutral');
-	assert.equal(deriveProjectActionState([risk]), 'green');
+	assert.equal(deriveProjectActionState([risk]), 'neutral');
 	const insertCall = client.calls.find((call) => call[0] === 'insert' && call[1] === 'project_risks');
 	assert.ok(insertCall);
 	assert.deepEqual(insertCall[2], {
@@ -3525,7 +3570,7 @@ test('Risk Register route renders a table-led scoped register and create access 
 		assert.doesNotMatch(route, new RegExp(`<th scope="col"[^>]*>${removedHeading}</th>`));
 	}
 	assert.match(route, /No risks have been recorded for this project yet\./);
-	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, risk\.risk_id\)/);
+	assert.match(route, /buildRiskDetailPath\(risk\.risk_id\)/);
 	assert.match(route, /filterAndSortRisksForRegister\(risks, registerFilters, registerNow\)/);
 	assert.match(route, /riskLifecycleCategory\(risk\.status\)/);
 	assert.match(route, /data-risk-lifecycle=\{lifecycleCategory\}/);
@@ -3546,7 +3591,7 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /data-risk-needs-action-view-all/);
 	assert.match(route, /view: 'need-action'/);
 	assert.match(route, /sort: 'action-needed'/);
-	assert.match(route, /buildProjectRiskPath\(workspaceSlug \?\? '', project\.slug, item\.riskId\)/);
+	assert.match(route, /buildRiskDetailPath\(item\.riskId, 'need-action'\)/);
 	assert.match(route, /aria-label=\{`\$\{item\.label\} for \$\{item\.riskReference\}: \$\{item\.riskTitle\}`\}/);
 	assert.doesNotMatch(route, /activeRisks = risks\.filter/);
 	assert.doesNotMatch(route, /draftRisks = risks\.filter/);
@@ -3944,10 +3989,32 @@ test('Project dashboard Risk tile routes to the Risk Register and loads only sco
 	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	const riskTileDefinition = dashboard.slice(dashboard.indexOf("title: 'Risks'"), dashboard.indexOf("title: 'Issues'"));
 	assert.match(dashboard, /title: 'Risks'[\s\S]*destination: 'risks'[\s\S]*featureKey: 'riskManagement'/);
-	assert.match(dashboard, /buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\)/);
+	assert.match(dashboard, /buildRiskRegisterViewPath\(buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\), riskRegisterDestinationView\)/);
 	assert.match(dashboard, /listProjectRisks\(organisation\.id, project\.id, workspace\.role, serverSupabase\)/);
-	assert.match(dashboard, /deriveRiskTileAttentionSignal\(risks, new Date\(\)\)/);
+	assert.match(dashboard, /const riskSignalNow = new Date\(\)/);
+	assert.match(dashboard, /const riskSignal = deriveProjectRiskSignal\(risks, riskSignalNow\)/);
+	assert.match(dashboard, /riskRegisterDestinationView = riskRegisterViewForProjectRiskSignal\(riskSignal\)/);
+	assert.match(dashboard, /deriveRiskTileAttentionSignal\(risks, riskSignalNow\)/);
 	assert.doesNotMatch(dashboard, /deriveRiskConcernTone\(risks|deriveRiskExposureTone\(risks|deriveProjectRiskDashboardAssuranceTone\(risks/);
 	assert.doesNotMatch(riskTileDefinition, /risk_ref/);
 	assert.doesNotMatch(riskTileDefinition, /badge|count|attention_items|notification_events|healthScore|AI summar|AI analys/i);
+});
+
+test('Risk Register and Risk Detail preserve safe return tabs without arbitrary return URLs', async () => {
+	const register = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro', import.meta.url), 'utf8');
+	const detail = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId].astro', import.meta.url), 'utf8');
+	const edit = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks/[riskId]/edit.astro', import.meta.url), 'utf8');
+
+	assert.match(register, /const buildRiskDetailPath = \(riskId, returnTab = selectedView\) => buildRiskDetailReturnPath\(/);
+	assert.match(register, /const riskHref = buildRiskDetailPath\(risk\.risk_id\)/);
+	assert.match(register, /const riskHref = buildRiskDetailPath\(item\.riskId, 'need-action'\)/);
+	assert.match(detail, /const detailReturnTab = parseRiskRegisterReturnTab\(Astro\.url\.searchParams\.get\('returnTab'\)\)/);
+	assert.match(detail, /buildRiskRegisterViewPath\(buildProjectRisksPath\(workspaceSlug \?\? '', project\.slug\), detailReturnTab \?\? 'active'\)/);
+	assert.match(detail, /const editHref = project && risk \? buildRiskDetailReturnPath\(buildProjectRiskEditPath/);
+	assert.match(detail, /return Astro\.redirect\(detailRedirectPath\(\)\)/);
+	assert.match(edit, /const detailReturnTab = parseRiskRegisterReturnTab\(Astro\.url\.searchParams\.get\('returnTab'\)\)/);
+	assert.match(edit, /return Astro\.redirect\(buildRiskDetailReturnPath\(buildProjectRiskPath/);
+	assert.match(edit, /cancelHref=\{riskDetailHref\}/);
+	assert.doesNotMatch(detail, /returnUrl|Astro\.url\.searchParams\.get\('redirectTo'\)/);
+	assert.doesNotMatch(edit, /returnUrl|Astro\.url\.searchParams\.get\('redirectTo'\)/);
 });
