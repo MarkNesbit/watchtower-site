@@ -24,6 +24,7 @@ import {
 	riskProfileName,
 	riskReferenceStatusLabel,
 } from '../../../../../../lib/projectRisks';
+import { getNarrativeReferencePillPresentation } from '../../../../../../lib/riskReferencePills';
 import { can } from '../../../../../../lib/permissions';
 import { buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
@@ -183,10 +184,6 @@ try {
 
 const canCreateNarrative = can(workspaceRole, 'narrative.create');
 const formatAttention = (value) => value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Neutral';
-const getAttentionPillTone = (value) => {
-	if (value === 'green' || value === 'amber' || value === 'red') return value;
-	return 'neutral';
-};
 const formatSourceType = (value) => {
 	if (!value) return 'Manual';
 	const labels = { manual: 'Manual', risk: 'Risk', issue: 'Issue', dependency: 'Dependency', assumption: 'Assumption', system: 'System' };
@@ -204,6 +201,7 @@ const profileName = (profile) => {
 };
 const creatorName = (entry) => profileName(entry.creator);
 const updaterName = (entry) => entry.updated_by ? profileName(entry.updater) : '';
+const narrativeNow = new Date();
 const riskPreviewFor = (entry) => {
 	if (entry.source_type !== 'risk' || !entry.source_record_id) return null;
 	const risk = sourceRisksById.get(entry.source_record_id);
@@ -212,11 +210,11 @@ const riskPreviewFor = (entry) => {
 		reference: entry.source_ref,
 		title: 'Risk detail unavailable',
 		unavailableReason: 'The linked risk could not be loaded for this project. It may have been archived, deleted, or unavailable to your current workspace access.',
-		openHref: buildProjectRiskPath(workspaceSlug ?? '', project?.slug ?? projectSlug ?? '', entry.source_record_id),
+		openHref: null,
 	};
-	const actionState = deriveRiskReferenceTone(risk, new Date());
+	const actionState = deriveRiskReferenceTone(risk, narrativeNow);
 	const exposure = deriveRiskExposureTone(risk.probability, risk.impact);
-	const assurance = deriveRiskAssuranceTone(risk, new Date());
+	const assurance = deriveRiskAssuranceTone(risk, narrativeNow);
 	return {
 		available: true,
 		reference: risk.risk_ref,
@@ -225,7 +223,7 @@ const riskPreviewFor = (entry) => {
 		status: riskDisplayLabel(risk.status),
 		assurance: riskDisplayLabel(assurance),
 		assuranceTone: assurance,
-		actionState: riskReferenceStatusLabel(risk, new Date()),
+		actionState: riskReferenceStatusLabel(risk, narrativeNow),
 		actionStateTone: actionState,
 		exposure: riskExposureToneLabel(exposure),
 		exposureTone: exposure,
@@ -314,33 +312,40 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 										<tr><th scope="col">Ref</th><th scope="col">Details</th><th scope="col">Created by</th><th scope="col">Created</th></tr>
 									</thead>
 									<tbody>
-										{entries.map((entry) => (
-											<tr>
-												<td>
-													<button
-														class="narrative-ref"
-														type="button"
-														data-entry-id={entry.id}
-														data-risk-detail-trigger={entry.source_type === 'risk' && entry.source_record_id ? '' : undefined}
-														aria-label={entry.source_type === 'risk' && entry.source_record_id
-															? `View risk detail for ${getNarrativeDisplayRef(entry)}`
-															: `Open ${getNarrativeDisplayRef(entry)}, ${formatAttention(entry.attention_level)} attention`}
-													>
-														<RagReferencePill
-															tone={getAttentionPillTone(entry.attention_level)}
-															label={getNarrativeDisplayRef(entry)}
-															statusLabel={formatAttention(entry.attention_level)}
-														/>
-													</button>
-												</td>
-												<td class="narrative-details">
-													{entry.title && <strong>{entry.title}</strong>}
-													{entry.details && <span>{entry.details}</span>}
-												</td>
-												<td>{creatorName(entry)}</td>
-												<td><time datetime={entry.created_at}>{formatCreatedAt(entry.created_at)}</time></td>
-											</tr>
-										))}
+										{entries.map((entry) => {
+											const linkedRisk = entry.source_type === 'risk' && entry.source_record_id
+												? sourceRisksById.get(entry.source_record_id)
+												: null;
+											const referencePill = getNarrativeReferencePillPresentation(entry, linkedRisk, narrativeNow);
+											return (
+												<tr>
+													<td>
+														<button
+															class="narrative-ref"
+															type="button"
+															data-entry-id={entry.id}
+															data-risk-detail-trigger={referencePill.riskDetailAvailable ? '' : undefined}
+															aria-label={referencePill.riskDetailAvailable ? `View current risk detail for ${referencePill.label}` : referencePill.ariaLabel}
+														>
+															<RagReferencePill
+																tone={referencePill.tone}
+																label={referencePill.label}
+																statusLabel={referencePill.statusLabel}
+																ariaLabel={referencePill.ariaLabel}
+																title={referencePill.title}
+																compactActionState={referencePill.compactActionState}
+															/>
+														</button>
+													</td>
+													<td class="narrative-details">
+														{entry.title && <strong>{entry.title}</strong>}
+														{entry.details && <span>{entry.details}</span>}
+													</td>
+													<td>{creatorName(entry)}</td>
+													<td><time datetime={entry.created_at}>{formatCreatedAt(entry.created_at)}</time></td>
+												</tr>
+											);
+										})}
 									</tbody>
 								</table>
 							</div>
@@ -688,7 +693,12 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 							setRagClass(detailModal.querySelector('[data-detail-risk-assurance-card]'), 'narrative-risk-signal rag-card', entry.sourceRisk.assuranceTone);
 							const openRisk = detailModal.querySelector('[data-detail-risk-open]');
 							if (openRisk instanceof HTMLAnchorElement) {
-								openRisk.href = entry.sourceRisk.openHref;
+								openRisk.hidden = entry.sourceRisk.available === false || !entry.sourceRisk.openHref;
+								if (entry.sourceRisk.available === false || !entry.sourceRisk.openHref) {
+									openRisk.removeAttribute('href');
+								} else {
+									openRisk.href = entry.sourceRisk.openHref;
+								}
 							}
 						}
 

@@ -10,7 +10,6 @@ import {
 	RISK_LEVELS,
 	RISK_STATUSES,
 	createProjectRiskComment,
-	deriveRiskReferenceTone,
 	getRiskActivationReadiness,
 	getRiskActionStateDrivers,
 	getRiskAssuranceBlocks,
@@ -27,6 +26,7 @@ import {
 	riskReferenceStatusLabel,
 	transitionProjectRiskLifecycle,
 } from '../../../../../../../lib/projectRisks';
+import { getRiskReferencePillPresentation } from '../../../../../../../lib/riskReferencePills';
 import { buildProjectPath, buildProjectRiskEditPath, buildProjectRisksPath, getWorkspaceBySlug } from '../../../../../../../lib/projects';
 import { buildLoginRedirectPath, createSupabaseServerClient, getServerAccessToken, isSupabaseAuthSessionError } from '../../../../../../../lib/supabaseServer';
 
@@ -153,7 +153,7 @@ const editHref = project && risk ? buildProjectRiskEditPath(workspaceSlug ?? '',
 const now = new Date();
 const assuranceBlocks = risk ? getRiskAssuranceBlocks(risk, now) : [];
 const actionStateDrivers = risk ? getRiskActionStateDrivers(risk, now) : [];
-const referenceTone = risk ? deriveRiskReferenceTone(risk, now) : 'neutral';
+const referencePill = risk ? getRiskReferencePillPresentation(risk, now) : null;
 const referenceStatus = risk ? riskReferenceStatusLabel(risk, now) : 'Neutral';
 const actionStateSummary = actionStateDrivers[0]?.message ?? 'Risk action state could not be calculated safely.';
 const detailSuccessMessage = Astro.url.searchParams.get('created') === 'draft' ? 'Draft risk created.' : '';
@@ -239,10 +239,12 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					<h1 slot="title" id="risk-detail-heading" class="risk-detail-heading">
 						<span class="risk-detail-heading__reference">
 							<RagReferencePill
-								tone={referenceTone}
-								label={risk.risk_ref}
-								statusLabel={referenceStatus}
-								ariaLabel={`${risk.risk_ref}, ${referenceStatus}`}
+								tone={referencePill?.tone ?? 'neutral'}
+								label={referencePill?.label ?? risk.risk_ref}
+								statusLabel={referencePill?.statusLabel ?? ''}
+								ariaLabel={referencePill?.ariaLabel ?? `${risk.risk_ref}, ${referenceStatus}`}
+								title={referencePill?.title}
+								compactActionState={referencePill?.compactActionState}
 							/>
 						</span>
 					</h1>
