@@ -1008,11 +1008,18 @@ function dateTone(value: unknown, now: Date, missingTone: RiskAssuranceTone, mis
 export function deriveRiskReviewDateTone(value: unknown, now = new Date()): RiskDateToneResult {
 	const daysUntil = daysUntilUtcDate(value, now);
 	if (daysUntil === null) return { tone: 'amber', value: 'No review date', status: 'missing' };
-	if (daysUntil < 0) return { tone: 'red', value: 'Overdue', status: 'overdue', daysUntil };
+	if (daysUntil <= 0) {
+		return {
+			tone: 'red',
+			value: daysUntil === 0 ? 'Due today' : 'Overdue',
+			status: 'overdue',
+			daysUntil,
+		};
+	}
 	if (daysUntil <= RISK_REVIEW_DUE_SOON_WINDOW_DAYS) {
 		return {
 			tone: 'amber',
-			value: daysUntil === 0 ? 'Due today' : `Due in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`,
+			value: `Due in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`,
 			status: 'due-soon',
 			daysUntil,
 		};

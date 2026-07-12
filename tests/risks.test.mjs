@@ -1898,7 +1898,7 @@ test('Risk assurance derives from governance and control quality signals', () =>
 	assert.equal(deriveRiskAssuranceTone(assuredRiskFacts({ status: 'escalated' }), now), 'green');
 });
 
-test('Risk review-date tone uses the MVP three-calendar-day Amber window', () => {
+test('Risk review-date tone uses Red today and the MVP three-calendar-day Amber window', () => {
 	const now = new Date('2026-07-12T12:00:00Z');
 
 	assert.equal(RISK_REVIEW_DUE_SOON_WINDOW_DAYS, 3);
@@ -1909,8 +1909,9 @@ test('Risk review-date tone uses the MVP three-calendar-day Amber window', () =>
 	});
 	assert.equal(deriveRiskReviewDateTone('2026-07-11', now).tone, 'red');
 	assert.equal(deriveRiskReviewDateTone('2026-07-11', now).status, 'overdue');
-	assert.equal(deriveRiskReviewDateTone('2026-07-12', now).tone, 'amber');
-	assert.equal(deriveRiskReviewDateTone('2026-07-12', now).status, 'due-soon');
+	assert.equal(deriveRiskReviewDateTone('2026-07-12', now).tone, 'red');
+	assert.equal(deriveRiskReviewDateTone('2026-07-12', now).status, 'overdue');
+	assert.equal(deriveRiskReviewDateTone('2026-07-12', now).value, 'Due today');
 	assert.equal(deriveRiskReviewDateTone('2026-07-13', now).tone, 'amber');
 	assert.equal(deriveRiskReviewDateTone('2026-07-13', now).status, 'due-soon');
 	assert.equal(deriveRiskReviewDateTone('2026-07-14', now).tone, 'amber');
@@ -2107,6 +2108,27 @@ test('Review-date due tomorrow is Amber across detail register dashboard and pro
 	assert.equal(deriveProjectRiskDashboardAssuranceTone([dueTomorrowRisk], now), 'amber');
 	assert.equal(deriveRiskTileAttentionSignal([dueTomorrowRisk], now), 'amber');
 	assert.equal(deriveProjectActionState([dueTomorrowRisk], now), 'amber');
+});
+
+test('Review-date due today is Red across detail register dashboard and project attention consumers', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	const dueTodayRisk = registerRisk({
+		review_date: '2026-07-12',
+		due_date: '2026-08-01',
+		updated_at: '2026-07-01T10:00:00Z',
+	});
+	const reviewBlock = getRiskAssuranceBlocks(dueTodayRisk, now).find((block) => block.id === 'review-date');
+
+	assert.equal(reviewBlock?.tone, 'red');
+	assert.equal(reviewBlock?.value, 'Due today');
+	assert.equal(reviewBlock?.prompt, 'Update review date');
+	assert.equal(deriveRiskReferenceTone(dueTodayRisk, now), 'red');
+	assert.equal(deriveRiskActionStateTone(dueTodayRisk, now), 'red');
+	assert.equal(countRisksNeedingAction([dueTodayRisk], now), 1);
+	assert.deepEqual(getRiskActionItems(dueTodayRisk, now).map((item) => item.type), ['review-overdue']);
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([dueTodayRisk], now), 'red');
+	assert.equal(deriveRiskTileAttentionSignal([dueTodayRisk], now), 'red');
+	assert.equal(deriveProjectActionState([dueTodayRisk], now), 'red');
 });
 
 test('Draft and Closed risk display is neutral while exposure remains available', () => {
