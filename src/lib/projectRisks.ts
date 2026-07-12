@@ -195,7 +195,7 @@ export type RiskOwnerOption = RiskProfile & {
 export type RiskFormInput = {
 	title: string;
 	description?: string;
-	status: string;
+	status?: string;
 	probability?: string;
 	impact?: string;
 	ragStatus?: string;
@@ -421,12 +421,13 @@ export function buildRiskReference(projectRef: string, sequence: number): string
 	return `Risk-${projectRef}-${String(sequence).padStart(3, '0')}`;
 }
 
-export function validateRiskFormInput(input: RiskFormInput): Record<string, string> {
+export function validateRiskFormInput(input: RiskFormInput, options: { mode?: 'create' | 'edit' } = {}): Record<string, string> {
 	const errors: Record<string, string> = {};
+	const mode = options.mode ?? 'edit';
 	if (!input.title.trim()) errors.title = 'Risk title is required.';
-	if (!isRiskStatus(input.status)) errors.status = 'Select a valid risk status.';
-	if (!RISK_LEVELS.includes(input.probability as RiskLevel)) errors.probability = 'Select a valid probability.';
-	if (!RISK_LEVELS.includes(input.impact as RiskLevel)) errors.impact = 'Select a valid impact.';
+	if (mode !== 'create' && !isRiskStatus(input.status)) errors.status = 'Select a valid risk status.';
+	if (mode !== 'create' && !RISK_LEVELS.includes(input.probability as RiskLevel)) errors.probability = 'Select a valid probability.';
+	if (mode !== 'create' && !RISK_LEVELS.includes(input.impact as RiskLevel)) errors.impact = 'Select a valid impact.';
 	if (!isRiskReviewDate(input.reviewDate)) errors.reviewDate = 'Enter a valid review date.';
 	if (!isRiskReviewDate(input.dueDate)) errors.dueDate = 'Enter a valid due date.';
 	return errors;
@@ -1641,12 +1642,14 @@ async function getNextRiskSequence(organisationId: string, projectId: string, cl
 }
 
 function normaliseRiskPayload(input: RiskFormInput, now = new Date()) {
+	const probability = RISK_LEVELS.includes(input.probability as RiskLevel) ? input.probability as RiskLevel : 'medium';
+	const impact = RISK_LEVELS.includes(input.impact as RiskLevel) ? input.impact as RiskLevel : 'medium';
 	const payload = {
 		title: input.title.trim(),
 		description: input.description?.trim() || null,
 		status: input.status as RiskStatus,
-		probability: input.probability as RiskLevel,
-		impact: input.impact as RiskLevel,
+		probability,
+		impact,
 		owner_id: input.ownerId?.trim() || null,
 		actioner_id: input.actionerId?.trim() || null,
 		review_date: input.reviewDate?.trim() || null,
@@ -1702,12 +1705,13 @@ export async function createProjectRisk(
 	client,
 	accessToken?: string,
 ): Promise<ProjectRisk> {
-	const errors = validateRiskFormInput(input);
+	const draftInput = { ...input, status: 'draft' };
+	const errors = validateRiskFormInput(draftInput, { mode: 'create' });
 	if (Object.keys(errors).length > 0) throw new Error(Object.values(errors)[0]);
 
 	const { workspace, organisation, project } = await resolveScopedRiskProject(workspaceSlug, projectSlug, 'risk.create', client, accessToken);
-	const ownerId = input.ownerId?.trim() || null;
-	const actionerId = input.actionerId?.trim() || null;
+	const ownerId = draftInput.ownerId?.trim() || null;
+	const actionerId = draftInput.actionerId?.trim() || null;
 	await assertActiveRiskMember(organisation.id, ownerId, client, 'risk owner');
 	await assertActiveRiskMember(organisation.id, actionerId, client, 'risk actioner');
 	const eventTime = new Date();
@@ -1715,7 +1719,7 @@ export async function createProjectRisk(
 		organisation.id,
 		project.id,
 		project.project_ref,
-		normaliseRiskPayload({ ...input, ownerId, actionerId }, eventTime),
+		normaliseRiskPayload({ ...draftInput, ownerId, actionerId }, eventTime),
 		client,
 	);
 	if (isActiveRiskStatus(risk.status)) {

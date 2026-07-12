@@ -31,9 +31,9 @@ let canCreateRisk = false;
 let formValues = {
 	title: '',
 	description: '',
-	status: 'open',
-	probability: 'medium',
-	impact: 'medium',
+	status: 'draft',
+	probability: '',
+	impact: '',
 	ownerId: '',
 	actionerId: '',
 	reviewDate: '',
@@ -45,9 +45,9 @@ let formValues = {
 const formDataToValues = (formData) => ({
 	title: String(formData.get('title') ?? ''),
 	description: String(formData.get('description') ?? ''),
-	status: String(formData.get('status') ?? 'open'),
-	probability: String(formData.get('probability') ?? 'medium'),
-	impact: String(formData.get('impact') ?? 'medium'),
+	status: 'draft',
+	probability: String(formData.get('probability') ?? ''),
+	impact: String(formData.get('impact') ?? ''),
 	ownerId: String(formData.get('owner_id') ?? ''),
 	actionerId: String(formData.get('actioner_id') ?? ''),
 	reviewDate: String(formData.get('review_date') ?? ''),
@@ -110,12 +110,12 @@ try {
 					if (Astro.request.method === 'POST') {
 						const formData = await Astro.request.formData();
 						formValues = formDataToValues(formData);
-						formErrors = validateRiskFormInput(formValues);
+						formErrors = validateRiskFormInput(formValues, { mode: 'create' });
 
 						if (Object.keys(formErrors).length === 0) {
 							try {
 								const risk = await createProjectRisk(workspaceSlug ?? '', projectSlug ?? '', formValues, serverSupabase, accessToken);
-								return Astro.redirect(buildProjectRiskPath(workspaceSlug ?? '', data.slug, risk.risk_id));
+								return Astro.redirect(`${buildProjectRiskPath(workspaceSlug ?? '', data.slug, risk.risk_id)}?created=draft`);
 							} catch (error) {
 								if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
 								const errorMessage = error instanceof Error ? error.message : 'Unable to create risk.';
@@ -152,12 +152,12 @@ try {
 				/>
 
 				<ProjectControlPanel title="Risk controls" status="Create risk" headingId="risk-new-controls-heading">
-					<p class="risk-form-page__copy">Saving as Draft keeps the risk neutral and does not create a Project Narrative entry. Saving as an active status opens the risk for active management.</p>
+					<p class="risk-form-page__copy">This risk will be created as a Draft for review and assessment.</p>
 				</ProjectControlPanel>
 
 				<ProjectContentPanel
-					title="Risk details"
-					helper="Capture the minimum fields needed to manage this project risk."
+					title="Draft risk details"
+					helper="Only the title is required now. Optional details can be added now or refined before opening."
 					headingId="risk-new-form-heading"
 				>
 					<RiskForm

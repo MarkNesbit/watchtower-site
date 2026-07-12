@@ -5,6 +5,7 @@
 **Status:** Assessment complete; no lifecycle behaviour changed
 **Implementation follow-up:** WT-RISK-LIFECYCLE-001B completed as the first dependency-led implementation slice, hardening the existing shared lifecycle/action-state contract without changing product behaviour
 **Defect follow-up:** WT-RISK-LIFECYCLE-001B-FIX-001 corrected active-risk review-date due-soon Amber handling in the shared contract; no migration required
+**Implementation follow-up:** WT-RISK-LIFECYCLE-002 completed manual and prompt Draft capture alignment; no migration required
 **Repository assessed:** `watchtower-site`
 
 ## Executive summary
@@ -438,6 +439,10 @@ Delivery risk: Low.
 
 ### WT-RISK-LIFECYCLE-002 - Manual and prompt Draft capture alignment
 
+Status: completed. Manual Raise a risk now creates a Draft-only `project_risks` record through the same source-of-truth model as prompt-created Drafts. The create form removes lifecycle/status selection, states that the risk will be created as a Draft for review and assessment, requires only a title, and treats probability/impact as optional Draft-capture fields. Server-side creation enforces `status='draft'` regardless of submitted status payload and does not create Project Narrative entries. Prompt-created Draft behaviour, duplicate detection and `source_risk_prompt_id` traceability are unchanged.
+
+Known limitation carried forward: the current non-null probability/impact schema still uses Medium/Medium compatibility defaults for untouched Drafts. These display as `Unassessed`, but the system cannot reliably distinguish untouched compatibility Medium/Medium from a deliberately supplied Medium/Medium estimate until a future readiness/profile design adds an explicit marker or schema change.
+
 Objective: Align manual risk creation with prompt-created Drafts while keeping initial capture lightweight.
 
 Included scope:
@@ -610,28 +615,27 @@ Delivery risk: Medium.
 | Slice | Parent Epic ID | Epic outcome supported | Dependencies on other slices | Requirements/product decisions addressed | Areas explicitly deferred |
 | --- | --- | --- | --- | --- | --- |
 | WT-RISK-LIFECYCLE-001B | WT-RISK-LIFECYCLE-EPIC-001 | One authoritative action-state model; consistency across surfaces | None | Forgiving Amber rule, action-state separation | Activation gate, Governance Profiles |
-| WT-RISK-LIFECYCLE-002 | WT-RISK-LIFECYCLE-EPIC-001 | Every creation route uses same model; lightweight capture | WT-RISK-LIFECYCLE-001B | Initial manual-create status, Draft default | Activation gate |
+| WT-RISK-LIFECYCLE-002 | WT-RISK-LIFECYCLE-EPIC-001 | Every creation route uses same model; lightweight capture | WT-RISK-LIFECYCLE-001B | Initial manual-create status, Draft default, title-only capture, optional details retained, no Draft Narrative | Activation gate, Medium/Medium ambiguity resolution |
 | WT-RISK-LIFECYCLE-003 | WT-RISK-LIFECYCLE-EPIC-001 | Draft risks cannot progress until minimum activation information is complete | WT-RISK-LIFECYCLE-001B, preferably WT-RISK-LIFECYCLE-002 | Minimum activation fields, owner/review/assessment decisions | Organisation-specific activation rules, approvals |
 | WT-RISK-LIFECYCLE-004 | WT-RISK-LIFECYCLE-EPIC-001 | Risk Register consistency; lifecycle/exposure/action-state separation | WT-RISK-LIFECYCLE-003 | Readiness display and register behaviour | Portfolio aggregation redesign |
 | WT-RISK-LIFECYCLE-005 | WT-RISK-LIFECYCLE-EPIC-001 | Dashboard signals and health consumers remain consistent | WT-RISK-LIFECYCLE-001B | Project action-state versus Health separation | Project Health policy |
 | WT-RISK-LIFECYCLE-006 | WT-RISK-LIFECYCLE-EPIC-001 | Narrative entries preserve text while showing current linked risk state | WT-RISK-LIFECYCLE-001B | Missing/deleted linked risk display | Rewriting historical entries, audit snapshot model |
 | WT-RISK-LIFECYCLE-007 | WT-RISK-LIFECYCLE-EPIC-001 | Lifecycle closure and audit evidence are supportable | WT-RISK-LIFECYCLE-003 | Closure requirements, lifecycle evidence | Approval chains, automated escalation |
 
-## Recommended first implementation slice
+## Recommended next implementation slice
 
-Recommended first slice: WT-RISK-LIFECYCLE-001B - Shared lifecycle/action-state contract hardening.
+Recommended next slice: WT-RISK-LIFECYCLE-003 - Minimum activation gate.
 
-Status: completed after this assessment. The slice made the existing lifecycle grouping and forgiving Amber action-state roll-up explicit, routed dashboard risk roll-up through the shared contract, added regression coverage for Draft/Closed neutrality and cross-consumer consistency, and fixed date-sensitive tests without weakening overdue logic.
+Status: WT-RISK-LIFECYCLE-001B and WT-RISK-LIFECYCLE-002 are complete. The shared lifecycle/action-state contract is hardened, and all current initial capture routes now create Draft risks. WT-RISK-LIFECYCLE-003 should define and enforce the minimum information required before a Draft can become Active/Open.
 
 Defect follow-up: WT-RISK-LIFECYCLE-001B-FIX-001 records the MVP review-date window in the shared contract. Active risks with no review date are Amber, overdue review dates and review dates due today are Red, review dates due tomorrow or within the next three calendar days are Amber, and later review dates are Green. The three-day window is an MVP constant that can later move into configurable Governance Profiles. No database migration or production data change is required.
 
 Why first:
 
-- It has the clearest boundary and lowest schema risk.
-- It preserves current behaviour while making the Epic's core action-state rule executable as regression coverage.
-- It reduces the chance that activation, manual Draft alignment or Narrative changes accidentally alter dashboard/register behaviour.
-- It does not require unresolved product decisions about activation fields.
-- It can begin immediately after review.
+- It is the next dependency after unified Draft capture.
+- It addresses the current gap where Drafts can still be opened without minimum activation information.
+- It can build on the central lifecycle/action-state contract and the unified Draft create path.
+- It should make the Medium/Medium compatibility ambiguity an explicit readiness/product decision.
 
 ## Assessment constraints confirmation
 
