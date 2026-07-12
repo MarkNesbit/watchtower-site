@@ -115,6 +115,7 @@ const RISK_REF_CONSTRAINT = 'project_risks_project_ref_key';
 const RISK_ORGANISATION_REF_CONSTRAINT = 'project_risks_organisation_ref_key';
 const RISK_SOURCE_PROMPT_CONSTRAINT = 'project_risks_project_source_prompt_key';
 const MAX_RISK_REF_INSERT_ATTEMPTS = 3;
+export const RISK_REVIEW_DUE_SOON_WINDOW_DAYS = 3;
 
 export type RiskProfile = {
 	id: string;
@@ -178,6 +179,13 @@ export type RiskAssuranceBlock = {
 export type RiskActionStateDriver = {
 	tone: RiskAssuranceTone;
 	message: string;
+};
+export type RiskDateToneStatus = 'missing' | 'overdue' | 'due-soon' | 'scheduled';
+export type RiskDateToneResult = {
+	tone: RiskAssuranceTone;
+	value: string;
+	status: RiskDateToneStatus;
+	daysUntil?: number;
 };
 
 export type RiskOwnerOption = RiskProfile & {
@@ -879,15 +887,14 @@ export function getRiskActionItems(risk: ProjectRisk, now = new Date()): RiskReg
 	if (!isRiskEligibleForActionPanel(risk)) return [];
 
 	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
-	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
+	const review = deriveRiskReviewDateTone(risk.review_date, now);
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
 	const contingency = trimmedText(risk.contingency_plan);
 	const updated = staleUpdateTone(risk.updated_at, now);
-	const reviewDays = daysUntilUtcDate(risk.review_date, now);
 	const items: RiskRegisterActionItem[] = [];
 
-	if (review.tone === 'red') {
+	if (review.status === 'overdue') {
 		items.push(riskActionItem(risk, now, 'review-overdue', 0, 'red', 'Review overdue risk', 'Overdue'));
 	}
 	if (!risk.owner_id) {
@@ -908,9 +915,10 @@ export function getRiskActionItems(risk: ProjectRisk, now = new Date()): RiskReg
 	if (due.tone === 'red') {
 		items.push(riskActionItem(risk, now, 'due-date-overdue', 60, 'red', 'Review overdue due date', 'Due date overdue'));
 	}
-	if (review.tone === 'amber') {
+	if (review.status === 'missing') {
 		items.push(riskActionItem(risk, now, 'set-review-date', 70, 'amber', 'Set review date', 'Missing review date'));
-	} else if (reviewDays !== null && reviewDays >= 0 && reviewDays <= 7) {
+	} else if (review.status === 'due-soon') {
+		const reviewDays = review.daysUntil ?? 0;
 		items.push(riskActionItem(
 			risk,
 			now,
@@ -989,12 +997,34 @@ function startOfUtcDay(date: Date): Date {
 	return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
-function dateTone(value: unknown, now: Date, missingTone: RiskAssuranceTone, missingValue: string) {
+function dateTone(value: unknown, now: Date, missingTone: RiskAssuranceTone, missingValue: string): RiskDateToneResult {
 	const date = parseUtcDate(value);
-	if (!date) return { tone: missingTone, value: missingValue };
+	if (!date) return { tone: missingTone, value: missingValue, status: 'missing' };
 	return date < startOfUtcDay(now)
-		? { tone: 'red' as RiskAssuranceTone, value: 'Overdue' }
-		: { tone: 'green' as RiskAssuranceTone, value: 'Scheduled' };
+		? { tone: 'red', value: 'Overdue', status: 'overdue' }
+		: { tone: 'green', value: 'Scheduled', status: 'scheduled' };
+}
+
+export function deriveRiskReviewDateTone(value: unknown, now = new Date()): RiskDateToneResult {
+	const daysUntil = daysUntilUtcDate(value, now);
+	if (daysUntil === null) return { tone: 'amber', value: 'No review date', status: 'missing' };
+	if (daysUntil <= 0) {
+		return {
+			tone: 'red',
+			value: daysUntil === 0 ? 'Due today' : 'Overdue',
+			status: 'overdue',
+			daysUntil,
+		};
+	}
+	if (daysUntil <= RISK_REVIEW_DUE_SOON_WINDOW_DAYS) {
+		return {
+			tone: 'amber',
+			value: `Due in ${daysUntil} day${daysUntil === 1 ? '' : 's'}`,
+			status: 'due-soon',
+			daysUntil,
+		};
+	}
+	return { tone: 'green', value: 'Scheduled', status: 'scheduled', daysUntil };
 }
 
 function riskReviewDateIsOverdue(value: unknown, now: Date): boolean {
@@ -1070,7 +1100,7 @@ export function deriveRiskAssuranceTone(risk: Pick<ProjectRisk,
 	if (!isActiveRiskStatus(risk.status)) return 'neutral';
 	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
 	const status = trimmedText(risk.status).toLowerCase();
-	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
+	const review = deriveRiskReviewDateTone(risk.review_date, now);
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
 	const contingency = trimmedText(risk.contingency_plan);
@@ -1155,7 +1185,7 @@ export function getRiskActionStateDrivers(risk: Pick<ProjectRisk,
 	}
 
 	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
-	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
+	const review = deriveRiskReviewDateTone(risk.review_date, now);
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
 	const contingency = trimmedText(risk.contingency_plan);
@@ -1165,8 +1195,9 @@ export function getRiskActionStateDrivers(risk: Pick<ProjectRisk,
 
 	if (!risk.owner_id) drivers.push({ tone: 'red', message: 'Risk owner is missing.' });
 	if (actionerTone(risk.status, risk.actioner_id) === 'red') drivers.push({ tone: 'red', message: 'Actioner is missing.' });
-	if (review.tone === 'red') drivers.push({ tone: 'red', message: 'Review date is overdue.' });
-	if (review.tone === 'amber') drivers.push({ tone: 'amber', message: 'Review date is missing.' });
+	if (review.status === 'overdue') drivers.push({ tone: 'red', message: 'Review date is overdue.' });
+	if (review.status === 'missing') drivers.push({ tone: 'amber', message: 'Review date is missing.' });
+	if (review.status === 'due-soon') drivers.push({ tone: 'amber', message: 'Review date is due soon.' });
 	if (due.tone === 'red') drivers.push({ tone: 'red', message: 'Due date is overdue.' });
 	if (due.tone === 'amber') drivers.push({ tone: 'amber', message: 'Due date is missing.' });
 	if (!mitigation && exposure === 'critical') drivers.push({ tone: 'red', message: 'Mitigation plan is missing for Critical exposure.' });
@@ -1301,7 +1332,7 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 	const descriptionTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : !description ? 'red' : description.length < 30 ? 'amber' : 'green';
 	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
 	const exposureTone = riskExposureTone(exposure);
-	const review = dateTone(risk.review_date, now, 'amber', 'No review date');
+	const review = deriveRiskReviewDateTone(risk.review_date, now);
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
 	const contingency = trimmedText(risk.contingency_plan);
@@ -1360,7 +1391,13 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 			tone: reviewTone,
 			statusLabel: riskAssuranceToneLabel(reviewTone),
 			value: review.value,
-			prompt: reviewTone === 'red' ? 'Update review date' : reviewTone === 'amber' ? 'Add review date' : undefined,
+			prompt: review.status === 'overdue'
+				? 'Update review date'
+				: review.status === 'missing'
+					? 'Add review date'
+					: review.status === 'due-soon'
+						? 'Review risk soon'
+						: undefined,
 		},
 		{
 			id: 'due-date',

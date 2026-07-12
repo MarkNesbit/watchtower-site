@@ -9,6 +9,7 @@ import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featu
 import { can } from '../../../../../../lib/permissions';
 import {
 	deriveRiskReferenceTone,
+	deriveRiskReviewDateTone,
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
 	defaultRiskRegisterSortForView,
 	filterAndSortRisksForRegister,
@@ -58,29 +59,24 @@ const formatDate = (value, fallback = 'Not available') => value
 const formatDateTime = (value, fallback = 'Not available') => value
 	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
 	: fallback;
-const startOfUtcDay = (date) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-const parseReviewDate = (value) => {
-	if (!value || typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-	const date = new Date(`${value}T00:00:00Z`);
-	return Number.isNaN(date.getTime()) ? null : date;
-};
 const reviewDueState = (risk, now = new Date()) => {
 	const category = riskLifecycleCategory(risk.status);
-	const date = parseReviewDate(risk.review_date);
-	if (!date) return {
-		tone: category === 'active' ? 'amber' : 'neutral',
-		label: 'No review date',
-		statusLabel: category === 'active' ? 'Missing' : '',
-	};
-	if (category === 'active' && date < startOfUtcDay(now)) return {
-		tone: 'red',
-		label: formatDate(risk.review_date),
-		statusLabel: 'Overdue',
+	const review = deriveRiskReviewDateTone(risk.review_date, now);
+	if (category !== 'active') return {
+		tone: 'neutral',
+		label: risk.review_date ? formatDate(risk.review_date) : 'No review date',
+		statusLabel: '',
 	};
 	return {
-		tone: 'neutral',
-		label: formatDate(risk.review_date),
-		statusLabel: '',
+		tone: review.tone,
+		label: risk.review_date ? formatDate(risk.review_date) : review.value,
+		statusLabel: review.status === 'missing'
+			? 'Missing'
+			: review.status === 'overdue'
+				? 'Overdue'
+				: review.status === 'due-soon'
+					? 'Due soon'
+					: '',
 	};
 };
 const actionStateFor = (risk) => {
