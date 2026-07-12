@@ -117,6 +117,7 @@ const RISK_SOURCE_PROMPT_CONSTRAINT = 'project_risks_project_source_prompt_key';
 const MAX_RISK_REF_INSERT_ATTEMPTS = 3;
 export const RISK_REVIEW_DUE_SOON_WINDOW_DAYS = 3;
 export const RISK_ACTIVATION_DESCRIPTION_MIN_LENGTH = 30;
+export const DRAFT_RISK_REVIEW_CHALLENGE_AGE_DAYS = 14;
 
 export type RiskProfile = {
 	id: string;
@@ -141,6 +142,19 @@ export type RiskActivationRequirement = {
 export type RiskActivationReadiness = {
 	ready: boolean;
 	missing: RiskActivationRequirement[];
+};
+
+export type DraftRiskRegisterReadinessDisplay = {
+	ready: boolean;
+	label: string;
+	missingCount: number;
+	missing: RiskActivationRequirement[];
+	missingSummary: string;
+	ageDays: number;
+	ageLabel: string;
+	reviewChallenge: boolean;
+	reviewLabel: string;
+	reviewDescription: string;
 };
 
 export type ProjectRisk = {
@@ -525,6 +539,47 @@ export function getRiskActivationReadiness(
 	return {
 		ready: missing.length === 0,
 		missing,
+	};
+}
+
+export function getDraftRiskAgeInDays(createdAt: unknown, now = new Date()): number {
+	const createdDate = typeof createdAt === 'string' || createdAt instanceof Date
+		? new Date(createdAt)
+		: null;
+	if (!createdDate || Number.isNaN(createdDate.getTime())) return 0;
+	const createdDay = startOfUtcDay(createdDate).getTime();
+	const currentDay = startOfUtcDay(now).getTime();
+	return Math.max(0, Math.floor((currentDay - createdDay) / 86_400_000));
+}
+
+export function getDraftRiskRegisterReadinessDisplay(
+	risk: Pick<ProjectRisk, 'title' | 'description' | 'owner_id' | 'probability' | 'impact' | 'review_date' | 'assessment_completed_at' | 'created_at'>,
+	now = new Date(),
+): DraftRiskRegisterReadinessDisplay {
+	const readiness = getRiskActivationReadiness(risk, { now });
+	const ageDays = getDraftRiskAgeInDays(risk.created_at, now);
+	const ageLabel = `${ageDays} ${ageDays === 1 ? 'day' : 'days'}`;
+	const missingCount = readiness.missing.length;
+	const label = readiness.ready
+		? 'Ready to activate'
+		: `${missingCount} ${missingCount === 1 ? 'requirement' : 'requirements'} missing`;
+	const missingSummary = readiness.ready
+		? 'All minimum activation requirements are complete.'
+		: readiness.missing.map((requirement) => requirement.label).join(', ');
+	const reviewChallenge = ageDays >= DRAFT_RISK_REVIEW_CHALLENGE_AGE_DAYS;
+	return {
+		ready: readiness.ready,
+		label,
+		missingCount,
+		missing: readiness.missing,
+		missingSummary,
+		ageDays,
+		ageLabel,
+		reviewChallenge,
+		reviewLabel: reviewChallenge ? 'Review Draft' : '',
+		reviewDescription: reviewChallenge
+			? `${ageLabel} old. Review whether this Draft risk is still required, should be completed, or should wait for a future withdrawal option.`
+			: `${ageLabel} old.`,
 	};
 }
 
