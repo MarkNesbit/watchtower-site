@@ -4,12 +4,25 @@ type Props = {
 	label: string;
 	statusLabel?: string;
 	ariaLabel?: string;
+	title?: string;
+	compactActionState?: boolean;
 };
 
-const { tone = 'neutral', label, statusLabel = '', ariaLabel = '' } = Astro.props;
+const {
+	tone = 'neutral',
+	label,
+	statusLabel = '',
+	ariaLabel = '',
+	title = '',
+	compactActionState = false,
+} = Astro.props;
+const compactStateLabels: Record<string, string> = { Red: 'R', Amber: 'A', Green: 'G' };
+const visibleStatusLabel = compactActionState
+	? compactStateLabels[statusLabel] ?? statusLabel
+	: statusLabel;
 ---
 
-<span class={`rag-reference-pill rag-reference-pill--${tone} rag-pill rag-pill--${tone}`} aria-label={ariaLabel || undefined}>
+<span class={`rag-reference-pill rag-reference-pill--${tone} rag-pill rag-pill--${tone}`} aria-label={ariaLabel || undefined} title={title || undefined}>
 	<span>{label}</span>
-	{statusLabel && <span class="rag-reference-pill__status rag-pill__status">{statusLabel}</span>}
+	{visibleStatusLabel && <span class="rag-reference-pill__status rag-pill__status">{visibleStatusLabel}</span>}
 </span>

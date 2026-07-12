@@ -6,6 +6,7 @@
 **Implementation follow-up:** WT-RISK-LIFECYCLE-001B completed as the first dependency-led implementation slice, hardening the existing shared lifecycle/action-state contract without changing product behaviour
 **Defect follow-up:** WT-RISK-LIFECYCLE-001B-FIX-001 corrected active-risk review-date due-soon Amber handling in the shared contract; no migration required
 **Implementation follow-up:** WT-RISK-LIFECYCLE-002 completed manual and prompt Draft capture alignment; no migration required
+**Implementation follow-up:** WT-RISK-LIFECYCLE-006 completed Narrative current-state linked-risk row pills; no migration required
 **Repository assessed:** `watchtower-site`
 
 ## Executive summary
@@ -16,9 +17,9 @@ The largest conflict with the Epic direction is activation readiness. Prompt-cre
 
 The current action-state roll-up already matches the MVP "forgiving Amber" rule: any Red produces Red, one or more Ambers with no Red produces Amber, and multiple Ambers do not escalate to Red. The main issue is not the roll-up rule itself; it is that lifecycle, exposure, assurance and action-state concepts are tightly coupled in the same helper and some UI-local presentation helpers duplicate date/review behaviour.
 
-Narrative is partly aligned with the future target. Narrative entries preserve historical text and source metadata, and the Narrative page fetches the current linked risk for its detail modal. However, the table reference pill still uses stored `project_narrative_entries.attention_level`, so the visible row pill can remain frozen even while the risk preview modal shows current state.
+At assessment time, Narrative was partly aligned with the future target: entries preserved historical text and source metadata, and the Narrative page fetched the current linked risk for its detail modal, but the table reference pill still used stored `project_narrative_entries.attention_level`. WT-RISK-LIFECYCLE-006 has since closed that gap by deriving risk-linked row pills from the current linked risk while leaving stored Narrative content unchanged.
 
-Recommended delivery approach: start with a small shared lifecycle/action-state contract hardening slice, then align manual and prompt Draft capture, then introduce a server-side activation gate, then update Narrative pills and any consumer-specific presentation. No database migration is required for the assessment. Implementation slices may need migrations only if future product decisions require new activation fields, closure metadata, or stored state history.
+Recommended delivery approach: start with a small shared lifecycle/action-state contract hardening slice, then align manual and prompt Draft capture, then introduce a server-side activation gate, then update Narrative pills and any consumer-specific presentation. WT-RISK-LIFECYCLE-001B, WT-RISK-LIFECYCLE-002, WT-RISK-LIFECYCLE-003 and WT-RISK-LIFECYCLE-006 now cover those first implementation steps. No database migration is required for the assessment. Implementation slices may need migrations only if future product decisions require new activation fields, closure metadata, or stored state history.
 
 ## Current-state architecture map
 
@@ -117,7 +118,7 @@ Recommended delivery approach: start with a small shared lifecycle/action-state 
   - Lists Narrative entries with stored source metadata and links.
 - `src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/narrative.astro`
   - Fetches linked current risks by `source_record_id`.
-  - Table pill still uses stored entry attention.
+  - Risk-linked row pills now use current linked-risk state through `src/lib/riskReferencePills.ts`.
   - Detail modal uses current linked risk state when the risk can be loaded.
 
 ### Permission boundaries
@@ -295,7 +296,7 @@ Current implementation:
 - `attention_level` stores the entry's creation-time attention value.
 - The Narrative page lists entries from `project_narrative_entries`.
 - The page then fetches current linked risks with `listProjectRisksByIds` and builds `sourceRisk` preview data from current risk helpers.
-- The table pill uses stored `entry.attention_level`, not the current linked risk state.
+- WT-RISK-LIFECYCLE-006 derives risk-linked table pills from the current linked risk state while leaving stored `entry.attention_level` unchanged.
 - The detail modal uses current risk preview values when the linked risk is available.
 
 Preferred target approach:
@@ -343,7 +344,7 @@ Test implications:
 | Shared action-state helper | Risk detail/register/dashboard/Narrative | Some presentation duplication remains | No | Medium | WT-RISK-LIFECYCLE-001B |
 | Risk Register consistency | Register page and helpers | UX-009 should remain stable | No | Medium | WT-RISK-LIFECYCLE-004 |
 | Dashboard consistency | `dashboardTileSignals`, `projectAttention` | Changes to risk assurance affect project action state | No | Medium | WT-RISK-LIFECYCLE-005 |
-| Narrative current-state pill | Narrative page, current risk fetch | Row pill still uses stored attention | No | Medium | WT-RISK-LIFECYCLE-006 |
+| Narrative current-state pill | Narrative page, current risk fetch | Implemented with shared presentation helper | No | Medium | WT-RISK-LIFECYCLE-006 |
 | Audit continuity | Narrative entries, notes, audit fields | No complete lifecycle history table | Maybe later | Medium | WT-RISK-LIFECYCLE-003 / WT-RISK-LIFECYCLE-007 |
 | Permissions | `permissions.ts`, RLS, helpers | Activation is `risk.edit`; no separate permission | Maybe if approval chains later | Low for MVP | WT-RISK-LIFECYCLE-003 |
 
@@ -558,6 +559,8 @@ Delivery risk: Medium.
 
 ### WT-RISK-LIFECYCLE-006 - Narrative current-state linked-risk pills
 
+Status: completed. Risk-linked Narrative row pills now use the current linked risk state through the shared risk reference pill presentation helper. Active linked risks show compact `R`, `A` or `G` visible labels with full Red/Amber/Green action-state wording in accessible labels and titles. Draft and Closed linked risks show neutral reference-only pills with lifecycle context in accessible text. Missing or inaccessible linked risks show a neutral unavailable reference using `source_ref` where available and do not expose an unsafe detail link. Stored Narrative title, details, source metadata, attention level and read-state remain historical and unchanged.
+
 Objective: Show current linked-risk state on risk-linked Narrative row pills while preserving historical entry text.
 
 Included scope:
@@ -573,11 +576,11 @@ Excluded scope:
 - No new Narrative entries when risk state changes.
 - No audit snapshot redesign.
 
-Dependencies: WT-RISK-LIFECYCLE-001B; can proceed before activation gate if scoped to current helpers.
+Dependencies: WT-RISK-LIFECYCLE-001B.
 
 Database impact: None.
 
-Primary files likely affected: Narrative page, possibly a small helper, tests.
+Primary files affected: `src/lib/riskReferencePills.ts`, `src/components/app/RagReferencePill.astro`, Risk Register and Risk Detail reference-pill consumers, Narrative page, tests and docs.
 
 Test scope: Red/Amber/Green current-state display, missing linked risk fallback, historical text unchanged.
 
@@ -628,7 +631,7 @@ Delivery risk: Medium.
 
 Recommended next slice: WT-RISK-LIFECYCLE-004 - Risk Register lifecycle/readiness presentation.
 
-Status: WT-RISK-LIFECYCLE-001B, WT-RISK-LIFECYCLE-002 and WT-RISK-LIFECYCLE-003 are complete. The shared lifecycle/action-state contract is hardened, all current initial capture routes create Draft risks, and Draft activation is blocked until the minimum activation information is complete.
+Status: WT-RISK-LIFECYCLE-001B, WT-RISK-LIFECYCLE-002, WT-RISK-LIFECYCLE-003 and WT-RISK-LIFECYCLE-006 are complete. The shared lifecycle/action-state contract is hardened, all current initial capture routes create Draft risks, Draft activation is blocked until the minimum activation information is complete, and risk-linked Narrative row pills now show current linked-risk state without rewriting historical entries.
 
 Defect follow-up: WT-RISK-LIFECYCLE-001B-FIX-001 records the MVP review-date window in the shared contract. Active risks with no review date are Amber, overdue review dates and review dates due today are Red, review dates due tomorrow or within the next three calendar days are Amber, and later review dates are Green. The three-day window is an MVP constant that can later move into configurable Governance Profiles. No database migration or production data change is required.
 
@@ -637,7 +640,7 @@ Why first:
 - It is the next dependency after the activation gate.
 - It can surface Draft readiness consistently in the Risk Register without changing activation rules.
 - It can build on the central lifecycle/action-state contract, unified Draft capture and shared activation-readiness helper.
-- It can keep Risk Register views consistent while Narrative live-state display remains a later slice.
+- It can keep Risk Register views consistent while building on the completed Narrative live-state display slice.
 
 ## WT-RISK-LIFECYCLE-001A assessment constraints confirmation
 

@@ -78,6 +78,10 @@ import {
 } from '../src/lib/projectRisks.ts';
 import { deriveRiskTileAttentionSignal } from '../src/lib/dashboardTileSignals.ts';
 import { deriveProjectActionState } from '../src/lib/projectAttention.ts';
+import {
+	getNarrativeReferencePillPresentation,
+	getRiskReferencePillPresentation,
+} from '../src/lib/riskReferencePills.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260620000100_create_project_risks.sql', import.meta.url);
 const migrationSql = async () => readFile(migrationUrl, 'utf8');
@@ -1947,6 +1951,118 @@ test('Watchtower default risk exposure display does not use green for Low exposu
 	assert.equal(riskExposureToneLabel('risk-low'), 'Low');
 });
 
+test('Risk reference pills use compact active action-state labels with full accessible wording', async () => {
+	const component = await readFile(new URL('../src/components/app/RagReferencePill.astro', import.meta.url), 'utf8');
+	const now = new Date('2026-07-12T12:00:00Z');
+	const redRisk = registerRisk({ risk_ref: 'Risk-HHH-002', owner_id: null });
+	const amberRisk = registerRisk({ risk_ref: 'Risk-HHH-004', review_date: '2026-07-13' });
+	const greenRisk = registerRisk({ risk_ref: 'Risk-HHH-013', review_date: '2026-07-20' });
+	const draftRisk = registerRisk({ risk_ref: 'Risk-HHH-014', status: 'draft', rag_status: 'red' });
+	const closedRisk = registerRisk({ risk_ref: 'Risk-HHH-010', status: 'closed', rag_status: 'red' });
+
+	assert.match(component, /compactActionState/);
+	assert.match(component, /Red: 'R'/);
+	assert.match(component, /Amber: 'A'/);
+	assert.match(component, /Green: 'G'/);
+	assert.match(component, /title=\{title \|\| undefined\}/);
+
+	assert.deepEqual(getRiskReferencePillPresentation(redRisk, now), {
+		tone: 'red',
+		label: 'Risk-HHH-002',
+		statusLabel: 'Red',
+		ariaLabel: 'Risk-HHH-002, action state Red',
+		title: 'Risk-HHH-002, action state Red',
+		compactActionState: true,
+		riskDetailAvailable: true,
+	});
+	assert.deepEqual(getRiskReferencePillPresentation(amberRisk, now), {
+		tone: 'amber',
+		label: 'Risk-HHH-004',
+		statusLabel: 'Amber',
+		ariaLabel: 'Risk-HHH-004, action state Amber',
+		title: 'Risk-HHH-004, action state Amber',
+		compactActionState: true,
+		riskDetailAvailable: true,
+	});
+	assert.deepEqual(getRiskReferencePillPresentation(greenRisk, now), {
+		tone: 'green',
+		label: 'Risk-HHH-013',
+		statusLabel: 'Green',
+		ariaLabel: 'Risk-HHH-013, action state Green',
+		title: 'Risk-HHH-013, action state Green',
+		compactActionState: true,
+		riskDetailAvailable: true,
+	});
+	assert.deepEqual(getRiskReferencePillPresentation(draftRisk, now), {
+		tone: 'neutral',
+		label: 'Risk-HHH-014',
+		statusLabel: '',
+		ariaLabel: 'Risk-HHH-014, Draft risk',
+		title: 'Risk-HHH-014, Draft risk',
+		compactActionState: false,
+		riskDetailAvailable: true,
+	});
+	assert.deepEqual(getRiskReferencePillPresentation(closedRisk, now), {
+		tone: 'neutral',
+		label: 'Risk-HHH-010',
+		statusLabel: '',
+		ariaLabel: 'Risk-HHH-010, Closed risk',
+		title: 'Risk-HHH-010, Closed risk',
+		compactActionState: false,
+		riskDetailAvailable: true,
+	});
+});
+
+test('Narrative risk reference pill presentation uses current linked risk state without rewriting history', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	const historicalRedEntry = {
+		narrative_ref: 'NAR-HHH-001',
+		source_type: 'risk',
+		source_record_id: 'risk-1',
+		source_ref: 'Risk-HHH-001',
+		attention_level: 'red',
+	};
+	const manualEntry = {
+		narrative_ref: 'NAR-HHH-002',
+		source_type: 'manual',
+		source_record_id: null,
+		source_ref: null,
+		attention_level: 'amber',
+	};
+
+	assert.equal(getNarrativeReferencePillPresentation(historicalRedEntry, registerRisk({ risk_ref: 'Risk-HHH-001', owner_id: null }), now).statusLabel, 'Red');
+	assert.equal(getNarrativeReferencePillPresentation(historicalRedEntry, registerRisk({ risk_ref: 'Risk-HHH-001', review_date: '2026-07-13' }), now).statusLabel, 'Amber');
+	assert.equal(getNarrativeReferencePillPresentation(historicalRedEntry, registerRisk({ risk_ref: 'Risk-HHH-001', review_date: '2026-07-20' }), now).statusLabel, 'Green');
+	assert.deepEqual(getNarrativeReferencePillPresentation(historicalRedEntry, registerRisk({ risk_ref: 'Risk-HHH-001', status: 'draft' }), now), {
+		tone: 'neutral',
+		label: 'Risk-HHH-001',
+		statusLabel: '',
+		ariaLabel: 'Risk-HHH-001, Draft risk',
+		title: 'Risk-HHH-001, Draft risk',
+		compactActionState: false,
+		riskDetailAvailable: true,
+	});
+	assert.deepEqual(getNarrativeReferencePillPresentation(historicalRedEntry, null, now), {
+		tone: 'neutral',
+		label: 'Risk-HHH-001',
+		statusLabel: '',
+		ariaLabel: 'Risk-HHH-001, linked risk unavailable',
+		title: 'Linked risk unavailable',
+		compactActionState: false,
+		riskDetailAvailable: false,
+	});
+	assert.deepEqual(getNarrativeReferencePillPresentation(manualEntry, null, now), {
+		tone: 'amber',
+		label: 'NAR-HHH-002',
+		statusLabel: 'Amber',
+		ariaLabel: 'Open NAR-HHH-002, Amber attention',
+		title: 'NAR-HHH-002, Amber attention',
+		compactActionState: false,
+		riskDetailAvailable: false,
+	});
+	assert.equal(historicalRedEntry.attention_level, 'red');
+});
+
 test('Risk terminology contract leaves project health as Unknown', async () => {
 	const dashboard = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	const projectDetails = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/details.astro', import.meta.url), 'utf8');
@@ -3351,12 +3467,11 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.doesNotMatch(route, /data-closed-risks-section/);
 	assert.match(route, /getRiskRegisterExposureDisplay\(risk\)/);
 	assert.doesNotMatch(route, /statusLabel="Exposure"/);
-	assert.match(route, /actionStateFor\(risk\)/);
-	assert.match(route, /deriveRiskReferenceTone\(risk\)/);
-	assert.match(route, /riskReferenceStatusLabel\(risk\)/);
-	assert.match(route, /label: 'Not active'/);
-	assert.match(route, /referenceTone = lifecycleCategory === 'active' \? actionState\.tone : 'neutral'/);
-	assert.match(route, /referenceStatusLabel = lifecycleCategory === 'active' \? actionState\.label : ''/);
+	assert.match(route, /getRiskReferencePillPresentation\(risk, registerNow\)/);
+	assert.doesNotMatch(route, /actionStateFor\(risk\)/);
+	assert.doesNotMatch(route, /deriveRiskReferenceTone\(risk\)/);
+	assert.doesNotMatch(route, /riskReferenceStatusLabel\(risk\)/);
+	assert.doesNotMatch(route, /label: 'Not active'/);
 	assert.match(route, /riskProfileName\(risk\.owner, 'Unassigned'\)/);
 	assert.match(route, /risk-register-table__owner--missing/);
 	assert.match(route, /reviewDueState\(risk\)/);
@@ -3366,9 +3481,10 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /Due soon/);
 	assert.doesNotMatch(route, /parseReviewDate/);
 	assert.match(route, /ariaLabel=\{exposure\.ariaLabel\}/);
-	assert.match(route, /tone=\{referenceTone\}/);
-	assert.match(route, /statusLabel=\{referenceStatusLabel\}/);
+	assert.match(route, /tone=\{referencePill\.tone\}/);
+	assert.match(route, /statusLabel=\{referencePill\.statusLabel\}/);
 	assert.match(route, /ariaLabel=\{referenceAriaLabel\}/);
+	assert.match(route, /compactActionState=\{referencePill\.compactActionState\}/);
 	assert.match(route, /Estimated exposure/);
 	assert.match(route, /buildProjectNewRiskPath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(route, /data-risk-register-summary/);
@@ -3473,11 +3589,13 @@ test('Risk detail route renders edit access state and requires the risk to belon
 	assert.doesNotMatch(route, /What needs attention/);
 	assert.doesNotMatch(route, /Risk assurance view/);
 	assert.match(route, /class="risk-detail-heading"/);
-	assert.match(route, /label=\{risk\.risk_ref\}/);
-	assert.match(route, /deriveRiskReferenceTone\(risk, now\)/);
+	assert.match(route, /label=\{referencePill\?\.label \?\? risk\.risk_ref\}/);
+	assert.match(route, /getRiskReferencePillPresentation\(risk, now\)/);
+	assert.doesNotMatch(route, /deriveRiskReferenceTone\(risk, now\)/);
 	assert.match(route, /riskReferenceStatusLabel\(risk, now\)/);
-	assert.match(route, /tone=\{referenceTone\}/);
-	assert.match(route, /statusLabel=\{referenceStatus\}/);
+	assert.match(route, /tone=\{referencePill\?\.tone \?\? 'neutral'\}/);
+	assert.match(route, /statusLabel=\{referencePill\?\.statusLabel \?\? ''\}/);
+	assert.match(route, /compactActionState=\{referencePill\?\.compactActionState\}/);
 	assert.doesNotMatch(route, /RISK_RAG_STATUSES/);
 	assert.doesNotMatch(route, /riskRagTone/);
 	assert.match(route, /font-size: clamp\(1\.55rem, 2\.35vw, 2\.45rem\)/);

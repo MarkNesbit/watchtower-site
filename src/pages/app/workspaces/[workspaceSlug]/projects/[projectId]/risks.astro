@@ -8,7 +8,6 @@ import RagReferencePill from '../../../../../../components/app/RagReferencePill.
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import { can } from '../../../../../../lib/permissions';
 import {
-	deriveRiskReferenceTone,
 	deriveRiskReviewDateTone,
 	DEFAULT_RISK_REGISTER_PAGE_SIZE,
 	defaultRiskRegisterSortForView,
@@ -33,9 +32,9 @@ import {
 	riskLifecycleLabel,
 	riskProfileName,
 	riskMatchesRegisterView,
-	riskReferenceStatusLabel,
 	summarizeRiskRegister,
 } from '../../../../../../lib/projectRisks';
+import { getRiskReferencePillPresentation } from '../../../../../../lib/riskReferencePills';
 import { getDefaultRiskPromptLibraryForSelection, type RiskPromptLibraryForSelection } from '../../../../../../lib/riskPrompts';
 import { buildProjectNewRiskPath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
@@ -77,16 +76,6 @@ const reviewDueState = (risk, now = new Date()) => {
 				: review.status === 'due-soon'
 					? 'Due soon'
 					: '',
-	};
-};
-const actionStateFor = (risk) => {
-	if (riskLifecycleCategory(risk.status) !== 'active') return {
-		tone: 'neutral',
-		label: 'Not active',
-	};
-	return {
-		tone: deriveRiskReferenceTone(risk),
-		label: riskReferenceStatusLabel(risk),
 	};
 };
 try {
@@ -548,17 +537,13 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 														<tbody>
 															{pagedRisks.map((risk) => {
 																const exposure = getRiskRegisterExposureDisplay(risk);
-																const actionState = actionStateFor(risk);
 																const reviewDue = reviewDueState(risk);
 																const ownerLabel = riskProfileName(risk.owner, 'Unassigned');
 																const riskHref = buildProjectRiskPath(workspaceSlug ?? '', project.slug, risk.risk_id);
 																const lifecycleCategory = riskLifecycleCategory(risk.status);
 																const lifecycle = riskLifecycleLabel(risk.status);
-																const referenceTone = lifecycleCategory === 'active' ? actionState.tone : 'neutral';
-																const referenceStatusLabel = lifecycleCategory === 'active' ? actionState.label : '';
-																const referenceAriaLabel = lifecycleCategory === 'active'
-																	? `Open ${risk.risk_ref} detail, action state: ${actionState.label}`
-																	: `Open ${risk.risk_ref} detail, ${lifecycle} risk`;
+																const referencePill = getRiskReferencePillPresentation(risk, registerNow);
+																const referenceAriaLabel = `Open ${referencePill.ariaLabel}`;
 																return (
 																	<tr data-risk-lifecycle={lifecycleCategory}>
 																		<td>
@@ -568,10 +553,12 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 																				aria-label={`Open ${risk.risk_ref}`}
 																			>
 																				<RagReferencePill
-																					tone={referenceTone}
-																					label={risk.risk_ref}
-																					statusLabel={referenceStatusLabel}
+																					tone={referencePill.tone}
+																					label={referencePill.label}
+																					statusLabel={referencePill.statusLabel}
 																					ariaLabel={referenceAriaLabel}
+																					title={referencePill.title}
+																					compactActionState={referencePill.compactActionState}
 																				/>
 																			</a>
 																		</td>
