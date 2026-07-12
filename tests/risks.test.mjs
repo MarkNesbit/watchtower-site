@@ -736,7 +736,7 @@ test('Risk migration adds expected workflow indexes and updated_at triggers', as
 });
 
 test('Risk foundation does not add out-of-scope RAID, notification, email, or dashboard live-data work', async () => {
-	const sql = await allMigrationSql();
+	const sql = await migrationSql();
 	for (const table of [
 		'project_assumptions',
 		'project_issues',

@@ -675,3 +675,27 @@ WT-PROJ-DATES-001 adds `project_dates` and `project_date_comments` as structured
 `project_date_comments` belongs to one project date and repeats `organisation_id` and `project_id` for explicit workspace/project scoping. A composite foreign key ensures comments cannot cross-link to a date from another project or workspace. Comments preserve author and timestamp and do not change the date itself.
 
 Project dates are intended to auto-populate the future Project Timeline capability. They do not replace Risks, Issues, Dependencies, Assumptions, Actions, Decisions or Project Narrative.
+
+---
+
+# Project Actions Addendum
+
+WT-ACTION-001A adds the initial Project Actions data foundation through migration `20260712000200_project_actions_schema_foundation.sql`.
+
+The Action schema is project and workspace scoped:
+
+* `project_action_counters` allocates concurrency-safe per-project Action numbers.
+* `project_actions` stores the one authoritative Action record.
+* `project_action_history` stores immutable structured workflow history.
+
+Action references are generated in the database from the owning project's immutable project reference:
+
+```text
+Action-{PROJECT_REF}-{NNN}
+```
+
+The initial source-type list is deliberately narrow: `project`, `risk`, `project_details` and `narrative`. Issue, Dependency, Assumption and Decision sources remain future work until those authoritative modules exist.
+
+Viewer remains read-only. The migration grants authenticated users select access only for Action records and history under active workspace membership. It does not grant authenticated insert, update or delete access, does not create archive/delete fields, and does not implement workflow transitions. Controlled creation and transition enforcement are deferred to WT-ACTION-001B.
+
+History is append-only for authenticated users. No authenticated update/delete grants are provided, and a trigger prevents non-service-role update/delete attempts.

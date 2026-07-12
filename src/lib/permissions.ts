@@ -18,13 +18,31 @@ export const NARRATIVE_PERMISSIONS = [
 	'narrative.delete',
 ] as const;
 export type NarrativePermission = (typeof NARRATIVE_PERMISSIONS)[number];
-export type Permission = ProjectPermission | RiskPermission | NarrativePermission;
+export const ACTION_PERMISSIONS = [
+	'action.view',
+	'action.create',
+	'action.respond',
+	'action.review',
+	'action.manage',
+	'action.takeover',
+] as const;
+export type ActionPermission = (typeof ACTION_PERMISSIONS)[number];
+export type Permission = ProjectPermission | RiskPermission | NarrativePermission | ActionPermission;
 
 const ROLE_PERMISSIONS: Record<WorkspaceRole, ReadonlySet<Permission>> = {
-	owner: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS]),
-	admin: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS]),
-	member: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS]),
-	viewer: new Set(['project.view', 'project.viewDashboard', 'risk.view', 'narrative.view']),
+	owner: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS, ...ACTION_PERMISSIONS]),
+	admin: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS, ...ACTION_PERMISSIONS]),
+	member: new Set([
+		...PROJECT_PERMISSIONS,
+		...RISK_PERMISSIONS,
+		...NARRATIVE_PERMISSIONS,
+		'action.view',
+		'action.create',
+		'action.respond',
+		'action.review',
+		'action.manage',
+	]),
+	viewer: new Set(['project.view', 'project.viewDashboard', 'risk.view', 'narrative.view', 'action.view']),
 };
 
 export function isWorkspaceRole(role: unknown): role is WorkspaceRole {
