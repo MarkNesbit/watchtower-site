@@ -1057,7 +1057,7 @@ function staleUpdateTone(updatedAt: unknown, now: Date): RiskAssuranceTone {
 	return 'green';
 }
 
-function worstTone(tones: RiskAssuranceTone[]): RiskAssuranceTone {
+export function deriveRiskAssuranceRollupTone(tones: RiskAssuranceTone[]): RiskAssuranceTone {
 	if (tones.includes('red')) return 'red';
 	if (tones.includes('amber')) return 'amber';
 	if (tones.includes('green')) return 'green';
@@ -1082,7 +1082,7 @@ export function deriveRiskAssuranceTone(risk: Pick<ProjectRisk,
 		? 'red'
 		: 'green';
 
-	return worstTone([
+	return deriveRiskAssuranceRollupTone([
 		risk.owner_id ? 'green' : 'red',
 		actionerTone(risk.status, risk.actioner_id),
 		review.tone,
@@ -1129,7 +1129,7 @@ export function deriveProjectRiskDashboardAssuranceTone(
 ): RiskDashboardAssuranceTone {
 	const activeRisks = risks.filter((risk) => isDashboardActiveRiskStatus(risk.status));
 	if (activeRisks.length === 0) return 'neutral';
-	return worstTone(activeRisks.map((risk) => deriveRiskAssuranceTone(risk, now)));
+	return deriveRiskAssuranceRollupTone(activeRisks.map((risk) => deriveRiskAssuranceTone(risk, now)));
 }
 
 export function deriveRiskRedNarrativeReason(risk: Pick<ProjectRisk,
