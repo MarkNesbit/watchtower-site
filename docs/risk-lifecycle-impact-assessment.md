@@ -623,7 +623,7 @@ Recommended first slice: WT-RISK-LIFECYCLE-001B - Shared lifecycle/action-state 
 
 Status: completed after this assessment. The slice made the existing lifecycle grouping and forgiving Amber action-state roll-up explicit, routed dashboard risk roll-up through the shared contract, added regression coverage for Draft/Closed neutrality and cross-consumer consistency, and fixed date-sensitive tests without weakening overdue logic.
 
-Defect follow-up: WT-RISK-LIFECYCLE-001B-FIX-001 records the MVP review-date window in the shared contract. Active risks with no review date are Amber, overdue review dates are Red, review dates due today or within the next three calendar days are Amber, and later review dates are Green. The three-day window is an MVP constant that can later move into configurable Governance Profiles. No database migration or production data change is required.
+Defect follow-up: WT-RISK-LIFECYCLE-001B-FIX-001 records the MVP review-date window in the shared contract. Active risks with no review date are Amber, overdue review dates and review dates due today are Red, review dates due tomorrow or within the next three calendar days are Amber, and later review dates are Green. The three-day window is an MVP constant that can later move into configurable Governance Profiles. No database migration or production data change is required.
 
 Why first:
 
