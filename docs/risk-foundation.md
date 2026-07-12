@@ -3,6 +3,12 @@
 **Status:** WT-RISK-LIFECYCLE-001 draft, active, closed and reopened risk handling
 **Scope:** Database, Row Level Security, constraints, indexes, migration tests, Risk Register, risk assurance detail, risk create and risk edit pages
 
+## Current lifecycle assessment status
+
+WT-RISK-LIFECYCLE-EPIC-001 is the parent Epic for unified Risk Capture, Assurance and Lifecycle Management across Watchtower.
+
+WT-RISK-LIFECYCLE-001A is an assessment-only slice. The current-state repository and data-model assessment is recorded in `docs/risk-lifecycle-impact-assessment.md`. No lifecycle behaviour, activation gate, risk action-state logic, Risk Register behaviour, Project Narrative behaviour, permissions, migrations or production data changed in that assessment slice. Implementation slices will follow review of the assessment and will remain traceable to WT-RISK-LIFECYCLE-EPIC-001.
+
 ## Purpose
 
 The risk foundation introduces the minimum database model needed for project-scoped risk management while preserving Watchtower's workspace isolation model. WT-RISK-002A added the first Risk Management UI surface for existing risk records, WT-RISK-002B added create/edit flows for permitted workspace roles, WT-RISK-002C simplifies the register while introducing block-level assurance signals on the detail page, WT-RISK-003 adds a nullable primary actioner assignment on the risk record, WT-RISK-004 adds focused edit modals and comments, WT-RISK-004A/004B polish the detail information architecture, WT-RISK-005 derives risk action state from governance and assurance drivers while keeping risk exposure separate, WT-RISK-NARRATIVE-001 creates Project Narrative entries for raised risks and existing risks that become Red action state, and WT-RISK-LIFECYCLE-001 separates draft, active, closed and reopened risk handling. It does not introduce risk delete, dashboard roll-ups, risk replies, risk comment-to-narrative integration, attention item generation, email notification delivery, action approval, health scoring, configurable governance scoring, AI scoring, multiple actioners, a separate Actions module, temporary handover/delegation, or non-risk RAID tables.
