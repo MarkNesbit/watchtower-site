@@ -2149,6 +2149,81 @@ test('Review-date due today is Red across detail register dashboard and project 
 	assert.equal(deriveProjectActionState([dueTodayRisk], now), 'red');
 });
 
+test('Risk Detail exposure uses the shared Draft display contract from the Register', () => {
+	const now = new Date('2026-06-28T12:00:00Z');
+	const untouchedDraft = registerRisk({
+		status: 'draft',
+		probability: 'medium',
+		impact: 'medium',
+	});
+	const draftLowEstimate = registerRisk({
+		risk_id: 'risk-low-draft',
+		risk_ref: 'Risk-HHH-011',
+		risk_sequence: 11,
+		status: 'draft',
+		probability: 'low',
+		impact: 'low',
+	});
+	const draftHighEstimate = registerRisk({
+		risk_id: 'risk-high-draft',
+		risk_ref: 'Risk-HHH-012',
+		risk_sequence: 12,
+		status: 'draft',
+		probability: 'high',
+		impact: 'medium',
+	});
+	const activeMedium = registerRisk({
+		risk_id: 'risk-active-medium',
+		risk_ref: 'Risk-HHH-013',
+		risk_sequence: 13,
+		status: 'open',
+		probability: 'medium',
+		impact: 'medium',
+	});
+	const draftExposureBlock = getRiskAssuranceBlocks(untouchedDraft, now).find((block) => block.id === 'exposure');
+	const draftRegisterExposure = getRiskRegisterExposureDisplay(untouchedDraft);
+	const lowExposureBlock = getRiskAssuranceBlocks(draftLowEstimate, now).find((block) => block.id === 'exposure');
+	const highExposureBlock = getRiskAssuranceBlocks(draftHighEstimate, now).find((block) => block.id === 'exposure');
+	const activeExposureBlock = getRiskAssuranceBlocks(activeMedium, now).find((block) => block.id === 'exposure');
+
+	assert.deepEqual(draftRegisterExposure, {
+		value: 'unassessed',
+		label: 'Unassessed',
+		tone: 'neutral',
+		ariaLabel: 'Risk-HHH-001 estimated exposure is unassessed.',
+		isProvisional: true,
+	});
+	assert.equal(draftExposureBlock?.title, 'Estimated exposure');
+	assert.equal(draftExposureBlock?.tone, draftRegisterExposure.tone);
+	assert.equal(draftExposureBlock?.statusLabel, draftRegisterExposure.label);
+	assert.equal(draftExposureBlock?.value, 'No estimated exposure has been recorded for this Draft risk.');
+	assert.doesNotMatch(draftExposureBlock?.value ?? '', /Medium exposure|Medium probability \/ Medium impact/);
+
+	assert.equal(lowExposureBlock?.title, 'Estimated exposure');
+	assert.equal(lowExposureBlock?.tone, 'risk-low');
+	assert.equal(lowExposureBlock?.statusLabel, 'Low');
+	assert.match(lowExposureBlock?.value ?? '', /^Low estimated exposure\./);
+	assert.match(lowExposureBlock?.value ?? '', /Watchtower default estimate: Low probability \/ Low impact/);
+	assert.equal(getRiskRegisterExposureDisplay(draftLowEstimate).label, lowExposureBlock?.statusLabel);
+
+	assert.equal(highExposureBlock?.title, 'Estimated exposure');
+	assert.equal(highExposureBlock?.tone, 'risk-high');
+	assert.equal(highExposureBlock?.statusLabel, 'High');
+	assert.match(highExposureBlock?.value ?? '', /^High estimated exposure\./);
+	assert.match(highExposureBlock?.value ?? '', /Watchtower default estimate: High probability \/ Medium impact/);
+	assert.equal(getRiskRegisterExposureDisplay(draftHighEstimate).label, highExposureBlock?.statusLabel);
+
+	assert.equal(activeExposureBlock?.title, 'Exposure');
+	assert.equal(activeExposureBlock?.tone, 'risk-medium');
+	assert.equal(activeExposureBlock?.statusLabel, 'Medium');
+	assert.match(activeExposureBlock?.value ?? '', /^Medium exposure\./);
+	assert.match(activeExposureBlock?.value ?? '', /Watchtower default assessment: Medium probability \/ Medium impact/);
+	assert.equal(deriveRiskReferenceTone(untouchedDraft, now), 'neutral');
+	assert.equal(deriveRiskReferenceTone(activeMedium, now), 'green');
+	assert.equal(countRisksNeedingAction([untouchedDraft], now), 0);
+	assert.equal(deriveProjectRiskDashboardAssuranceTone([untouchedDraft], now), 'neutral');
+});
+
 test('Draft and Closed risk display is neutral while exposure remains available', () => {
 	const now = new Date('2026-06-28T12:00:00Z');
 	const draftRisk = assuredRiskFacts({

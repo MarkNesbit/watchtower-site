@@ -1329,10 +1329,20 @@ async function createRiskLifecycleNote(risk: ProjectRisk, note: string, client) 
 
 export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): RiskAssuranceBlock[] {
 	const isActiveLifecycle = isActiveRiskStatus(risk.status);
+	const lifecycle = riskLifecycleCategory(risk.status);
 	const description = trimmedText(risk.description);
 	const descriptionTone: RiskAssuranceTone = !isActiveLifecycle ? 'neutral' : !description ? 'red' : description.length < 30 ? 'amber' : 'green';
 	const exposure = deriveWatchtowerDefaultRiskExposure(risk.probability, risk.impact);
-	const exposureTone = riskExposureTone(exposure);
+	const exposureDisplay = getRiskRegisterExposureDisplay(risk);
+	const isDraftEstimatedExposure = lifecycle === 'draft' && exposureDisplay.value !== 'unassessed';
+	const exposureTitle = lifecycle === 'draft' ? 'Estimated exposure' : 'Exposure';
+	const exposureTone = lifecycle === 'draft' ? exposureDisplay.tone : riskExposureTone(exposure);
+	const exposureStatusLabel = lifecycle === 'draft' ? exposureDisplay.label : riskExposureLabel(exposure);
+	const exposureValue = exposureDisplay.value === 'unassessed'
+		? 'No estimated exposure has been recorded for this Draft risk.'
+		: isDraftEstimatedExposure
+			? `${exposureDisplay.label} estimated exposure. Watchtower default estimate: ${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact`
+			: `${riskExposureLabel(exposure)} exposure. Watchtower default assessment: ${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact`;
 	const review = deriveRiskReviewDateTone(risk.review_date, now);
 	const due = dateTone(risk.due_date, now, 'amber', 'No due date');
 	const mitigation = trimmedText(risk.mitigation_plan);
@@ -1364,11 +1374,11 @@ export function getRiskAssuranceBlocks(risk: ProjectRisk, now = new Date()): Ris
 		},
 		{
 			id: 'exposure',
-			title: 'Exposure',
+			title: exposureTitle,
 			tone: exposureTone,
-			statusLabel: riskExposureLabel(exposure),
-			value: `${riskExposureLabel(exposure)} exposure. Watchtower default assessment: ${riskDisplayLabel(risk.probability)} probability / ${riskDisplayLabel(risk.impact)} impact`,
-			prompt: exposure === 'critical' ? 'Review exposure' : undefined,
+			statusLabel: exposureStatusLabel,
+			value: exposureValue,
+			prompt: exposureDisplay.value === 'unassessed' ? 'Estimate exposure' : exposure === 'critical' ? 'Review exposure' : undefined,
 		},
 		{
 			id: 'owner',
