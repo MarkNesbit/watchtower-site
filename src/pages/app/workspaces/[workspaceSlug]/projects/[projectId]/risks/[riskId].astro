@@ -20,6 +20,9 @@ import {
 	isDraftRiskStatus,
 	listProjectRiskComments,
 	listRiskOwnerOptions,
+	buildRiskDetailReturnPath,
+	buildRiskRegisterViewPath,
+	parseRiskRegisterReturnTab,
 	riskDisplayLabel,
 	riskLifecycleLabel,
 	riskProfileName,
@@ -45,6 +48,8 @@ let message = '';
 let commentError = '';
 let lifecycleError = '';
 let featureAccess = getFeatureAccess('riskManagement');
+const detailReturnTab = parseRiskRegisterReturnTab(Astro.url.searchParams.get('returnTab'));
+const detailRedirectPath = () => buildRiskDetailReturnPath(Astro.url.pathname, detailReturnTab);
 
 const formatDate = (value, fallback = 'Not available') => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value))
@@ -113,7 +118,7 @@ try {
 						if (intent === 'add-comment') {
 							try {
 								await createProjectRiskComment(workspaceSlug ?? '', data.slug, risk.risk_id, String(formData.get('comment') ?? ''), serverSupabase, accessToken);
-								return Astro.redirect(Astro.url.pathname);
+								return Astro.redirect(detailRedirectPath());
 							} catch (error) {
 								if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
 								commentError = error instanceof Error ? error.message : 'Unable to add comment.';
@@ -129,7 +134,7 @@ try {
 									serverSupabase,
 									accessToken,
 								);
-								return Astro.redirect(Astro.url.pathname);
+								return Astro.redirect(detailRedirectPath());
 							} catch (error) {
 								if (isSupabaseAuthSessionError(error)) return Astro.redirect(sessionRedirectPath);
 								lifecycleError = error instanceof Error ? error.message : 'Unable to update the risk lifecycle.';
@@ -149,7 +154,12 @@ try {
 }
 
 const canEditRisk = can(workspaceRole, 'risk.edit');
-const editHref = project && risk ? buildProjectRiskEditPath(workspaceSlug ?? '', project.slug, risk.risk_id) : '';
+const riskRegisterBackHref = project
+	? buildRiskRegisterViewPath(buildProjectRisksPath(workspaceSlug ?? '', project.slug), detailReturnTab ?? 'active')
+	: workspaceSlug && projectSlug
+		? buildProjectRisksPath(workspaceSlug, projectSlug)
+		: '/app/projects';
+const editHref = project && risk ? buildRiskDetailReturnPath(buildProjectRiskEditPath(workspaceSlug ?? '', project.slug, risk.risk_id), detailReturnTab) : '';
 const now = new Date();
 const assuranceBlocks = risk ? getRiskAssuranceBlocks(risk, now) : [];
 const actionStateDrivers = risk ? getRiskActionStateDrivers(risk, now) : [];
@@ -251,7 +261,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 				</ProjectPageHero>
 
 				<nav class="risk-detail-top-links" aria-label="Risk navigation">
-					<a class="button button--secondary" href={buildProjectRisksPath(workspaceSlug ?? '', project.slug)}>Back to Risk Register</a>
+					<a class="button button--secondary" href={riskRegisterBackHref}>Back to Risk Register</a>
 					<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
 				</nav>
 
@@ -606,7 +616,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 					</section>
 
 					<div class="risk-detail-links">
-						<a class="button button--secondary" href={buildProjectRisksPath(workspaceSlug ?? '', project.slug)}>Back to Risk Register</a>
+						<a class="button button--secondary" href={riskRegisterBackHref}>Back to Risk Register</a>
 						<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
 					</div>
 				</ProjectContentPanel>
@@ -616,7 +626,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 				<p class="eyebrow">Risk Management</p>
 				<h1>Risk unavailable</h1>
 				<p>{message}</p>
-				<a class="button button--secondary" href={workspaceSlug && projectSlug ? buildProjectRisksPath(workspaceSlug, projectSlug) : '/app/projects'}>Back to Risk Register</a>
+				<a class="button button--secondary" href={riskRegisterBackHref}>Back to Risk Register</a>
 			</section>
 		)}
 	</section>

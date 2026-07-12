@@ -535,6 +535,8 @@ Delivery risk: Medium.
 
 ### WT-RISK-LIFECYCLE-005 - Dashboard and project-signal alignment
 
+Status: completed. The dashboard Risk tile and project risk signal consumers now use the shared active-only project risk signal from `projectRisks.ts`: any active Red risk makes the signal Red, one or more active Amber risks with no Red makes it Amber, all active Green risks make it Green, and no active risks makes it Neutral. Multiple Amber risks remain Amber. Draft, Closed and legacy terminal statuses are excluded.
+
 Objective: Ensure dashboard/project-list consumers use the same risk action-state contract without altering Health.
 
 Included scope:
@@ -552,11 +554,11 @@ Dependencies: WT-RISK-LIFECYCLE-001B and any action-state helper changes.
 
 Database impact: None.
 
-Primary files likely affected: `dashboardTileSignals.ts`, `projectAttention.ts`, tests.
+Primary files affected: `projectRisks.ts`, `dashboardTileSignals.ts`, `projectAttention.ts`, project dashboard route, Risk Register route, Risk Detail/Edit routes, tests and docs.
 
 Test scope: Risk tile, project list action state, Health remains Unknown.
 
-Manual validation focus: Project dashboard Risk tile and project list pills remain explainable.
+Manual validation focus: Project dashboard Risk tile routes Red/Amber to Need action and Green/Neutral to Active risks; project list pills remain explainable; Risk Detail returns to the originating Register tab using only validated tab identifiers.
 
 Delivery risk: Medium.
 
