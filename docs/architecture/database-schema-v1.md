@@ -680,7 +680,7 @@ Project dates are intended to auto-populate the future Project Timeline capabili
 
 # Project Actions Addendum
 
-WT-ACTION-001A adds the initial Project Actions data foundation through migration `20260712000200_project_actions_schema_foundation.sql`.
+WT-ACTION-001A adds the initial Project Actions data foundation through migration `20260712000200_project_actions_schema_foundation.sql`. WT-ACTION-001B adds controlled transactional lifecycle operations through migration `20260712000300_project_actions_transactional_lifecycle.sql`.
 
 The Action schema is project and workspace scoped:
 
@@ -696,6 +696,25 @@ Action-{PROJECT_REF}-{NNN}
 
 The initial source-type list is deliberately narrow: `project`, `risk`, `project_details` and `narrative`. Issue, Dependency, Assumption and Decision sources remain future work until those authoritative modules exist.
 
-Viewer remains read-only. The migration grants authenticated users select access only for Action records and history under active workspace membership. It does not grant authenticated insert, update or delete access, does not create archive/delete fields, and does not implement workflow transitions. Controlled creation and transition enforcement are deferred to WT-ACTION-001B.
+Viewer remains read-only. Authenticated users have select access only for Action records and history under active workspace membership. They do not receive direct insert, update or delete grants, and Actions do not have archive/delete fields.
+
+All writes use explicit `security definer` RPCs that derive the actor from `auth.uid()`, validate workspace membership and role, lock the Action row, verify expected state, update the Action, append immutable history and return the updated Action in one database transaction. The RPC surface is intentionally named per operation rather than exposed as a generic update function:
+
+* `create_project_action`
+* `submit_project_action`
+* `return_project_action_to_raiser`
+* `reject_project_action`
+* `return_project_action_to_actioner`
+* `complete_project_action`
+* `cancel_project_action`
+* `assign_project_action`
+* `amend_project_action_brief`
+* `change_project_action_due_date`
+* `reissue_project_action`
+* `take_over_project_action_acceptance`
+
+Owner, Admin and Member can create Actions. Only active Owner/Admin/Member profiles in the same workspace can be assigned as Actioner. Current eligible Actioners can submit, return to raiser or reject. Current acceptance owners can review, complete, return, cancel, reassign, amend, change due date and reissue. Active Owner/Admin users can take over acceptance ownership with a mandatory reason; the original raiser is not changed.
+
+Valid workflow transitions are limited to the MVP matrix: create to `open`; Actioner response from `open` or `returned_to_actioner` to `submitted`, `returned_to_raiser` or `rejected_by_actioner`; acceptance-owner review from `submitted` to `complete` or `returned_to_actioner`; reissue from `returned_to_raiser` or `rejected_by_actioner` to `open`; cancellation from any non-terminal state; and Owner/Admin takeover without status change. `complete` and `cancelled` are terminal.
 
 History is append-only for authenticated users. No authenticated update/delete grants are provided, and a trigger prevents non-service-role update/delete attempts.
