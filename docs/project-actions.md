@@ -150,6 +150,7 @@ Timing state is derived separately from workflow status:
 - `cancelled`: Grey.
 - `overdue`: Red.
 - `due_today`: Red.
+- `missing_due_date`: Amber when no due date is set.
 - `reassignment_required`: Amber.
 - `unassigned`: Amber.
 - `due_soon`: Amber when due within three calendar days.
@@ -164,7 +165,7 @@ If an assigned Actioner later becomes Viewer, suspended, removed or inactive, th
 Owner, Admin and Member can create Actions from the register using the New Action dialog. Direct register creation requires:
 
 - brief;
-- due date;
+- optional due date;
 - optional eligible Actioner.
 
 The source defaults to Project. Arbitrary source linking is not exposed in this slice. Viewer sees the New Action button disabled with read-only guidance, and server-side RPC enforcement remains the security boundary.
