@@ -148,8 +148,11 @@ export type ReissueProjectActionInput = ProjectActionExpectedState & {
 	actionerId?: string | null;
 };
 
-export const ACTION_REGISTER_TABS = ['outstanding', 'awaiting_review', 'complete', 'cancelled', 'all'] as const;
+export const ACTION_REGISTER_TABS = ['outstanding', 'awaiting_review', 'complete', 'cancelled'] as const;
 export type ActionRegisterTab = (typeof ACTION_REGISTER_TABS)[number];
+
+export const ACTION_REGISTER_SCOPES = ['my', 'project'] as const;
+export type ActionRegisterScope = (typeof ACTION_REGISTER_SCOPES)[number];
 
 export const ACTION_TIMING_STATES = [
 	'open',
@@ -181,9 +184,10 @@ export const ACTION_REGISTER_SORTS = [
 ] as const;
 export type ActionRegisterSort = (typeof ACTION_REGISTER_SORTS)[number];
 
-export const ACTION_REGISTER_PAGE_SIZES = [5, 10, 25, 50] as const;
+export const ACTION_REGISTER_PAGE_SIZES = [20] as const;
 export type ActionRegisterPageSize = (typeof ACTION_REGISTER_PAGE_SIZES)[number];
-export const DEFAULT_ACTION_REGISTER_PAGE_SIZE: ActionRegisterPageSize = 10;
+export const DEFAULT_ACTION_REGISTER_PAGE_SIZE: ActionRegisterPageSize = 20;
+export const ACTION_REGISTER_LOAD_INCREMENT = 20;
 
 export type ActionRegisterFilters = {
 	tab?: ActionRegisterTab | string | null;
@@ -237,10 +241,10 @@ export type ActionDistributionSegment = {
 	label: string;
 	count: number;
 	percentage: number;
-	tone: 'blue' | 'amber' | 'green' | 'grey';
+	tone: 'neutral' | 'amber' | 'green' | 'grey';
 };
 
-export type ActionConcernTone = 'red' | 'amber' | 'green' | 'grey' | 'blue';
+export type ActionConcernTone = 'red' | 'amber' | 'green' | 'grey' | 'neutral';
 
 export type ActionDueDateDisplay = {
 	label: string;
@@ -316,7 +320,11 @@ export const ACTION_REGISTER_TAB_LABELS: Record<ActionRegisterTab, string> = {
 	awaiting_review: 'Awaiting review',
 	complete: 'Complete',
 	cancelled: 'Cancelled',
-	all: 'All',
+};
+
+export const ACTION_REGISTER_SCOPE_LABELS: Record<ActionRegisterScope, string> = {
+	my: 'My actions',
+	project: 'All project actions',
 };
 
 const ACTION_SELECT = [
@@ -408,11 +416,10 @@ export function actionConcernTone(action: ProjectAction, now = new Date()): Acti
 		|| timingState === 'unassigned'
 		|| timingState === 'reassignment_required'
 		|| timingState === 'due_soon'
-		|| ['submitted', 'returned_to_raiser', 'rejected_by_actioner', 'returned_to_actioner'].includes(action.status)
 	) {
 		return 'amber';
 	}
-	return 'blue';
+	return 'neutral';
 }
 
 export function actionDueDateDisplay(action: ProjectAction, now = new Date()): ActionDueDateDisplay {
@@ -540,6 +547,22 @@ export function normaliseActionRegisterTab(value: unknown): ActionRegisterTab {
 		: 'outstanding';
 }
 
+export function defaultActionRegisterScope(actions: Pick<ProjectAction, 'actioner_id'>[], actorId: string | null | undefined): ActionRegisterScope {
+	return actorId && actions.some((action) => action.actioner_id === actorId) ? 'my' : 'project';
+}
+
+export function normaliseActionRegisterScope(value: unknown, fallback: ActionRegisterScope = 'project'): ActionRegisterScope {
+	return typeof value === 'string' && ACTION_REGISTER_SCOPES.includes(value as ActionRegisterScope)
+		? value as ActionRegisterScope
+		: fallback;
+}
+
+export function filterProjectActionsByScope(actions: ProjectAction[], scope: ActionRegisterScope | string | null | undefined, actorId: string | null | undefined): ProjectAction[] {
+	const selectedScope = normaliseActionRegisterScope(scope, defaultActionRegisterScope(actions, actorId));
+	if (selectedScope !== 'my') return actions;
+	return actorId ? actions.filter((action) => action.actioner_id === actorId) : [];
+}
+
 export function normaliseActionTimingFilter(value: unknown): ActionTimingFilter {
 	return typeof value === 'string' && ACTION_TIMING_FILTERS.includes(value as ActionTimingFilter)
 		? value as ActionTimingFilter
@@ -555,8 +578,13 @@ export function defaultActionRegisterSortForTab(tab: ActionRegisterTab): ActionR
 	if (tab === 'awaiting_review') return 'submitted_oldest';
 	if (tab === 'complete') return 'completed_recent';
 	if (tab === 'cancelled') return 'cancelled_recent';
-	if (tab === 'all') return 'recently_updated';
 	return 'highest_urgency';
+}
+
+export function parseActionRegisterVisibleCount(value: unknown): number {
+	const count = Number(value);
+	if (!Number.isInteger(count) || count < ACTION_REGISTER_LOAD_INCREMENT) return ACTION_REGISTER_LOAD_INCREMENT;
+	return Math.ceil(count / ACTION_REGISTER_LOAD_INCREMENT) * ACTION_REGISTER_LOAD_INCREMENT;
 }
 
 export function parseActionRegisterPage(value: unknown): number {
@@ -576,7 +604,7 @@ export function actionMatchesRegisterTab(action: ProjectAction, tab: ActionRegis
 	if (tab === 'awaiting_review') return action.status === 'submitted';
 	if (tab === 'complete') return action.status === 'complete';
 	if (tab === 'cancelled') return action.status === 'cancelled';
-	return true;
+	return false;
 }
 
 function compareText(a: string, b: string): number {
@@ -589,25 +617,20 @@ function compareNullableDate(a: string | null | undefined, b: string | null | un
 	return direction === 'asc' ? aTime - bTime : bTime - aTime;
 }
 
-function urgencyRank(action: ProjectAction, now = new Date()): number {
+function outstandingSortBucket(action: ProjectAction, now = new Date()): number {
+	if (!action.due_date) return 3;
 	const timingState = deriveActionTimingState(action, now);
-	const timingRank: Record<ActionTimingState, number> = {
-		overdue: 0,
-		due_today: 1,
-		reassignment_required: 2,
-		missing_due_date: 3,
-		unassigned: 5,
-		due_soon: 7,
-		open: 8,
-		complete: 20,
-		cancelled: 21,
-	};
-	const statusRank: Partial<Record<ActionStatus, number>> = {
-		rejected_by_actioner: 3,
-		returned_to_raiser: 4,
-		submitted: 6,
-	};
-	return Math.min(timingRank[timingState], statusRank[action.status] ?? timingRank[timingState]);
+	if (timingState === 'overdue') return 0;
+	if (timingState === 'due_today') return 1;
+	return 2;
+}
+
+function compareOutstandingDefault(a: ProjectAction, b: ProjectAction, now = new Date()): number {
+	const aBucket = outstandingSortBucket(a, now);
+	const bBucket = outstandingSortBucket(b, now);
+	if (aBucket !== bBucket) return aBucket - bBucket;
+	if (aBucket === 3) return compareText(a.action_ref, b.action_ref);
+	return compareNullableDate(a.due_date, b.due_date) || compareText(a.action_ref, b.action_ref);
 }
 
 export function filterProjectActions(actions: ProjectAction[], filters: ActionRegisterFilters, now = new Date()): ProjectAction[] {
@@ -645,9 +668,11 @@ export function filterProjectActions(actions: ProjectAction[], filters: ActionRe
 }
 
 export function sortProjectActions(actions: ProjectAction[], sort: ActionRegisterSort | string | null | undefined, now = new Date()): ProjectAction[] {
-	const selectedSort = normaliseActionRegisterSort(sort, 'all');
+	const selectedSort = typeof sort === 'string' && ACTION_REGISTER_SORTS.includes(sort as ActionRegisterSort)
+		? sort as ActionRegisterSort
+		: 'recently_updated';
 	return [...actions].sort((a, b) => {
-		if (selectedSort === 'highest_urgency') return urgencyRank(a, now) - urgencyRank(b, now) || compareNullableDate(a.due_date, b.due_date) || compareText(a.action_ref, b.action_ref);
+		if (selectedSort === 'highest_urgency') return compareOutstandingDefault(a, b, now);
 		if (selectedSort === 'due_date_earliest') return compareNullableDate(a.due_date, b.due_date) || compareText(a.action_ref, b.action_ref);
 		if (selectedSort === 'due_date_latest') return compareNullableDate(a.due_date, b.due_date, 'desc') || compareText(a.action_ref, b.action_ref);
 		if (selectedSort === 'oldest_updated') return compareNullableDate(a.updated_at, b.updated_at) || compareText(a.action_ref, b.action_ref);
@@ -784,7 +809,7 @@ export function deriveActionDistribution(actions: ProjectAction[]): ActionDistri
 	const cancelled = actions.filter((action) => action.status === 'cancelled').length;
 	const total = actions.length;
 	const segments: ActionDistributionSegment[] = [
-		{ key: 'open', label: 'Open', count: open, percentage: total ? Math.round((open / total) * 100) : 0, tone: 'blue' },
+		{ key: 'open', label: 'Open', count: open, percentage: total ? Math.round((open / total) * 100) : 0, tone: 'neutral' },
 		{ key: 'awaiting_review', label: 'Awaiting review', count: awaitingReview, percentage: total ? Math.round((awaitingReview / total) * 100) : 0, tone: 'amber' },
 		{ key: 'complete', label: 'Complete', count: complete, percentage: total ? Math.round((complete / total) * 100) : 0, tone: 'green' },
 		{ key: 'cancelled', label: 'Cancelled', count: cancelled, percentage: total ? Math.round((cancelled / total) * 100) : 0, tone: 'grey' },

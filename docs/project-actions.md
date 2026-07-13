@@ -120,7 +120,7 @@ Legacy `/app/projects/{projectSlug}/actions` routes redirect only when the proje
 
 ## Actions Register
 
-The register follows the Risk Register visual pattern: project hero, summary cards, tabs, compact filters, table-led register, pagination, right-side support panels, guidance text and a Back to project link.
+The register is deliberately lightweight: project hero, personal/project scope switch, workflow tabs, compact filters, table-led register, Load more controls and a Back to project link. It is not a task-management dashboard and does not permanently show governance statistics.
 
 Tabs are:
 
@@ -128,19 +128,14 @@ Tabs are:
 - Awaiting review: `submitted`
 - Complete: `complete`
 - Cancelled: `cancelled`
-- All: every status
 
-The default tab is Outstanding and selected tab/filter/page state is stored in the query string.
+The default tab is Outstanding. The register defaults to My actions when the authenticated user is assigned at least one project Action; otherwise it defaults to All project actions. My actions means assigned Actioner only, not Actions merely raised by the current user.
 
-Search covers Action reference, brief, Actioner name and raiser name. Filters cover timing, workflow status, Actioner and raiser. Sorting supports urgency, due date, updated date, Action reference and Actioner. Source information is kept on Action detail pages rather than shown on the project-level register.
+Search covers Action reference, brief, Actioner name and raiser name. Filters cover Actioner and raiser. Workflow status is represented by the tabs. Source information is kept on Action detail pages rather than shown on the project-level register.
 
-Summary cards are project-level and unaffected by table filters:
+The register initially shows 20 matching Actions and exposes a Load 20 more control while further rows exist. Changing scope, tab or filters resets the visible set to the first 20.
 
-- Open Actions: non-terminal Actions.
-- Need Action: Actions requiring intervention.
-- Highest urgency: the most urgent current timing state across open Actions.
-
-The Needs Action panel is also project-level and prioritises overdue, due today, reassignment required, rejected, returned to raiser, unassigned, awaiting review, due soon and missing due date items. The Action distribution panel shows Open, Awaiting review, Complete and Cancelled counts and is not a health indicator.
+Sorting is fixed by workflow tab: Outstanding shows overdue first, then due today, then future due dates nearest first, then no due date; Awaiting review uses `submitted_at` oldest first with `updated_at` as fallback; Complete uses `completed_at` newest first with `updated_at` as fallback; Cancelled uses `cancelled_at` newest first with `updated_at` as fallback.
 
 ## Timing Rules
 
@@ -154,7 +149,7 @@ Timing state is derived separately from workflow status:
 - `reassignment_required`: Amber.
 - `unassigned`: Amber.
 - `due_soon`: Amber when due within three calendar days.
-- `open`: Blue/neutral.
+- `open`: Neutral.
 
 Ordinary open Actions are not shown as Green simply because they are not near their due date.
 

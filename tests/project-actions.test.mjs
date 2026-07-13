@@ -33,10 +33,14 @@ import {
 	isTerminalActionStatus,
 	isValidActionReference,
 	mapProjectActionOperationError,
+	defaultActionRegisterScope,
+	filterProjectActionsByScope,
 	normaliseActionRegisterSort,
+	normaliseActionRegisterScope,
 	normaliseActionRegisterTab,
 	normaliseActionTimingFilter,
 	normaliseActionEvidenceUrl,
+	parseActionRegisterVisibleCount,
 	paginateProjectActions,
 	reissueProjectAction,
 	rejectProjectAction,
@@ -541,45 +545,67 @@ test('Project Action register concern tones and due-date labels combine timing a
 	assert.equal(actionConcernTone(actionFixture({ due_date: null }), now), 'amber');
 	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-13', actioner_id: null }), now), 'amber');
 	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-15' }), now), 'amber');
-	assert.equal(actionConcernTone(actionFixture({ status: 'submitted', due_date: '2026-07-20' }), now), 'amber');
+	assert.equal(actionConcernTone(actionFixture({ status: 'submitted', due_date: '2026-07-20' }), now), 'neutral');
 	assert.equal(actionConcernTone(actionFixture({ status: 'complete', due_date: '2026-07-01' }), now), 'green');
 	assert.equal(actionConcernTone(actionFixture({ status: 'cancelled', due_date: '2026-07-01' }), now), 'grey');
-	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-20' }), now), 'blue');
+	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-20' }), now), 'neutral');
 	assert.deepEqual(actionDueDateDisplay(actionFixture({ due_date: null }), now), { label: 'No due date', tone: 'amber' });
 	assert.deepEqual(actionDueDateDisplay(actionFixture({ due_date: '2026-07-11' }), now), { label: 'Overdue: 11 Jul 2026', tone: 'red' });
 	assert.deepEqual(actionDueDateDisplay(actionFixture({ due_date: '2026-07-12' }), now), { label: 'Due today: 12 Jul 2026', tone: 'red' });
 	assert.deepEqual(actionDueDateDisplay(actionFixture({ due_date: '2026-07-15' }), now), { label: 'Due soon: 15 Jul 2026', tone: 'amber' });
 });
 
-test('Project Action register tabs filters search sorting and pagination are centralised', () => {
+test('Project Action register scope tabs filters search sorting and loading are centralised', () => {
 	const now = new Date('2026-07-12T12:00:00Z');
 	const actions = [
-		actionFixture({ action_number: 1, brief: 'Confirm hosting fallback approach', status: 'open', due_date: '2026-07-20', actionerName: 'Sarah Mitchell' }),
-		actionFixture({ action_number: 2, brief: 'Review supplier recovery plan', status: 'submitted', due_date: '2026-07-18', submitted_at: '2026-07-10T09:00:00.000Z', actionerName: 'Mark Nesbit', source_type: 'risk', source_ref: 'Risk-HHH-002' }),
-		actionFixture({ action_number: 3, brief: 'Validate recovery milestone dates', status: 'complete', due_date: '2026-07-10', completed_at: '2026-07-11T09:00:00.000Z' }),
+		actionFixture({ action_number: 1, brief: 'Confirm hosting fallback approach', status: 'open', due_date: '2026-07-20', actioner_id: 'actioner-1', actionerName: 'Sarah Mitchell' }),
+		actionFixture({ action_number: 2, brief: 'Review supplier recovery plan', status: 'submitted', due_date: '2026-07-18', submitted_at: '2026-07-10T09:00:00.000Z', actioner_id: 'actioner-2', actionerName: 'Mark Nesbit', source_type: 'risk', source_ref: 'Risk-HHH-002' }),
+		actionFixture({ action_number: 3, brief: 'Validate recovery milestone dates', status: 'complete', due_date: '2026-07-10', completed_at: '2026-07-11T09:00:00.000Z', actioner_id: 'actioner-2' }),
 		actionFixture({ action_number: 4, brief: 'Update stakeholder comms note', status: 'returned_to_raiser', due_date: '2026-07-13', actioner_id: null }),
-		actionFixture({ action_number: 5, brief: 'Assign RAID owner for test item', status: 'cancelled', due_date: '2026-07-14', cancelled_at: '2026-07-11T10:00:00.000Z' }),
+		actionFixture({ action_number: 5, brief: 'Assign RAID owner for test item', status: 'cancelled', due_date: '2026-07-14', cancelled_at: '2026-07-11T10:00:00.000Z', actioner_id: 'actioner-2' }),
+		actionFixture({ action_number: 6, brief: 'Escalate overdue dependency', status: 'open', due_date: '2026-07-10', actioner_id: 'actioner-1' }),
+		actionFixture({ action_number: 7, brief: 'Confirm today checkpoint', status: 'open', due_date: '2026-07-12', actioner_id: 'actioner-1' }),
+		actionFixture({ action_number: 8, brief: 'Clarify action without due date', status: 'open', due_date: null, actioner_id: 'actioner-1' }),
+		actionFixture({ action_number: 9, brief: 'Older review submission', status: 'submitted', due_date: '2026-07-18', submitted_at: '2026-07-08T09:00:00.000Z', actioner_id: 'actioner-1' }),
+		actionFixture({ action_number: 10, brief: 'Recent completion', status: 'complete', due_date: '2026-07-10', completed_at: '2026-07-12T09:00:00.000Z', actioner_id: 'actioner-1' }),
+		actionFixture({ action_number: 11, brief: 'Recent cancellation', status: 'cancelled', due_date: '2026-07-14', cancelled_at: '2026-07-12T10:00:00.000Z', actioner_id: 'actioner-1' }),
 	];
 
-	assert.deepEqual(ACTION_REGISTER_TABS, ['outstanding', 'awaiting_review', 'complete', 'cancelled', 'all']);
+	assert.deepEqual(ACTION_REGISTER_TABS, ['outstanding', 'awaiting_review', 'complete', 'cancelled']);
 	assert.equal(normaliseActionRegisterTab('bad'), 'outstanding');
+	assert.equal(normaliseActionRegisterTab('all'), 'outstanding');
+	assert.equal(normaliseActionRegisterScope('my'), 'my');
+	assert.equal(normaliseActionRegisterScope('bad', 'project'), 'project');
+	assert.equal(defaultActionRegisterScope(actions, 'actioner-1'), 'my');
+	assert.equal(defaultActionRegisterScope(actions, 'missing-person'), 'project');
+	assert.equal(filterProjectActionsByScope(actions, 'my', 'actioner-1').every((action) => action.actioner_id === 'actioner-1'), true);
+	assert.equal(filterProjectActionsByScope(actions, 'project', 'actioner-1').length, actions.length);
 	assert.equal(normaliseActionTimingFilter('due_today'), 'due_today');
 	assert.equal(normaliseActionTimingFilter('bad'), 'all');
 	assert.equal(normaliseActionRegisterSort(null, 'awaiting_review'), 'submitted_oldest');
-	assert.equal(filterProjectActions(actions, { tab: 'outstanding' }, now).length, 2);
-	assert.equal(filterProjectActions(actions, { tab: 'awaiting_review' }, now).length, 1);
-	assert.equal(filterProjectActions(actions, { tab: 'complete' }, now).length, 1);
-	assert.equal(filterProjectActions(actions, { tab: 'cancelled' }, now).length, 1);
-	assert.equal(filterProjectActions(actions, { tab: 'all', search: 'supplier' }, now)[0].action_ref, 'Action-HHH-002');
-	assert.equal(filterProjectActions(actions, { tab: 'all', sourceType: 'risk' }, now)[0].source_ref, 'Risk-HHH-002');
-	assert.equal(filterProjectActions(actions, { tab: 'all', actionerId: 'unassigned' }, now)[0].action_ref, 'Action-HHH-004');
-	assert.equal(filterAndSortProjectActions(actions, { tab: 'all', search: 'mark', sort: 'action_ref' }, now).length, 5);
-	assert.equal(sortProjectActions(actions, 'highest_urgency', now)[0].action_ref, 'Action-HHH-004');
-	const page = paginateProjectActions(actions, 2, 2);
-	assert.equal(page.items.length, 2);
-	assert.equal(page.pagination.startItem, 3);
-	assert.equal(page.pagination.hasPrevious, true);
-	assert.equal(page.pagination.hasNext, true);
+	assert.equal(filterProjectActions(actions, { tab: 'outstanding' }, now).length, 5);
+	assert.equal(filterProjectActions(actions, { tab: 'awaiting_review' }, now).length, 2);
+	assert.equal(filterProjectActions(actions, { tab: 'complete' }, now).length, 2);
+	assert.equal(filterProjectActions(actions, { tab: 'cancelled' }, now).length, 2);
+	assert.equal(filterProjectActions(actions, { tab: 'awaiting_review', search: 'supplier' }, now)[0].action_ref, 'Action-HHH-002');
+	assert.equal(filterProjectActions(actions, { tab: 'awaiting_review', sourceType: 'risk' }, now)[0].source_ref, 'Risk-HHH-002');
+	assert.equal(filterProjectActions(actions, { tab: 'outstanding', actionerId: 'unassigned' }, now)[0].action_ref, 'Action-HHH-004');
+	assert.equal(filterAndSortProjectActions(actions, { tab: 'outstanding', search: 'mark', sort: 'action_ref' }, now).length, 5);
+	assert.deepEqual(filterAndSortProjectActions(actions, { tab: 'outstanding', sort: 'highest_urgency' }, now).map((action) => action.action_ref), [
+		'Action-HHH-006',
+		'Action-HHH-007',
+		'Action-HHH-004',
+		'Action-HHH-001',
+		'Action-HHH-008',
+	]);
+	assert.deepEqual(filterAndSortProjectActions(actions, { tab: 'awaiting_review', sort: 'submitted_oldest' }, now).map((action) => action.action_ref), ['Action-HHH-009', 'Action-HHH-002']);
+	assert.deepEqual(filterAndSortProjectActions(actions, { tab: 'complete', sort: 'completed_recent' }, now).map((action) => action.action_ref), ['Action-HHH-010', 'Action-HHH-003']);
+	assert.deepEqual(filterAndSortProjectActions(actions, { tab: 'cancelled', sort: 'cancelled_recent' }, now).map((action) => action.action_ref), ['Action-HHH-011', 'Action-HHH-005']);
+	assert.equal(parseActionRegisterVisibleCount(null), 20);
+	assert.equal(parseActionRegisterVisibleCount('21'), 40);
+	const page = paginateProjectActions(actions, 1);
+	assert.equal(page.items.length, actions.length);
+	assert.equal(page.pagination.pageSize, 20);
 });
 
 test('Project Action summaries needs-action queue distribution and labels stay project-level', () => {
@@ -610,20 +636,18 @@ test('Project Action summaries needs-action queue distribution and labels stay p
 	assert.equal(briefPreview('A '.repeat(100), 20).endsWith('...'), true);
 });
 
-test('Project Actions Register and detail routes expose the required WT-ACTION-002 surface', async () => {
+test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register surface', async () => {
 	const register = await registerRouteSource();
 	const detail = await detailRouteSource();
 	const dashboard = await projectDashboardSource();
 
-	assert.match(register, /Actions Register/);
-	assert.match(register, /A source-of-truth register of project assurance actions\./);
+	assert.match(register, /title="Actions"/);
+	assert.match(register, /Track project actions from creation to closure\./);
 	assert.match(register, /New Action/);
-	assert.match(register, /No due date/);
-	assert.match(register, /No due date is allowed\. Actions without a due date will appear as Amber attention\./);
-	assert.match(register, /data-action-date-input/);
-	assert.match(register, /type="date"/);
-	assert.match(register, /showPicker/);
-	assert.match(register, /data-action-date-clear/);
+	assert.match(register, /Actions with no due date or Actioner will display as Amber\./);
+	assert.match(register, /import DateField/);
+	assert.match(register, /<DateField[\s\S]*name="due_date"[\s\S]*pickerLabel="Choose due date"[\s\S]*clearLabel="Clear due date"/);
+	assert.doesNotMatch(register, /data-action-date-input|data-action-date-clear|data-action-date-picker/);
 	assert.match(register, /backdrop-filter: blur\(10px\)/);
 	assert.match(register, /modal-scroll-locked/);
 	assert.match(register, /Viewers cannot create Actions/);
@@ -633,15 +657,22 @@ test('Project Actions Register and detail routes expose the required WT-ACTION-0
 	assert.match(register, /createProjectAction/);
 	assert.match(register, /listProjectActions/);
 	assert.match(register, /listEligibleActioners/);
+	assert.match(register, /ACTION_REGISTER_SCOPE_LABELS\.my/);
+	assert.match(register, /ACTION_REGISTER_SCOPE_LABELS\.project/);
+	assert.match(register, /data-actions-scope-switch/);
+	assert.match(register, /data-actions-tab=\{tab\.id\}/);
 	assert.match(register, /Search actions/);
-	assert.match(register, /Workflow status/);
-	assert.match(register, /Action distribution/);
-	assert.match(register, /Needs action/);
+	assert.match(register, /Actioner/);
+	assert.match(register, /Raiser/);
+	assert.match(register, /Load 20 more/);
+	assert.match(register, /Showing \{visibleActions\.length\} of \{filteredActions\.length\}/);
 	assert.match(register, /Back to project/);
-	assert.match(register, /grid-template-columns: minmax\(0, 1fr\) clamp\(19rem, 23vw, 22rem\)/);
 	assert.match(register, /\.actions-register-main \{[\s\S]*min-width: 0;[\s\S]*overflow: hidden;/);
-	assert.match(register, /\.actions-side-panels \{[\s\S]*min-width: 0;/);
-	assert.match(register, /@media \(max-width: 1180px\)[\s\S]*\.actions-register-layout,[\s\S]*grid-template-columns: 1fr/);
+	assert.doesNotMatch(register, /data-actions-summary|actions-summary-card|data-actions-needs-action-panel|data-actions-distribution|actions-guidance/);
+	assert.doesNotMatch(register, /Workflow status|Action distribution|Needs action|Highest urgency|Open Actions|Need Action/);
+	assert.doesNotMatch(register, /<th scope="col">Workflow<\/th>/);
+	assert.doesNotMatch(register, /Timing<\/span>|name="timing"|name="status"|name="sort"|name="pageSize"|Previous|Next/);
+	assert.doesNotMatch(register, /data-actions-tab=\{'all'\}|tab: 'all'/);
 	assert.doesNotMatch(register, /<th scope="col">Source<\/th>/);
 	assert.doesNotMatch(register, /<th scope="col">Timing state<\/th>/);
 	assert.doesNotMatch(register, /<th scope="col">More actions<\/th>/);
