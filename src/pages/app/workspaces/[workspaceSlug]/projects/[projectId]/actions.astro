@@ -59,7 +59,7 @@ const formatDate = (value, fallback = 'Not available') => value
 
 const timingTone = (state) => {
 	if (state === 'overdue' || state === 'due_today') return 'red';
-	if (state === 'due_soon' || state === 'unassigned' || state === 'reassignment_required') return 'amber';
+	if (state === 'due_soon' || state === 'missing_due_date' || state === 'unassigned' || state === 'reassignment_required') return 'amber';
 	if (state === 'complete') return 'green';
 	if (state === 'cancelled') return 'grey';
 	return 'blue';
@@ -121,11 +121,10 @@ try {
 					try {
 						if (!can(workspace.role, 'action.create')) throw new Error('Viewer access is read-only. Action creation is unavailable.');
 						if (!createValues.brief.trim()) throw new Error('Action brief is required.');
-						if (!createValues.dueDate) throw new Error('Action due date is required.');
 						const created = await createProjectAction(serverSupabase, {
 							projectId: data.id,
 							brief: createValues.brief,
-							dueDate: createValues.dueDate,
+							dueDate: createValues.dueDate || null,
 							actionerId: createValues.actionerId || null,
 							sourceType: 'project',
 							sourceLabel: data.name,
@@ -397,7 +396,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 																		<td><span class={action.actioner_id && !action.actioner?.isAssignable ? 'actions-person actions-person--warning' : 'actions-person'}>{action.actioner_id ? actionProfileName(action.actioner, 'Workspace member') : 'Unassigned'}</span></td>
 																		<td><span class={`actions-pill actions-pill--workflow actions-pill--${action.status}`}>{ACTION_DISPLAY_LABELS[action.status]}</span></td>
 																		<td><span class={`actions-pill actions-pill--${timingTone(timing)}`} title={`Timing state: ${actionTimingDisplayLabel(timing)}`}>{actionTimingDisplayLabel(timing)}</span></td>
-																		<td><span class={`actions-due actions-due--${timingTone(timing)}`}>{formatDate(action.due_date)}</span></td>
+																		<td><span class={`actions-due actions-due--${timingTone(timing)}`}>{formatDate(action.due_date, 'No due date')}</span></td>
 																		<td>{actionProfileName(action.raiser, 'Workspace member')}</td>
 																		<td><a class="text-link" href={detailHref}>Open details</a></td>
 																	</tr>
@@ -486,7 +485,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 					<a class="text-link actions-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
 				</ProjectContentPanel>
 
-				<dialog class="action-create-dialog" aria-labelledby="action-create-title" data-action-create-dialog open={createModalOpen}>
+				<dialog class="action-create-dialog" aria-labelledby="action-create-title" data-action-create-dialog data-open-on-load={createModalOpen || undefined}>
 					<form method="post" class="action-create-form">
 						<input type="hidden" name="intent" value="create-action" />
 						<div class="action-create-form__header">
@@ -503,7 +502,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 							<option value="" selected={!createValues.actionerId}>Unassigned</option>
 							{eligibleActioners.map((person) => <option value={person.id} selected={createValues.actionerId === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
 						</select></label>
-						<label><span>Due date</span><input type="date" name="due_date" value={createValues.dueDate} required /></label>
+						<label><span>Due date</span><input type="date" name="due_date" value={createValues.dueDate} /></label>
 						<div class="action-create-form__footer">
 							<button class="button button--secondary" type="button" data-action-create-cancel>Cancel</button>
 							<button class="button button--primary" type="submit" data-action-create-submit>Create Action</button>
@@ -527,16 +526,31 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 	const openButton = document.querySelector('[data-action-create-open]');
 	const closeButtons = document.querySelectorAll('[data-action-create-close], [data-action-create-cancel]');
 	let lastTrigger = null;
+	const setScrollLocked = (locked) => {
+		document.documentElement.classList.toggle('modal-scroll-locked', locked);
+		document.body.classList.toggle('modal-scroll-locked', locked);
+	};
+	const openDialog = (trigger) => {
+		if (!(dialog instanceof HTMLDialogElement)) return;
+		lastTrigger = trigger;
+		if (!dialog.open) dialog.showModal();
+		setScrollLocked(true);
+		dialog.querySelector('textarea')?.focus();
+	};
 	openButton?.addEventListener('click', () => {
-		lastTrigger = openButton;
-		dialog?.showModal();
-		dialog?.querySelector('textarea')?.focus();
+		openDialog(openButton);
 	});
 	closeButtons.forEach((button) => button.addEventListener('click', () => {
 		dialog?.close();
 		lastTrigger?.focus();
 	}));
-	dialog?.addEventListener('close', () => lastTrigger?.focus());
+	if (dialog instanceof HTMLDialogElement && dialog.dataset.openOnLoad === 'true') {
+		openDialog(openButton instanceof HTMLElement ? openButton : null);
+	}
+	dialog?.addEventListener('close', () => {
+		setScrollLocked(false);
+		lastTrigger?.focus();
+	});
 	dialog?.querySelector('form')?.addEventListener('submit', (event) => {
 		const submitButton = event.currentTarget?.querySelector('[data-action-create-submit]');
 		if (submitButton) {
@@ -847,7 +861,13 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		color: var(--text);
 	}
 	.action-create-dialog::backdrop {
-		background: rgba(0, 0, 0, 0.65);
+		background: rgba(0, 0, 0, 0.72);
+		backdrop-filter: blur(10px);
+		-webkit-backdrop-filter: blur(10px);
+	}
+	:global(html.modal-scroll-locked),
+	:global(body.modal-scroll-locked) {
+		overflow: hidden;
 	}
 	.action-create-form {
 		display: grid;
