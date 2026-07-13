@@ -10,6 +10,7 @@ import {
 	actionDisplayLabel,
 	actionConcernTone,
 	actionDueDateDisplay,
+	actionProfileName,
 	actionTimingDisplayLabel,
 	amendProjectActionBrief,
 	assignProjectAction,
@@ -58,12 +59,14 @@ import { buildProjectActionPath, buildProjectActionsPath } from '../src/lib/proj
 const migrationUrl = new URL('../supabase/migrations/20260712000200_project_actions_schema_foundation.sql', import.meta.url);
 const lifecycleMigrationUrl = new URL('../supabase/migrations/20260712000300_project_actions_transactional_lifecycle.sql', import.meta.url);
 const optionalDueDateMigrationUrl = new URL('../supabase/migrations/20260713000100_project_actions_optional_due_date.sql', import.meta.url);
+const projectActionsLibUrl = new URL('../src/lib/projectActions.ts', import.meta.url);
 const registerRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/actions.astro', import.meta.url);
 const detailRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/actions/[actionId].astro', import.meta.url);
 const projectDashboardUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url);
 const migrationSql = async () => readFile(migrationUrl, 'utf8');
 const lifecycleMigrationSql = async () => readFile(lifecycleMigrationUrl, 'utf8');
 const optionalDueDateMigrationSql = async () => readFile(optionalDueDateMigrationUrl, 'utf8');
+const projectActionsLibSource = async () => readFile(projectActionsLibUrl, 'utf8');
 const registerRouteSource = async () => readFile(registerRouteUrl, 'utf8');
 const detailRouteSource = async () => readFile(detailRouteUrl, 'utf8');
 const projectDashboardSource = async () => readFile(projectDashboardUrl, 'utf8');
@@ -608,6 +611,55 @@ test('Project Action register scope tabs filters search sorting and loading are 
 	assert.equal(page.pagination.pageSize, 20);
 });
 
+test('Project Action All project Outstanding includes null Actioner and due-date combinations', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	const actions = [
+		actionFixture({ action_number: 1, brief: 'Assigned future action', status: 'open', due_date: '2026-07-20', actioner_id: 'actioner-1' }),
+		actionFixture({ action_number: 2, brief: 'Unassigned future action', status: 'open', due_date: '2026-07-21', actioner_id: null }),
+		actionFixture({ action_number: 3, brief: 'Assigned undated action', status: 'open', due_date: null, actioner_id: 'actioner-1' }),
+		actionFixture({ action_number: 4, brief: 'Unassigned undated action', status: 'open', due_date: null, actioner_id: null }),
+		actionFixture({ action_number: 5, brief: 'Other user submitted action', status: 'submitted', due_date: null, actioner_id: null }),
+	];
+
+	const projectOutstanding = filterAndSortProjectActions(
+		filterProjectActionsByScope(actions, 'project', 'actioner-1'),
+		{ tab: 'outstanding', sort: 'highest_urgency' },
+		now,
+	);
+	assert.deepEqual(projectOutstanding.map((action) => action.action_ref), [
+		'Action-HHH-001',
+		'Action-HHH-002',
+		'Action-HHH-003',
+		'Action-HHH-004',
+	]);
+
+	const myOutstanding = filterAndSortProjectActions(
+		filterProjectActionsByScope(actions, 'my', 'actioner-1'),
+		{ tab: 'outstanding', sort: 'highest_urgency' },
+		now,
+	);
+	assert.deepEqual(myOutstanding.map((action) => action.action_ref), ['Action-HHH-001', 'Action-HHH-003']);
+	assert.equal(myOutstanding.some((action) => action.actioner_id === null), false);
+
+	const unassignedUndated = actions[3];
+	const unassignedDated = actions[1];
+	const assignedUndated = actions[2];
+	assert.equal(actionProfileName(unassignedUndated.actioner, 'Workspace member'), 'Workspace member');
+	assert.equal(unassignedUndated.actioner_id ? actionProfileName(unassignedUndated.actioner, 'Workspace member') : 'Unassigned', 'Unassigned');
+	assert.deepEqual(actionDueDateDisplay(unassignedUndated, now), { label: 'No due date', tone: 'amber' });
+	assert.equal(actionConcernTone(unassignedUndated, now), 'amber');
+	assert.equal(actionConcernTone(unassignedDated, now), 'amber');
+	assert.equal(actionConcernTone(assignedUndated, now), 'amber');
+	assert.equal(projectOutstanding.at(-1)?.action_ref, 'Action-HHH-004');
+});
+
+test('Project Action list query remains project-scoped and does not inner join Actioner profiles', async () => {
+	const source = await projectActionsLibSource();
+	assert.match(source, /from\('project_actions'\)[\s\S]*\.select\(ACTION_SELECT\)[\s\S]*\.eq\('organisation_id', organisationId\)[\s\S]*\.eq\('project_id', projectId\)/);
+	assert.doesNotMatch(source, /project_actions[\s\S]*!inner/);
+	assert.doesNotMatch(source, /actioner[\s\S]*!inner/);
+});
+
 test('Project Action summaries needs-action queue distribution and labels stay project-level', () => {
 	const now = new Date('2026-07-12T12:00:00Z');
 	const actions = [
@@ -660,6 +712,8 @@ test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register s
 	assert.match(register, /ACTION_REGISTER_SCOPE_LABELS\.my/);
 	assert.match(register, /ACTION_REGISTER_SCOPE_LABELS\.project/);
 	assert.match(register, /data-actions-scope-switch/);
+	assert.match(register, /query\.set\('scope', next\.scope\)/);
+	assert.match(register, /<input type="hidden" name="scope" value=\{selectedScope\} \/>/);
 	assert.match(register, /data-actions-tab=\{tab\.id\}/);
 	assert.match(register, /Search actions/);
 	assert.match(register, /Actioner/);

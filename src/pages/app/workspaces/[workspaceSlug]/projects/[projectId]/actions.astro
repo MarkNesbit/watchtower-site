@@ -184,7 +184,7 @@ const buildRegisterPath = (overrides = {}) => {
 	};
 	const query = new URLSearchParams();
 	if (next.tab && next.tab !== 'outstanding') query.set('tab', next.tab);
-	if (next.scope && next.scope !== defaultScope) query.set('scope', next.scope);
+	if (next.scope) query.set('scope', next.scope);
 	if (next.q) query.set('q', next.q);
 	if (next.actioner) query.set('actioner', next.actioner);
 	if (next.raiser) query.set('raiser', next.raiser);
@@ -260,7 +260,7 @@ const scopeItems = [
 
 									<form class="actions-toolbar" method="get" action={registerPath} data-actions-controls>
 										{selectedTab !== 'outstanding' && <input type="hidden" name="tab" value={selectedTab} />}
-										{selectedScope !== defaultScope && <input type="hidden" name="scope" value={selectedScope} />}
+										<input type="hidden" name="scope" value={selectedScope} />
 										<label><span>Search actions</span><input type="search" name="q" value={selectedSearch} placeholder="Search actions..." autocomplete="off" /></label>
 										<label><span>Actioner</span><select name="actioner">
 											<option value="" selected={!selectedActioner}>All actioners</option>
@@ -320,7 +320,7 @@ const scopeItems = [
 											{hasMoreActions && (
 												<form class="actions-load-more" method="get" action={registerPath} data-actions-load-more>
 													{selectedTab !== 'outstanding' && <input type="hidden" name="tab" value={selectedTab} />}
-													{selectedScope !== defaultScope && <input type="hidden" name="scope" value={selectedScope} />}
+													<input type="hidden" name="scope" value={selectedScope} />
 													{selectedSearch && <input type="hidden" name="q" value={selectedSearch} />}
 													{selectedActioner && <input type="hidden" name="actioner" value={selectedActioner} />}
 													{selectedRaiser && <input type="hidden" name="raiser" value={selectedRaiser} />}
