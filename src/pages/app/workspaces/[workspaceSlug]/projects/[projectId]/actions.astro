@@ -3,7 +3,6 @@ import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.a
 import DisabledActionHint from '../../../../../../components/app/DisabledActionHint.astro';
 import EmptyState from '../../../../../../components/app/EmptyState.astro';
 import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
-import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import { can } from '../../../../../../lib/permissions';
 import {
@@ -259,10 +258,6 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 					description="A source-of-truth register of project assurance actions."
 					headingId="actions-register-heading"
 				/>
-
-				<ProjectControlPanel title="Action controls" status={canCreateAction ? 'Create and edit enabled' : 'Read-only access'} headingId="actions-controls-heading">
-					<p class="actions-register-copy">Create and manage project assurance Actions. Workflow, timing and responsibility are shown separately.</p>
-				</ProjectControlPanel>
 
 				<ProjectContentPanel
 					title="Actions Register"
@@ -554,11 +549,9 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 <style>
 	.actions-register-page {
 		display: grid;
-		gap: 1rem;
-	}
-	.actions-register-copy {
-		margin: 0.6rem 0 0;
-		color: var(--muted-strong);
+		gap: 0.9rem;
+		width: min(calc(100vw - 2rem), 96rem);
+		margin-inline: calc((100% - min(calc(100vw - 2rem), 96rem)) / 2);
 	}
 	.actions-register-action {
 		display: grid;

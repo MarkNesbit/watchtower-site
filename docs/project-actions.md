@@ -120,7 +120,7 @@ Legacy `/app/projects/{projectSlug}/actions` routes redirect only when the proje
 
 ## Actions Register
 
-The register follows the Risk Register visual pattern: project hero, Action controls strip, summary cards, tabs, compact filters, table-led register, pagination, right-side support panels, guidance text and a Back to project link.
+The register follows the Risk Register visual pattern: project hero, summary cards, tabs, compact filters, table-led register, pagination, right-side support panels, guidance text and a Back to project link.
 
 Tabs are:
 
