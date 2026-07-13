@@ -240,6 +240,13 @@ export type ActionDistributionSegment = {
 	tone: 'blue' | 'amber' | 'green' | 'grey';
 };
 
+export type ActionConcernTone = 'red' | 'amber' | 'green' | 'grey' | 'blue';
+
+export type ActionDueDateDisplay = {
+	label: string;
+	tone: ActionConcernTone;
+};
+
 export type ActionDistribution = {
 	total: number;
 	segments: ActionDistributionSegment[];
@@ -389,6 +396,37 @@ export function actionSourceDisplayLabel(sourceType: unknown): string {
 
 export function isTerminalActionStatus(status: unknown): boolean {
 	return status === 'complete' || status === 'cancelled';
+}
+
+export function actionConcernTone(action: ProjectAction, now = new Date()): ActionConcernTone {
+	const timingState = deriveActionTimingState(action, now);
+	if (timingState === 'complete') return 'green';
+	if (timingState === 'cancelled') return 'grey';
+	if (timingState === 'overdue' || timingState === 'due_today') return 'red';
+	if (
+		timingState === 'missing_due_date'
+		|| timingState === 'unassigned'
+		|| timingState === 'reassignment_required'
+		|| timingState === 'due_soon'
+		|| ['submitted', 'returned_to_raiser', 'rejected_by_actioner', 'returned_to_actioner'].includes(action.status)
+	) {
+		return 'amber';
+	}
+	return 'blue';
+}
+
+export function actionDueDateDisplay(action: ProjectAction, now = new Date()): ActionDueDateDisplay {
+	const timingState = deriveActionTimingState(action, now);
+	const dateLabel = action.due_date
+		? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${action.due_date}T00:00:00Z`))
+		: 'No due date';
+	if (timingState === 'missing_due_date') return { label: 'No due date', tone: 'amber' };
+	if (timingState === 'overdue') return { label: `Overdue: ${dateLabel}`, tone: 'red' };
+	if (timingState === 'due_today') return { label: `Due today: ${dateLabel}`, tone: 'red' };
+	if (timingState === 'due_soon') return { label: `Due soon: ${dateLabel}`, tone: 'amber' };
+	if (timingState === 'complete') return { label: dateLabel, tone: 'green' };
+	if (timingState === 'cancelled') return { label: dateLabel, tone: 'grey' };
+	return { label: dateLabel, tone: actionConcernTone(action, now) };
 }
 
 export function isValidActionProjectRef(value: unknown): value is string {

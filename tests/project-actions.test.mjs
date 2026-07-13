@@ -8,6 +8,8 @@ import {
 	ACTION_SOURCE_TYPES,
 	ACTION_STATUSES,
 	actionDisplayLabel,
+	actionConcernTone,
+	actionDueDateDisplay,
 	actionTimingDisplayLabel,
 	amendProjectActionBrief,
 	assignProjectAction,
@@ -532,6 +534,23 @@ test('Project Action timing state follows MVP precedence without green open stat
 	assert.equal(actionTimingDisplayLabel('complete'), 'Completed');
 });
 
+test('Project Action register concern tones and due-date labels combine timing and workflow attention', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-11' }), now), 'red');
+	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-12' }), now), 'red');
+	assert.equal(actionConcernTone(actionFixture({ due_date: null }), now), 'amber');
+	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-13', actioner_id: null }), now), 'amber');
+	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-15' }), now), 'amber');
+	assert.equal(actionConcernTone(actionFixture({ status: 'submitted', due_date: '2026-07-20' }), now), 'amber');
+	assert.equal(actionConcernTone(actionFixture({ status: 'complete', due_date: '2026-07-01' }), now), 'green');
+	assert.equal(actionConcernTone(actionFixture({ status: 'cancelled', due_date: '2026-07-01' }), now), 'grey');
+	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-20' }), now), 'blue');
+	assert.deepEqual(actionDueDateDisplay(actionFixture({ due_date: null }), now), { label: 'No due date', tone: 'amber' });
+	assert.deepEqual(actionDueDateDisplay(actionFixture({ due_date: '2026-07-11' }), now), { label: 'Overdue: 11 Jul 2026', tone: 'red' });
+	assert.deepEqual(actionDueDateDisplay(actionFixture({ due_date: '2026-07-12' }), now), { label: 'Due today: 12 Jul 2026', tone: 'red' });
+	assert.deepEqual(actionDueDateDisplay(actionFixture({ due_date: '2026-07-15' }), now), { label: 'Due soon: 15 Jul 2026', tone: 'amber' });
+});
+
 test('Project Action register tabs filters search sorting and pagination are centralised', () => {
 	const now = new Date('2026-07-12T12:00:00Z');
 	const actions = [
@@ -600,10 +619,17 @@ test('Project Actions Register and detail routes expose the required WT-ACTION-0
 	assert.match(register, /A source-of-truth register of project assurance actions\./);
 	assert.match(register, /New Action/);
 	assert.match(register, /No due date/);
+	assert.match(register, /No due date is allowed\. Actions without a due date will appear as Amber attention\./);
+	assert.match(register, /data-action-date-input/);
+	assert.match(register, /type="date"/);
+	assert.match(register, /showPicker/);
+	assert.match(register, /data-action-date-clear/);
 	assert.match(register, /backdrop-filter: blur\(10px\)/);
 	assert.match(register, /modal-scroll-locked/);
 	assert.match(register, /Viewers cannot create Actions/);
 	assert.match(register, /data-action-create-dialog/);
+	assert.match(register, /actions-ref-pill/);
+	assert.match(register, /buildProjectActionPath/);
 	assert.match(register, /createProjectAction/);
 	assert.match(register, /listProjectActions/);
 	assert.match(register, /listEligibleActioners/);
@@ -612,6 +638,14 @@ test('Project Actions Register and detail routes expose the required WT-ACTION-0
 	assert.match(register, /Action distribution/);
 	assert.match(register, /Needs action/);
 	assert.match(register, /Back to project/);
+	assert.match(register, /grid-template-columns: minmax\(0, 1fr\) clamp\(19rem, 23vw, 22rem\)/);
+	assert.match(register, /\.actions-register-main \{[\s\S]*min-width: 0;[\s\S]*overflow: hidden;/);
+	assert.match(register, /\.actions-side-panels \{[\s\S]*min-width: 0;/);
+	assert.match(register, /@media \(max-width: 1180px\)[\s\S]*\.actions-register-layout,[\s\S]*grid-template-columns: 1fr/);
+	assert.doesNotMatch(register, /<th scope="col">Source<\/th>/);
+	assert.doesNotMatch(register, /<th scope="col">Timing state<\/th>/);
+	assert.doesNotMatch(register, /<th scope="col">More actions<\/th>/);
+	assert.doesNotMatch(register, /name="source"/);
 
 	assert.match(detail, /listProjectActionHistory/);
 	assert.match(detail, /Immutable history/);

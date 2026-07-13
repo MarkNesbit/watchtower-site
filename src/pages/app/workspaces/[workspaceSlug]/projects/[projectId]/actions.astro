@@ -10,8 +10,9 @@ import {
 	ACTION_REGISTER_PAGE_SIZES,
 	ACTION_REGISTER_TAB_LABELS,
 	ACTION_REGISTER_TABS,
-	ACTION_SOURCE_DISPLAY_LABELS,
 	DEFAULT_ACTION_REGISTER_PAGE_SIZE,
+	actionConcernTone,
+	actionDueDateDisplay,
 	actionProfileName,
 	actionTimingDisplayLabel,
 	briefPreview,
@@ -29,13 +30,12 @@ import {
 	paginateProjectActions,
 	parseActionRegisterPage,
 	parseActionRegisterPageSize,
-	sourceLabelForAction,
 	summariseProjectActions,
 	type ActionRegisterTab,
 	type ProjectAction,
 } from '../../../../../../lib/projectActions';
 import { buildLoginRedirectPath, createSupabaseServerClient, getServerAccessToken, isSupabaseAuthSessionError } from '../../../../../../lib/supabaseServer';
-import { buildProjectActionPath, buildProjectActionsPath, buildProjectDetailsPath, buildProjectNarrativePath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
+import { buildProjectActionPath, buildProjectActionsPath, buildProjectPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 
 const projectSlug = Astro.params.projectId;
 const workspaceSlug = Astro.params.workspaceSlug;
@@ -53,25 +53,12 @@ let createError = '';
 let createValues = { brief: '', actionerId: '', dueDate: '' };
 let createModalOpen = false;
 
-const formatDate = (value, fallback = 'Not available') => value
-	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${String(value).slice(0, 10)}T00:00:00Z`))
-	: fallback;
-
 const timingTone = (state) => {
 	if (state === 'overdue' || state === 'due_today') return 'red';
 	if (state === 'due_soon' || state === 'missing_due_date' || state === 'unassigned' || state === 'reassignment_required') return 'amber';
 	if (state === 'complete') return 'green';
 	if (state === 'cancelled') return 'grey';
 	return 'blue';
-};
-
-const sourceHref = (action, projectRecord) => {
-	if (!workspaceSlug || !projectRecord) return '';
-	if (action.source_type === 'project') return buildProjectPath(workspaceSlug, projectRecord.slug);
-	if (action.source_type === 'project_details') return buildProjectDetailsPath(workspaceSlug, projectRecord.slug);
-	if (action.source_type === 'narrative') return buildProjectNarrativePath(workspaceSlug, projectRecord.slug);
-	if (action.source_type === 'risk' && action.source_record_id) return buildProjectRiskPath(workspaceSlug, projectRecord.slug, action.source_record_id);
-	return '';
 };
 
 try {
@@ -169,7 +156,6 @@ const selectedTiming = normaliseActionTimingFilter(params.get('timing'));
 const selectedStatus = ACTION_DISPLAY_LABELS[params.get('status')] ? params.get('status') : '';
 const selectedActioner = (params.get('actioner') ?? '').trim();
 const selectedRaiser = (params.get('raiser') ?? '').trim();
-const selectedSource = ACTION_SOURCE_DISPLAY_LABELS[params.get('source')] ? params.get('source') : '';
 const selectedPage = parseActionRegisterPage(params.get('page'));
 const selectedPageSize = parseActionRegisterPageSize(params.get('pageSize'));
 const registerFilters = {
@@ -179,7 +165,6 @@ const registerFilters = {
 	status: selectedStatus,
 	actionerId: selectedActioner,
 	raiserId: selectedRaiser,
-	sourceType: selectedSource,
 	sort: selectedSort,
 };
 const filteredActions = filterAndSortProjectActions(actions, registerFilters, now);
@@ -213,7 +198,6 @@ const actionerOptions = [...new Map(actions
 	.filter((action) => action.actioner_id)
 	.map((action) => [action.actioner_id, actionProfileName(action.actioner, 'Workspace member')]))].sort((a, b) => a[1].localeCompare(b[1]));
 const raiserOptions = [...new Map(actions.map((action) => [action.raiser_id, actionProfileName(action.raiser, 'Workspace member')]))].sort((a, b) => a[1].localeCompare(b[1]));
-const sourceOptions = [...new Set(actions.map((action) => action.source_type))];
 const hasUnassignedActions = actions.some((action) => !action.actioner_id);
 const buildRegisterPath = (overrides = {}) => {
 	const next = {
@@ -223,7 +207,6 @@ const buildRegisterPath = (overrides = {}) => {
 		status: selectedStatus,
 		actioner: selectedActioner,
 		raiser: selectedRaiser,
-		source: selectedSource,
 		sort: selectedSort,
 		page: paginated.pagination.page,
 		pageSize: selectedPageSize,
@@ -236,7 +219,6 @@ const buildRegisterPath = (overrides = {}) => {
 	if (next.status) query.set('status', next.status);
 	if (next.actioner) query.set('actioner', next.actioner);
 	if (next.raiser) query.set('raiser', next.raiser);
-	if (next.source) query.set('source', next.source);
 	if (next.sort && next.sort !== normaliseActionRegisterSort(null, next.tab)) query.set('sort', next.sort);
 	if (Number(next.page) > 1) query.set('page', String(next.page));
 	if (Number(next.pageSize) !== DEFAULT_ACTION_REGISTER_PAGE_SIZE) query.set('pageSize', String(next.pageSize));
@@ -303,7 +285,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 
 								{actions.length === 0 ? (
 									<EmptyState title="No Actions have been recorded for this project yet." data-actions-empty-state>
-										<p>When Actions are raised, this register will show their reference, Actioner, workflow state, timing state, source and history.</p>
+										<p>When Actions are raised, this register will show their reference, Actioner, workflow, due date and raiser.</p>
 										<p>{canCreateAction ? 'Create the first Action when assurance work needs to be tracked.' : 'Viewer access is read-only, so Action creation is unavailable for your role.'}</p>
 									</EmptyState>
 								) : (
@@ -323,7 +305,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 											<label><span>Search actions</span><input type="search" name="q" value={selectedSearch} placeholder="Search actions..." autocomplete="off" /></label>
 											<label><span>Timing</span><select name="timing">
 												<option value="all" selected={selectedTiming === 'all'}>All timing</option>
-												{['open', 'due_soon', 'due_today', 'overdue', 'unassigned', 'reassignment_required', 'complete', 'cancelled'].map((state) => (
+												{['open', 'due_soon', 'due_today', 'missing_due_date', 'overdue', 'unassigned', 'reassignment_required', 'complete', 'cancelled'].map((state) => (
 													<option value={state} selected={selectedTiming === state}>{actionTimingDisplayLabel(state)}</option>
 												))}
 											</select></label>
@@ -339,10 +321,6 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 											<label><span>Raiser</span><select name="raiser">
 												<option value="" selected={!selectedRaiser}>All raisers</option>
 												{raiserOptions.map(([id, label]) => <option value={id} selected={selectedRaiser === id}>{label}</option>)}
-											</select></label>
-											<label><span>Source</span><select name="source">
-												<option value="" selected={!selectedSource}>All sources</option>
-												{sourceOptions.map((source) => <option value={source} selected={selectedSource === source}>{ACTION_SOURCE_DISPLAY_LABELS[source]}</option>)}
 											</select></label>
 											<label><span>Sort</span><select name="sort">
 												<option value="highest_urgency" selected={selectedSort === 'highest_urgency'}>Highest urgency</option>
@@ -374,31 +352,26 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 															<tr>
 																<th scope="col">Ref</th>
 																<th scope="col">Action</th>
-																<th scope="col">Source</th>
 																<th scope="col">Actioner</th>
-																<th scope="col">Workflow state</th>
-																<th scope="col">Timing state</th>
+																<th scope="col">Workflow</th>
 																<th scope="col">Due date</th>
 																<th scope="col">Raiser</th>
-																<th scope="col">More actions</th>
 															</tr>
 														</thead>
 														<tbody>
 															{paginated.items.map((action) => {
 																const timing = deriveActionTimingState(action, now);
+																const concernTone = actionConcernTone(action, now);
+																const dueDisplay = actionDueDateDisplay(action, now);
 																const detailHref = buildProjectActionPath(workspaceSlug ?? '', project.slug, action.id);
-																const sourceUrl = sourceHref(action, project);
 																return (
 																	<tr>
-																		<td><a class="actions-ref" href={detailHref}>{action.action_ref}</a></td>
+																		<td><a class={`actions-ref-pill actions-ref-pill--${concernTone}`} href={detailHref} aria-label={`Open ${action.action_ref} details`}>{action.action_ref}</a></td>
 																		<td><a class="actions-title" href={detailHref} title={action.brief}>{briefPreview(action.brief)}</a></td>
-																		<td>{sourceUrl ? <a class="text-link" href={sourceUrl}>{sourceLabelForAction(action)}</a> : sourceLabelForAction(action)}</td>
 																		<td><span class={action.actioner_id && !action.actioner?.isAssignable ? 'actions-person actions-person--warning' : 'actions-person'}>{action.actioner_id ? actionProfileName(action.actioner, 'Workspace member') : 'Unassigned'}</span></td>
 																		<td><span class={`actions-pill actions-pill--workflow actions-pill--${action.status}`}>{ACTION_DISPLAY_LABELS[action.status]}</span></td>
-																		<td><span class={`actions-pill actions-pill--${timingTone(timing)}`} title={`Timing state: ${actionTimingDisplayLabel(timing)}`}>{actionTimingDisplayLabel(timing)}</span></td>
-																		<td><span class={`actions-due actions-due--${timingTone(timing)}`}>{formatDate(action.due_date, 'No due date')}</span></td>
+																		<td><span class={`actions-due actions-due--${dueDisplay.tone}`} title={actionTimingDisplayLabel(timing)}>{dueDisplay.label}</span></td>
 																		<td>{actionProfileName(action.raiser, 'Workspace member')}</td>
-																		<td><a class="text-link" href={detailHref}>Open details</a></td>
 																	</tr>
 																);
 															})}
@@ -413,7 +386,6 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 														{selectedStatus && <input type="hidden" name="status" value={selectedStatus} />}
 														{selectedActioner && <input type="hidden" name="actioner" value={selectedActioner} />}
 														{selectedRaiser && <input type="hidden" name="raiser" value={selectedRaiser} />}
-														{selectedSource && <input type="hidden" name="source" value={selectedSource} />}
 														{selectedSort !== defaultSort && <input type="hidden" name="sort" value={selectedSort} />}
 														<label><span>Show</span><select name="pageSize" aria-label="Actions per page">
 															{ACTION_REGISTER_PAGE_SIZES.map((size) => <option value={size} selected={paginated.pagination.pageSize === size}>{size}</option>)}
@@ -492,7 +464,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 							<div>
 								<p class="eyebrow">Project Action</p>
 								<h2 id="action-create-title">New Action</h2>
-								<p>This Action will be raised directly against the project source.</p>
+								<p>This Action will be raised directly against this project.</p>
 							</div>
 							<button class="action-dialog-close" type="button" value="cancel" data-action-create-close aria-label="Close New Action dialog">x</button>
 						</div>
@@ -502,7 +474,22 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 							<option value="" selected={!createValues.actionerId}>Unassigned</option>
 							{eligibleActioners.map((person) => <option value={person.id} selected={createValues.actionerId === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
 						</select></label>
-						<label><span>Due date</span><input type="date" name="due_date" value={createValues.dueDate} /></label>
+						<div class="action-create-form__field action-date-field">
+							<label for="action-create-due-date">Due date</label>
+							<div class="action-date-control">
+								<input
+									id="action-create-due-date"
+									type="date"
+									name="due_date"
+									value={createValues.dueDate}
+									aria-describedby="action-create-due-date-help"
+									data-action-date-input
+								/>
+								<button class="action-date-picker-button" type="button" data-action-date-picker aria-label="Open due date calendar"></button>
+								<button class="action-date-clear-button" type="button" data-action-date-clear>Clear</button>
+							</div>
+							<p class="action-field-help" id="action-create-due-date-help">No due date is allowed. Actions without a due date will appear as Amber attention.</p>
+						</div>
 						<div class="action-create-form__footer">
 							<button class="button button--secondary" type="button" data-action-create-cancel>Cancel</button>
 							<button class="button button--primary" type="submit" data-action-create-submit>Create Action</button>
@@ -525,6 +512,9 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 	const dialog = document.querySelector('[data-action-create-dialog]');
 	const openButton = document.querySelector('[data-action-create-open]');
 	const closeButtons = document.querySelectorAll('[data-action-create-close], [data-action-create-cancel]');
+	const dateInput = document.querySelector('[data-action-date-input]');
+	const datePickerButton = document.querySelector('[data-action-date-picker]');
+	const dateClearButton = document.querySelector('[data-action-date-clear]');
 	let lastTrigger = null;
 	const setScrollLocked = (locked) => {
 		document.documentElement.classList.toggle('modal-scroll-locked', locked);
@@ -551,6 +541,24 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		setScrollLocked(false);
 		lastTrigger?.focus();
 	});
+	const openNativeDatePicker = () => {
+		if (!(dateInput instanceof HTMLInputElement)) return;
+		dateInput.focus();
+		if (typeof dateInput.showPicker === 'function') {
+			try {
+				dateInput.showPicker();
+			} catch {
+				// The focused native date input remains usable when showPicker is not allowed.
+			}
+		}
+	};
+	dateInput?.addEventListener('click', openNativeDatePicker);
+	datePickerButton?.addEventListener('click', openNativeDatePicker);
+	dateClearButton?.addEventListener('click', () => {
+		if (!(dateInput instanceof HTMLInputElement)) return;
+		dateInput.value = '';
+		dateInput.focus();
+	});
 	dialog?.querySelector('form')?.addEventListener('submit', (event) => {
 		const submitButton = event.currentTarget?.querySelector('[data-action-create-submit]');
 		if (submitButton) {
@@ -574,14 +582,20 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 	}
 	.actions-register-layout {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem);
+		grid-template-columns: minmax(0, 1fr) clamp(19rem, 23vw, 22rem);
 		gap: 1rem;
 		align-items: start;
 	}
-	.actions-register-main,
+	.actions-register-main {
+		display: grid;
+		gap: 1rem;
+		min-width: 0;
+		overflow: hidden;
+	}
 	.actions-side-panels {
 		display: grid;
 		gap: 1rem;
+		min-width: 0;
 	}
 	.actions-summary {
 		display: grid;
@@ -653,7 +667,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 	}
 	.actions-toolbar {
 		display: grid;
-		grid-template-columns: minmax(12rem, 1.2fr) repeat(6, minmax(8rem, 1fr)) auto;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 0.75rem;
 		align-items: end;
 	}
@@ -680,6 +694,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 	.actions-toolbar__buttons {
 		display: flex;
 		align-items: center;
+		align-self: end;
 		gap: 0.6rem;
 	}
 	.actions-filter-status {
@@ -690,14 +705,35 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		overflow-x: auto;
 	}
 	.actions-table {
-		min-width: 68rem;
+		min-width: 54rem;
+		table-layout: fixed;
 	}
-	.actions-ref,
+	.actions-ref-pill,
 	.actions-title {
 		color: var(--accent-strong);
 		font-weight: 850;
 		text-decoration: none;
 	}
+	.actions-ref-pill {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		padding: 0.2rem 0.58rem;
+		background: rgba(0, 160, 255, 0.1);
+		white-space: nowrap;
+	}
+	.actions-ref-pill:hover,
+	.actions-ref-pill:focus-visible {
+		text-decoration: none;
+		border-color: currentColor;
+	}
+	.actions-ref-pill--blue { border-color: rgba(0, 160, 255, 0.45); color: var(--accent-strong); background: rgba(0, 160, 255, 0.1); }
+	.actions-ref-pill--amber { border-color: rgba(255, 176, 32, 0.55); color: #ffb020; background: rgba(255, 176, 32, 0.1); }
+	.actions-ref-pill--red { border-color: rgba(255, 91, 91, 0.55); color: #ff5b5b; background: rgba(255, 91, 91, 0.1); }
+	.actions-ref-pill--green { border-color: rgba(76, 212, 126, 0.45); color: #4cd47e; background: rgba(76, 212, 126, 0.1); }
+	.actions-ref-pill--grey { border-color: rgba(159, 174, 194, 0.32); color: var(--muted-strong); background: rgba(159, 174, 194, 0.08); }
 	.actions-title {
 		display: -webkit-box;
 		-webkit-line-clamp: 2;
@@ -726,6 +762,9 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 	.actions-pill--grey { border-color: rgba(159, 174, 194, 0.32); color: var(--muted-strong); background: rgba(159, 174, 194, 0.08); }
 	.actions-due--red { color: #ff5b5b; font-weight: 850; }
 	.actions-due--amber { color: #ffb020; font-weight: 850; }
+	.actions-due--blue { color: var(--accent-strong); font-weight: 850; }
+	.actions-due--green { color: #4cd47e; font-weight: 850; }
+	.actions-due--grey { color: var(--muted-strong); font-weight: 850; }
 	.actions-pagination {
 		display: flex;
 		justify-content: space-between;
@@ -889,6 +928,64 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		background: transparent;
 		color: var(--text);
 	}
+	.action-create-form__field {
+		display: grid;
+		gap: 0.3rem;
+		color: var(--muted-strong);
+		font-size: 0.85rem;
+		font-weight: 800;
+	}
+	.action-date-control {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 2.5rem auto;
+		gap: 0.5rem;
+		align-items: stretch;
+	}
+	.action-date-control input::-webkit-calendar-picker-indicator {
+		opacity: 1;
+		cursor: pointer;
+		filter: invert(74%) sepia(93%) saturate(2682%) hue-rotate(164deg) brightness(101%) contrast(104%);
+	}
+	.action-date-picker-button,
+	.action-date-clear-button {
+		border: 1px solid var(--border);
+		border-radius: 0.45rem;
+		background: rgba(0, 160, 255, 0.1);
+		color: var(--text);
+		font: inherit;
+		font-size: 0.82rem;
+		font-weight: 850;
+		cursor: pointer;
+	}
+	.action-date-picker-button {
+		position: relative;
+		min-height: 2.35rem;
+	}
+	.action-date-picker-button::before {
+		content: "";
+		position: absolute;
+		inset: 0.55rem 0.65rem 0.5rem;
+		border: 2px solid var(--accent-strong);
+		border-top-width: 0.42rem;
+		border-radius: 0.18rem;
+		box-shadow: inset 0 0.28rem 0 rgba(0, 160, 255, 0.25);
+	}
+	.action-date-clear-button {
+		padding: 0 0.75rem;
+		background: rgba(255, 255, 255, 0.05);
+	}
+	.action-date-picker-button:hover,
+	.action-date-picker-button:focus-visible,
+	.action-date-clear-button:hover,
+	.action-date-clear-button:focus-visible {
+		border-color: rgba(0, 160, 255, 0.6);
+	}
+	.action-field-help {
+		margin: 0;
+		color: var(--muted-strong);
+		font-size: 0.8rem;
+		font-weight: 650;
+	}
 	.action-form-error {
 		border: 1px solid rgba(255, 91, 91, 0.45);
 		border-radius: 0.55rem;
@@ -896,16 +993,23 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		background: rgba(255, 91, 91, 0.08);
 		color: #ffb8b8;
 	}
-	@media (max-width: 1120px) {
+	@media (max-width: 1180px) {
 		.actions-register-layout,
-		.actions-toolbar,
 		.actions-guidance {
 			grid-template-columns: 1fr;
+		}
+		.actions-toolbar {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.actions-toolbar__buttons {
+			grid-column: 1 / -1;
 		}
 	}
 	@media (max-width: 720px) {
 		.actions-summary,
-		.actions-distribution__body {
+		.actions-distribution__body,
+		.actions-toolbar,
+		.action-date-control {
 			grid-template-columns: 1fr;
 		}
 		.actions-pagination {

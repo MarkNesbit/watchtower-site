@@ -132,7 +132,7 @@ Tabs are:
 
 The default tab is Outstanding and selected tab/filter/page state is stored in the query string.
 
-Search covers Action reference, brief, Actioner name, raiser name, source reference and source label. Filters cover timing, workflow status, Actioner, raiser and source type. Sorting supports urgency, due date, updated date, Action reference and Actioner.
+Search covers Action reference, brief, Actioner name and raiser name. Filters cover timing, workflow status, Actioner and raiser. Sorting supports urgency, due date, updated date, Action reference and Actioner. Source information is kept on Action detail pages rather than shown on the project-level register.
 
 Summary cards are project-level and unaffected by table filters:
 
@@ -140,7 +140,7 @@ Summary cards are project-level and unaffected by table filters:
 - Need Action: Actions requiring intervention.
 - Highest urgency: the most urgent current timing state across open Actions.
 
-The Needs Action panel is also project-level and prioritises overdue, due today, reassignment required, rejected, returned to raiser, unassigned, awaiting review and due soon items. The Action distribution panel shows Open, Awaiting review, Complete and Cancelled counts and is not a health indicator.
+The Needs Action panel is also project-level and prioritises overdue, due today, reassignment required, rejected, returned to raiser, unassigned, awaiting review, due soon and missing due date items. The Action distribution panel shows Open, Awaiting review, Complete and Cancelled counts and is not a health indicator.
 
 ## Timing Rules
 
