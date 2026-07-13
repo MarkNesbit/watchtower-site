@@ -4,11 +4,14 @@ import test from 'node:test';
 
 import {
 	ACTION_HISTORY_EVENT_TYPES,
+	ACTION_REGISTER_TABS,
 	ACTION_SOURCE_TYPES,
 	ACTION_STATUSES,
 	actionDisplayLabel,
+	actionTimingDisplayLabel,
 	amendProjectActionBrief,
 	assignProjectAction,
+	briefPreview,
 	buildActionReference,
 	canBeAssignedActionerRole,
 	canHoldActionWorkflowRole,
@@ -17,26 +20,45 @@ import {
 	changeProjectActionDueDate,
 	completeProjectAction,
 	createProjectAction,
+	deriveActionDistribution,
+	deriveActionTimingState,
+	filterAndSortProjectActions,
+	filterProjectActions,
+	getProjectActionNeedsAttentionItems,
 	isActionHistoryEventType,
 	isActionSourceType,
 	isActionStatus,
 	isTerminalActionStatus,
 	isValidActionReference,
 	mapProjectActionOperationError,
+	normaliseActionRegisterSort,
+	normaliseActionRegisterTab,
+	normaliseActionTimingFilter,
 	normaliseActionEvidenceUrl,
+	paginateProjectActions,
 	reissueProjectAction,
 	rejectProjectAction,
 	returnProjectActionToActioner,
 	returnProjectActionToRaiser,
+	sortProjectActions,
+	sourceLabelForAction,
+	summariseProjectActions,
 	submitProjectAction,
 	takeOverProjectActionAcceptance,
 } from '../src/lib/projectActions.ts';
 import { ACTION_PERMISSIONS, can } from '../src/lib/permissions.ts';
+import { buildProjectActionPath, buildProjectActionsPath } from '../src/lib/projects.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260712000200_project_actions_schema_foundation.sql', import.meta.url);
 const lifecycleMigrationUrl = new URL('../supabase/migrations/20260712000300_project_actions_transactional_lifecycle.sql', import.meta.url);
+const registerRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/actions.astro', import.meta.url);
+const detailRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/actions/[actionId].astro', import.meta.url);
+const projectDashboardUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url);
 const migrationSql = async () => readFile(migrationUrl, 'utf8');
 const lifecycleMigrationSql = async () => readFile(lifecycleMigrationUrl, 'utf8');
+const registerRouteSource = async () => readFile(registerRouteUrl, 'utf8');
+const detailRouteSource = async () => readFile(detailRouteUrl, 'utf8');
+const projectDashboardSource = async () => readFile(projectDashboardUrl, 'utf8');
 
 test('Project Action migration creates counters actions and immutable history tables', async () => {
 	const sql = await migrationSql();
@@ -441,4 +463,154 @@ test('Project Action RPC wrappers surface controlled operation errors', async ()
 		() => completeProjectAction(client, { actionId: 'action-1', expectedStatus: 'submitted' }),
 		(error) => error.code === 'stale_operation',
 	);
+});
+
+const actionFixture = (overrides = {}) => ({
+	id: overrides.id ?? `action-${overrides.action_number ?? 1}`,
+	organisation_id: 'org-1',
+	project_id: 'project-1',
+	action_number: overrides.action_number ?? 1,
+	action_ref: overrides.action_ref ?? `Action-HHH-${String(overrides.action_number ?? 1).padStart(3, '0')}`,
+	brief: overrides.brief ?? 'Confirm hosting fallback approach',
+	status: overrides.status ?? 'open',
+	due_date: overrides.due_date ?? '2026-07-20',
+	raiser_id: overrides.raiser_id ?? 'raiser-1',
+	actioner_id: Object.hasOwn(overrides, 'actioner_id') ? overrides.actioner_id : 'actioner-1',
+	acceptance_owner_id: overrides.acceptance_owner_id ?? 'raiser-1',
+	source_type: overrides.source_type ?? 'project',
+	source_record_id: overrides.source_record_id ?? null,
+	source_ref: overrides.source_ref ?? null,
+	source_label: overrides.source_label ?? 'Project',
+	source_context: {},
+	latest_response: overrides.latest_response ?? null,
+	latest_evidence_url: overrides.latest_evidence_url ?? null,
+	submitted_at: overrides.submitted_at ?? null,
+	completed_at: overrides.completed_at ?? null,
+	cancelled_at: overrides.cancelled_at ?? null,
+	created_by: overrides.created_by ?? 'raiser-1',
+	updated_by: overrides.updated_by ?? 'raiser-1',
+	created_at: overrides.created_at ?? '2026-07-01T10:00:00.000Z',
+	updated_at: overrides.updated_at ?? '2026-07-10T10:00:00.000Z',
+	raiser: { id: overrides.raiser_id ?? 'raiser-1', display_name: overrides.raiserName ?? 'Mark Nesbit' },
+	actioner: overrides.actioner_id === null
+		? null
+		: { id: overrides.actioner_id ?? 'actioner-1', display_name: overrides.actionerName ?? 'Sarah Mitchell', role: overrides.actionerRole ?? 'member', membershipStatus: overrides.actionerStatus ?? 'active', isAssignable: overrides.isAssignable ?? true },
+	acceptance_owner: { id: overrides.acceptance_owner_id ?? 'raiser-1', display_name: overrides.acceptanceOwnerName ?? 'Mark Nesbit' },
+});
+
+test('Project Actions route builders use workspace-safe project paths', () => {
+	assert.equal(buildProjectActionsPath('mark-workspace', 'hhh-website-build'), '/app/workspaces/mark-workspace/projects/hhh-website-build/actions');
+	assert.equal(buildProjectActionPath('mark-workspace', 'hhh-website-build', 'action/1'), '/app/workspaces/mark-workspace/projects/hhh-website-build/actions/action%2F1');
+});
+
+test('Project Action timing state follows MVP precedence without green open states', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	assert.equal(deriveActionTimingState(actionFixture({ status: 'complete', due_date: '2026-07-01' }), now), 'complete');
+	assert.equal(deriveActionTimingState(actionFixture({ status: 'cancelled', due_date: '2026-07-01' }), now), 'cancelled');
+	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-11' }), now), 'overdue');
+	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-12' }), now), 'due_today');
+	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-13', isAssignable: false }), now), 'reassignment_required');
+	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-13', actioner_id: null }), now), 'unassigned');
+	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-15' }), now), 'due_soon');
+	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-20' }), now), 'open');
+	assert.equal(actionTimingDisplayLabel('open'), 'Open');
+	assert.equal(actionTimingDisplayLabel('complete'), 'Completed');
+});
+
+test('Project Action register tabs filters search sorting and pagination are centralised', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	const actions = [
+		actionFixture({ action_number: 1, brief: 'Confirm hosting fallback approach', status: 'open', due_date: '2026-07-20', actionerName: 'Sarah Mitchell' }),
+		actionFixture({ action_number: 2, brief: 'Review supplier recovery plan', status: 'submitted', due_date: '2026-07-18', submitted_at: '2026-07-10T09:00:00.000Z', actionerName: 'Mark Nesbit', source_type: 'risk', source_ref: 'Risk-HHH-002' }),
+		actionFixture({ action_number: 3, brief: 'Validate recovery milestone dates', status: 'complete', due_date: '2026-07-10', completed_at: '2026-07-11T09:00:00.000Z' }),
+		actionFixture({ action_number: 4, brief: 'Update stakeholder comms note', status: 'returned_to_raiser', due_date: '2026-07-13', actioner_id: null }),
+		actionFixture({ action_number: 5, brief: 'Assign RAID owner for test item', status: 'cancelled', due_date: '2026-07-14', cancelled_at: '2026-07-11T10:00:00.000Z' }),
+	];
+
+	assert.deepEqual(ACTION_REGISTER_TABS, ['outstanding', 'awaiting_review', 'complete', 'cancelled', 'all']);
+	assert.equal(normaliseActionRegisterTab('bad'), 'outstanding');
+	assert.equal(normaliseActionTimingFilter('due_today'), 'due_today');
+	assert.equal(normaliseActionTimingFilter('bad'), 'all');
+	assert.equal(normaliseActionRegisterSort(null, 'awaiting_review'), 'submitted_oldest');
+	assert.equal(filterProjectActions(actions, { tab: 'outstanding' }, now).length, 2);
+	assert.equal(filterProjectActions(actions, { tab: 'awaiting_review' }, now).length, 1);
+	assert.equal(filterProjectActions(actions, { tab: 'complete' }, now).length, 1);
+	assert.equal(filterProjectActions(actions, { tab: 'cancelled' }, now).length, 1);
+	assert.equal(filterProjectActions(actions, { tab: 'all', search: 'supplier' }, now)[0].action_ref, 'Action-HHH-002');
+	assert.equal(filterProjectActions(actions, { tab: 'all', sourceType: 'risk' }, now)[0].source_ref, 'Risk-HHH-002');
+	assert.equal(filterProjectActions(actions, { tab: 'all', actionerId: 'unassigned' }, now)[0].action_ref, 'Action-HHH-004');
+	assert.equal(filterAndSortProjectActions(actions, { tab: 'all', search: 'mark', sort: 'action_ref' }, now).length, 5);
+	assert.equal(sortProjectActions(actions, 'highest_urgency', now)[0].action_ref, 'Action-HHH-004');
+	const page = paginateProjectActions(actions, 2, 2);
+	assert.equal(page.items.length, 2);
+	assert.equal(page.pagination.startItem, 3);
+	assert.equal(page.pagination.hasPrevious, true);
+	assert.equal(page.pagination.hasNext, true);
+});
+
+test('Project Action summaries needs-action queue distribution and labels stay project-level', () => {
+	const now = new Date('2026-07-12T12:00:00Z');
+	const actions = [
+		actionFixture({ action_number: 1, status: 'open', due_date: '2026-07-11' }),
+		actionFixture({ action_number: 2, status: 'submitted', due_date: '2026-07-18' }),
+		actionFixture({ action_number: 3, status: 'complete', due_date: '2026-07-10' }),
+		actionFixture({ action_number: 4, status: 'cancelled', due_date: '2026-07-10' }),
+		actionFixture({ action_number: 5, status: 'rejected_by_actioner', due_date: '2026-07-20' }),
+	];
+	const summary = summariseProjectActions(actions, now);
+	assert.equal(summary.openActions, 3);
+	assert.equal(summary.needAction, 3);
+	assert.equal(summary.highestUrgency, 'overdue');
+	const needsAction = getProjectActionNeedsAttentionItems(actions, 3, now);
+	assert.deepEqual(needsAction.map((item) => item.type), ['overdue', 'rejected_by_actioner', 'awaiting_review']);
+	const distribution = deriveActionDistribution(actions);
+	assert.equal(distribution.total, 5);
+	assert.deepEqual(distribution.segments.map((segment) => [segment.key, segment.count]), [
+		['open', 2],
+		['awaiting_review', 1],
+		['complete', 1],
+		['cancelled', 1],
+	]);
+	assert.equal(sourceLabelForAction(actionFixture({ source_ref: 'Risk-HHH-002', source_type: 'risk' })), 'Risk-HHH-002');
+	assert.equal(briefPreview('A '.repeat(100), 20).endsWith('...'), true);
+});
+
+test('Project Actions Register and detail routes expose the required WT-ACTION-002 surface', async () => {
+	const register = await registerRouteSource();
+	const detail = await detailRouteSource();
+	const dashboard = await projectDashboardSource();
+
+	assert.match(register, /Actions Register/);
+	assert.match(register, /Action controls/);
+	assert.match(register, /A source-of-truth register of project assurance actions\./);
+	assert.match(register, /Create and edit enabled/);
+	assert.match(register, /Read-only access/);
+	assert.match(register, /Viewers cannot create Actions/);
+	assert.match(register, /data-action-create-dialog/);
+	assert.match(register, /createProjectAction/);
+	assert.match(register, /listProjectActions/);
+	assert.match(register, /listEligibleActioners/);
+	assert.match(register, /Search actions/);
+	assert.match(register, /Workflow status/);
+	assert.match(register, /Action distribution/);
+	assert.match(register, /Needs action/);
+	assert.match(register, /Back to project/);
+
+	assert.match(detail, /listProjectActionHistory/);
+	assert.match(detail, /Immutable history/);
+	assert.match(detail, /Current response/);
+	assert.match(detail, /Management controls/);
+	assert.match(detail, /amendProjectActionBrief/);
+	assert.match(detail, /changeProjectActionDueDate/);
+	assert.match(detail, /assignProjectAction/);
+	assert.match(detail, /reissueProjectAction/);
+	assert.match(detail, /completeProjectAction/);
+	assert.match(detail, /returnProjectActionToActioner/);
+	assert.match(detail, /cancelProjectAction/);
+	assert.match(detail, /takeOverProjectActionAcceptance/);
+	assert.match(detail, /Submit, return to raiser and reject response forms are intentionally deferred to WT-ACTION-003/);
+	assert.match(detail, /safeEvidenceHref/);
+
+	assert.match(dashboard, /buildProjectActionsPath/);
+	assert.match(dashboard, /destination: 'actions'/);
 });
