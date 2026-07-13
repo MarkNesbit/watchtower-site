@@ -40,7 +40,7 @@ export type ProjectAction = {
 	action_ref: string;
 	brief: string;
 	status: ActionStatus;
-	due_date: string;
+	due_date: string | null;
 	raiser_id: string;
 	actioner_id: string | null;
 	acceptance_owner_id: string;
@@ -102,7 +102,7 @@ export type ProjectActionExpectedState = {
 export type CreateProjectActionInput = {
 	projectId: string;
 	brief: string;
-	dueDate: string;
+	dueDate?: string | null;
 	actionerId?: string | null;
 	sourceType?: ActionSourceType;
 	sourceRecordId?: string | null;
@@ -138,7 +138,7 @@ export type AmendProjectActionBriefInput = ProjectActionExpectedState & {
 
 export type ChangeProjectActionDueDateInput = ProjectActionExpectedState & {
 	actionId: string;
-	dueDate: string;
+	dueDate?: string | null;
 };
 
 export type ReissueProjectActionInput = ProjectActionExpectedState & {
@@ -155,6 +155,7 @@ export const ACTION_TIMING_STATES = [
 	'open',
 	'due_soon',
 	'due_today',
+	'missing_due_date',
 	'overdue',
 	'unassigned',
 	'reassignment_required',
@@ -228,7 +229,7 @@ export type ActionNeedsAttentionItem = {
 	sourceLabel: string;
 	timingState: ActionTimingState;
 	status: ActionStatus;
-	dueDate: string;
+	dueDate: string | null;
 };
 
 export type ActionDistributionSegment = {
@@ -288,6 +289,7 @@ export const ACTION_TIMING_DISPLAY_LABELS: Record<ActionTimingState, string> = {
 	open: 'Open',
 	due_soon: 'Due soon',
 	due_today: 'Due today',
+	missing_due_date: 'No due date',
 	overdue: 'Overdue',
 	unassigned: 'Unassigned',
 	reassignment_required: 'Reassignment required',
@@ -465,6 +467,7 @@ function daysUntilUtc(dateValue: string, now = new Date()): number {
 export function deriveActionTimingState(action: ProjectAction, now = new Date()): ActionTimingState {
 	if (action.status === 'complete') return 'complete';
 	if (action.status === 'cancelled') return 'cancelled';
+	if (!action.due_date) return 'missing_due_date';
 
 	const daysUntilDue = daysUntilUtc(action.due_date, now);
 	if (daysUntilDue < 0) return 'overdue';
@@ -477,7 +480,7 @@ export function deriveActionTimingState(action: ProjectAction, now = new Date())
 
 export function deriveProjectActionNeedsAttention(action: ProjectAction, now = new Date()): boolean {
 	const timingState = deriveActionTimingState(action, now);
-	return ['overdue', 'due_today', 'reassignment_required', 'unassigned', 'due_soon'].includes(timingState)
+	return ['overdue', 'due_today', 'missing_due_date', 'reassignment_required', 'unassigned', 'due_soon'].includes(timingState)
 		|| ['submitted', 'returned_to_raiser', 'rejected_by_actioner'].includes(action.status);
 }
 
@@ -554,6 +557,7 @@ function urgencyRank(action: ProjectAction, now = new Date()): number {
 		overdue: 0,
 		due_today: 1,
 		reassignment_required: 2,
+		missing_due_date: 3,
 		unassigned: 5,
 		due_soon: 7,
 		open: 8,
@@ -659,11 +663,12 @@ export function summariseProjectActions(actions: ProjectAction[], now = new Date
 				overdue: 0,
 				due_today: 1,
 				reassignment_required: 2,
-				unassigned: 3,
-				due_soon: 4,
-				open: 5,
-				complete: 6,
-				cancelled: 7,
+				missing_due_date: 3,
+				unassigned: 4,
+				due_soon: 5,
+				open: 6,
+				complete: 7,
+				cancelled: 8,
 			};
 			return order[a] - order[b];
 		})[0] ?? 'none';
@@ -699,6 +704,8 @@ export function getProjectActionNeedsAttentionItems(actions: ProjectAction[], li
 				reason = 'No Actioner assigned';
 			} else if (timingState === 'reassignment_required') {
 				reason = 'Assigned Actioner is no longer eligible';
+			} else if (timingState === 'missing_due_date') {
+				reason = 'No due date set';
 			}
 			const priority: Record<ActionNeedsAttentionItem['type'], number> = {
 				overdue: 0,
@@ -709,6 +716,7 @@ export function getProjectActionNeedsAttentionItems(actions: ProjectAction[], li
 				unassigned: 5,
 				awaiting_review: 6,
 				due_soon: 7,
+				missing_due_date: 8,
 				open: 8,
 				complete: 20,
 				cancelled: 21,
@@ -802,7 +810,7 @@ export async function createProjectAction(client: ProjectActionRpcClient, input:
 	return callProjectActionRpc(client, 'create_project_action', {
 		p_project_id: input.projectId,
 		p_brief: input.brief,
-		p_due_date: input.dueDate,
+		p_due_date: input.dueDate?.trim() || null,
 		p_actioner_id: input.actionerId ?? null,
 		p_source_type: input.sourceType ?? 'project',
 		p_source_record_id: input.sourceRecordId ?? null,
@@ -869,7 +877,7 @@ export async function amendProjectActionBrief(client: ProjectActionRpcClient, in
 export async function changeProjectActionDueDate(client: ProjectActionRpcClient, input: ChangeProjectActionDueDateInput): Promise<ProjectAction> {
 	return callProjectActionRpc(client, 'change_project_action_due_date', {
 		...actionRpcArgs(input),
-		p_due_date: input.dueDate,
+		p_due_date: input.dueDate?.trim() || null,
 	});
 }
 

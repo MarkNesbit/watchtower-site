@@ -51,11 +51,13 @@ import { buildProjectActionPath, buildProjectActionsPath } from '../src/lib/proj
 
 const migrationUrl = new URL('../supabase/migrations/20260712000200_project_actions_schema_foundation.sql', import.meta.url);
 const lifecycleMigrationUrl = new URL('../supabase/migrations/20260712000300_project_actions_transactional_lifecycle.sql', import.meta.url);
+const optionalDueDateMigrationUrl = new URL('../supabase/migrations/20260713000100_project_actions_optional_due_date.sql', import.meta.url);
 const registerRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/actions.astro', import.meta.url);
 const detailRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/actions/[actionId].astro', import.meta.url);
 const projectDashboardUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url);
 const migrationSql = async () => readFile(migrationUrl, 'utf8');
 const lifecycleMigrationSql = async () => readFile(lifecycleMigrationUrl, 'utf8');
+const optionalDueDateMigrationSql = async () => readFile(optionalDueDateMigrationUrl, 'utf8');
 const registerRouteSource = async () => readFile(registerRouteUrl, 'utf8');
 const detailRouteSource = async () => readFile(detailRouteUrl, 'utf8');
 const projectDashboardSource = async () => readFile(projectDashboardUrl, 'utf8');
@@ -379,6 +381,16 @@ test('Project Action lifecycle migration records before and after values for cha
 	assert.match(sql, /'acceptance_owner_taken_over'[\s\S]*'acceptance_owner_id', current_action\.acceptance_owner_id[\s\S]*'acceptance_owner_id', updated_action\.acceptance_owner_id/);
 });
 
+test('Project Action optional due date migration relaxes due date storage and RPCs', async () => {
+	const sql = await optionalDueDateMigrationSql();
+	assert.match(sql, /alter table public\.project_actions[\s\S]*alter column due_date drop not null/);
+	assert.match(sql, /create or replace function public\.create_project_action\([\s\S]*p_due_date date default null/);
+	assert.match(sql, /create or replace function public\.change_project_action_due_date\([\s\S]*p_due_date date/);
+	assert.doesNotMatch(sql, /WT_ACTION_MISSING_DUE_DATE/);
+	assert.match(sql, /grant execute on function public\.create_project_action\(uuid, text, date, uuid, text, uuid, text, text, jsonb\) to authenticated/);
+	assert.match(sql, /grant execute on function public\.change_project_action_due_date\(uuid, date, text, timestamptz\) to authenticated/);
+});
+
 test('Project Action operation errors map controlled database failures for future UI', () => {
 	const expectations = [
 		['WT_ACTION_PERMISSION_DENIED: no', 'permission_denied'],
@@ -415,7 +427,7 @@ test('Project Action RPC wrappers call explicit lifecycle functions with expecte
 	await createProjectAction(client, {
 		projectId: 'project-1',
 		brief: 'Confirm hosting fallback approach',
-		dueDate: '2026-07-20',
+		dueDate: null,
 		actionerId: null,
 		sourceType: 'project',
 	});
@@ -448,6 +460,7 @@ test('Project Action RPC wrappers call explicit lifecycle functions with expecte
 	assert.equal(calls[1].args.p_expected_status, 'open');
 	assert.equal(calls[1].args.p_expected_updated_at, '2026-07-12T10:00:00.000Z');
 	assert.equal(calls[1].args.p_evidence_url, 'https://example.com/evidence');
+	assert.equal(calls[0].args.p_due_date, null);
 	assert.equal(calls[10].args.p_change_actioner, true);
 	assert.equal(calls[10].args.p_actioner_id, null);
 });
@@ -473,7 +486,7 @@ const actionFixture = (overrides = {}) => ({
 	action_ref: overrides.action_ref ?? `Action-HHH-${String(overrides.action_number ?? 1).padStart(3, '0')}`,
 	brief: overrides.brief ?? 'Confirm hosting fallback approach',
 	status: overrides.status ?? 'open',
-	due_date: overrides.due_date ?? '2026-07-20',
+	due_date: Object.hasOwn(overrides, 'due_date') ? overrides.due_date : '2026-07-20',
 	raiser_id: overrides.raiser_id ?? 'raiser-1',
 	actioner_id: Object.hasOwn(overrides, 'actioner_id') ? overrides.actioner_id : 'actioner-1',
 	acceptance_owner_id: overrides.acceptance_owner_id ?? 'raiser-1',
@@ -509,11 +522,13 @@ test('Project Action timing state follows MVP precedence without green open stat
 	assert.equal(deriveActionTimingState(actionFixture({ status: 'cancelled', due_date: '2026-07-01' }), now), 'cancelled');
 	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-11' }), now), 'overdue');
 	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-12' }), now), 'due_today');
+	assert.equal(deriveActionTimingState(actionFixture({ due_date: null }), now), 'missing_due_date');
 	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-13', isAssignable: false }), now), 'reassignment_required');
 	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-13', actioner_id: null }), now), 'unassigned');
 	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-15' }), now), 'due_soon');
 	assert.equal(deriveActionTimingState(actionFixture({ due_date: '2026-07-20' }), now), 'open');
 	assert.equal(actionTimingDisplayLabel('open'), 'Open');
+	assert.equal(actionTimingDisplayLabel('missing_due_date'), 'No due date');
 	assert.equal(actionTimingDisplayLabel('complete'), 'Completed');
 });
 
@@ -556,17 +571,18 @@ test('Project Action summaries needs-action queue distribution and labels stay p
 		actionFixture({ action_number: 3, status: 'complete', due_date: '2026-07-10' }),
 		actionFixture({ action_number: 4, status: 'cancelled', due_date: '2026-07-10' }),
 		actionFixture({ action_number: 5, status: 'rejected_by_actioner', due_date: '2026-07-20' }),
+		actionFixture({ action_number: 6, status: 'open', due_date: null }),
 	];
 	const summary = summariseProjectActions(actions, now);
-	assert.equal(summary.openActions, 3);
-	assert.equal(summary.needAction, 3);
+	assert.equal(summary.openActions, 4);
+	assert.equal(summary.needAction, 4);
 	assert.equal(summary.highestUrgency, 'overdue');
-	const needsAction = getProjectActionNeedsAttentionItems(actions, 3, now);
-	assert.deepEqual(needsAction.map((item) => item.type), ['overdue', 'rejected_by_actioner', 'awaiting_review']);
+	const needsAction = getProjectActionNeedsAttentionItems(actions, 4, now);
+	assert.deepEqual(needsAction.map((item) => item.type), ['overdue', 'rejected_by_actioner', 'awaiting_review', 'missing_due_date']);
 	const distribution = deriveActionDistribution(actions);
-	assert.equal(distribution.total, 5);
+	assert.equal(distribution.total, 6);
 	assert.deepEqual(distribution.segments.map((segment) => [segment.key, segment.count]), [
-		['open', 2],
+		['open', 3],
 		['awaiting_review', 1],
 		['complete', 1],
 		['cancelled', 1],
@@ -583,6 +599,9 @@ test('Project Actions Register and detail routes expose the required WT-ACTION-0
 	assert.match(register, /Actions Register/);
 	assert.match(register, /A source-of-truth register of project assurance actions\./);
 	assert.match(register, /New Action/);
+	assert.match(register, /No due date/);
+	assert.match(register, /backdrop-filter: blur\(10px\)/);
+	assert.match(register, /modal-scroll-locked/);
 	assert.match(register, /Viewers cannot create Actions/);
 	assert.match(register, /data-action-create-dialog/);
 	assert.match(register, /createProjectAction/);
@@ -600,6 +619,7 @@ test('Project Actions Register and detail routes expose the required WT-ACTION-0
 	assert.match(detail, /Management controls/);
 	assert.match(detail, /amendProjectActionBrief/);
 	assert.match(detail, /changeProjectActionDueDate/);
+	assert.match(detail, /No due date/);
 	assert.match(detail, /assignProjectAction/);
 	assert.match(detail, /reissueProjectAction/);
 	assert.match(detail, /completeProjectAction/);

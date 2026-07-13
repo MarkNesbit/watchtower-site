@@ -54,7 +54,7 @@ const formatDateTime = (value, fallback = 'Not available') => value
 	: fallback;
 const timingTone = (state) => state === 'overdue' || state === 'due_today'
 	? 'red'
-	: ['due_soon', 'unassigned', 'reassignment_required'].includes(state)
+	: ['due_soon', 'missing_due_date', 'unassigned', 'reassignment_required'].includes(state)
 		? 'amber'
 		: state === 'complete'
 			? 'green'
@@ -129,7 +129,7 @@ try {
 						if (intent === 'amend-brief') {
 							await amendProjectActionBrief(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, brief: String(formData.get('brief') ?? '') });
 						} else if (intent === 'change-due-date') {
-							await changeProjectActionDueDate(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, dueDate: String(formData.get('due_date') ?? '') });
+							await changeProjectActionDueDate(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, dueDate: String(formData.get('due_date') ?? '') || null });
 						} else if (intent === 'assign-actioner') {
 							const nextActioner = String(formData.get('actioner_id') ?? '');
 							await assignProjectAction(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, actionerId: nextActioner || null });
@@ -239,7 +239,7 @@ const sourceUrl = action && project ? sourceHref(action, project) : '';
 						<section class="action-detail-card">
 							<h3>Timing</h3>
 							<dl>
-								<div><dt>Due date</dt><dd>{formatDate(action.due_date)}</dd></div>
+								<div><dt>Due date</dt><dd>{formatDate(action.due_date, 'No due date')}</dd></div>
 								<div><dt>Created</dt><dd>{formatDateTime(action.created_at)}</dd></div>
 								<div><dt>Updated</dt><dd>{formatDateTime(action.updated_at)}</dd></div>
 								{action.submitted_at && <div><dt>Submitted</dt><dd>{formatDateTime(action.submitted_at)}</dd></div>}
@@ -289,7 +289,7 @@ const sourceUrl = action && project ? sourceHref(action, project) : '';
 										<input type="hidden" name="intent" value="change-due-date" />
 										<input type="hidden" name="expected_status" value={action.status} />
 										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
-										<label><span>Change due date</span><input type="date" name="due_date" value={action.due_date} required /></label>
+										<label><span>Change due date</span><input type="date" name="due_date" value={action.due_date ?? ''} /></label>
 										<button class="button button--secondary" type="submit">Save due date</button>
 									</form>
 								)}
@@ -311,7 +311,7 @@ const sourceUrl = action && project ? sourceHref(action, project) : '';
 										<input type="hidden" name="expected_status" value={action.status} />
 										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
 										<label><span>Reissue brief</span><textarea name="brief" rows="3">{action.brief}</textarea></label>
-										<label><span>Due date</span><input type="date" name="due_date" value={action.due_date} /></label>
+										<label><span>Due date</span><input type="date" name="due_date" value={action.due_date ?? ''} /></label>
 										<label><span>Actioner</span><select name="actioner_id">
 											<option value="" selected={!action.actioner_id}>Unassigned</option>
 											{eligibleActioners.map((person) => <option value={person.id} selected={action.actioner_id === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
