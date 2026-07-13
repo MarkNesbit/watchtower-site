@@ -1,0 +1,241 @@
+---
+type DateFieldProps = {
+	id: string;
+	name: string;
+	label: string;
+	value?: string | null;
+	required?: boolean;
+	disabled?: boolean;
+	readonly?: boolean;
+	min?: string | null;
+	max?: string | null;
+	helperText?: string;
+	error?: string;
+	clearable?: boolean;
+	pickerLabel?: string;
+	clearLabel?: string;
+	className?: string;
+	inputAttributes?: Record<string, unknown>;
+};
+
+const {
+	id,
+	name,
+	label,
+	value = '',
+	required = false,
+	disabled = false,
+	readonly = false,
+	min,
+	max,
+	helperText = '',
+	error = '',
+	clearable = true,
+	pickerLabel,
+	clearLabel,
+	className = '',
+	inputAttributes = {},
+} = Astro.props as DateFieldProps;
+
+const helperId = helperText ? `${id}-help` : '';
+const errorId = error ? `${id}-error` : '';
+const describedBy = [helperId, errorId].filter(Boolean).join(' ') || undefined;
+const canClear = clearable && !required && !disabled && !readonly;
+const calendarLabel = pickerLabel || `Choose ${label.toLowerCase()}`;
+const resolvedClearLabel = clearLabel || `Clear ${label.toLowerCase()}`;
+---
+
+<div class={`watchtower-date-field ${className}`} data-watchtower-date-field>
+	<label class="watchtower-date-field__label" for={id}>{label}</label>
+	<div class="watchtower-date-field__control">
+		<input
+			{...inputAttributes}
+			id={id}
+			name={name}
+			type="date"
+			value={value ?? ''}
+			required={required || undefined}
+			disabled={disabled || undefined}
+			readonly={readonly || undefined}
+			min={min || undefined}
+			max={max || undefined}
+			aria-invalid={Boolean(error) || undefined}
+			aria-describedby={describedBy}
+			data-watchtower-date-input
+		/>
+		<button
+			class="watchtower-date-field__picker"
+			type="button"
+			aria-label={calendarLabel}
+			disabled={disabled || readonly || undefined}
+			data-watchtower-date-picker
+		>
+			<span aria-hidden="true"></span>
+		</button>
+		{canClear && (
+			<button
+				class="watchtower-date-field__clear"
+				type="button"
+				aria-label={resolvedClearLabel}
+				data-watchtower-date-clear
+			>
+				Clear
+			</button>
+		)}
+	</div>
+	{helperText && <p class="watchtower-date-field__help" id={helperId}>{helperText}</p>}
+	{error && <p class="watchtower-date-field__error" id={errorId} role="alert">{error}</p>}
+</div>
+
+<script>
+	const openWatchtowerDatePicker = (input) => {
+		if (!(input instanceof HTMLInputElement) || input.disabled || input.readOnly) return;
+		input.focus();
+		if (typeof input.showPicker === 'function') {
+			try {
+				input.showPicker();
+			} catch {
+				// The focused native date input remains usable when showPicker is not allowed.
+			}
+		}
+	};
+
+	document.querySelectorAll('[data-watchtower-date-field]').forEach((field) => {
+		const input = field.querySelector('[data-watchtower-date-input]');
+		const picker = field.querySelector('[data-watchtower-date-picker]');
+		const clear = field.querySelector('[data-watchtower-date-clear]');
+
+		picker?.addEventListener('click', () => openWatchtowerDatePicker(input));
+		picker?.addEventListener('keydown', (event) => {
+			if (!(event instanceof KeyboardEvent) || (event.key !== 'Enter' && event.key !== ' ')) return;
+			event.preventDefault();
+			openWatchtowerDatePicker(input);
+		});
+		clear?.addEventListener('click', () => {
+			if (!(input instanceof HTMLInputElement)) return;
+			input.value = '';
+			input.dispatchEvent(new Event('input', { bubbles: true }));
+			input.dispatchEvent(new Event('change', { bubbles: true }));
+			input.focus();
+		});
+		clear?.addEventListener('keydown', (event) => {
+			if (!(event instanceof KeyboardEvent) || (event.key !== 'Enter' && event.key !== ' ')) return;
+			event.preventDefault();
+			if (clear instanceof HTMLButtonElement) clear.click();
+		});
+	});
+</script>
+
+<style>
+	.watchtower-date-field {
+		display: grid;
+		gap: 0.3rem;
+		color: var(--muted-strong);
+		font-size: 0.86rem;
+		font-weight: 850;
+	}
+
+	.watchtower-date-field__label {
+		color: inherit;
+		font: inherit;
+	}
+
+	.watchtower-date-field__control {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 2.5rem auto;
+		gap: 0.5rem;
+		align-items: stretch;
+	}
+
+	.watchtower-date-field__control input {
+		width: 100%;
+		min-height: 2.45rem;
+		border: 1px solid var(--border);
+		border-radius: 0.5rem;
+		padding: 0.55rem 0.65rem;
+		background: rgba(2, 8, 16, 0.76);
+		color: var(--text);
+		font: inherit;
+		font-weight: 650;
+	}
+
+	.watchtower-date-field__control input::-webkit-calendar-picker-indicator {
+		display: none;
+		opacity: 0;
+	}
+
+	.watchtower-date-field__control input::-webkit-inner-spin-button {
+		display: none;
+	}
+
+	.watchtower-date-field__picker,
+	.watchtower-date-field__clear {
+		min-height: 2.45rem;
+		border: 1px solid var(--border);
+		border-radius: 0.45rem;
+		background: rgba(0, 160, 255, 0.1);
+		color: var(--text);
+		font: inherit;
+		font-size: 0.82rem;
+		font-weight: 850;
+		cursor: pointer;
+	}
+
+	.watchtower-date-field__picker {
+		position: relative;
+		display: grid;
+		place-items: center;
+		padding: 0;
+	}
+
+	.watchtower-date-field__picker span {
+		width: 1.05rem;
+		height: 1.05rem;
+		border: 2px solid var(--accent-strong);
+		border-top-width: 0.34rem;
+		border-radius: 0.18rem;
+		box-shadow: inset 0 0.24rem 0 rgba(0, 160, 255, 0.25);
+	}
+
+	.watchtower-date-field__clear {
+		padding: 0 0.75rem;
+		background: rgba(255, 255, 255, 0.05);
+	}
+
+	.watchtower-date-field__picker:hover,
+	.watchtower-date-field__picker:focus-visible,
+	.watchtower-date-field__clear:hover,
+	.watchtower-date-field__clear:focus-visible {
+		border-color: rgba(0, 160, 255, 0.6);
+	}
+
+	.watchtower-date-field__picker:disabled,
+	.watchtower-date-field__clear:disabled {
+		cursor: not-allowed;
+		opacity: 0.62;
+	}
+
+	.watchtower-date-field__help {
+		margin: 0;
+		color: var(--muted-strong);
+		font-size: 0.8rem;
+		font-weight: 650;
+	}
+
+	.watchtower-date-field__error {
+		margin: 0;
+		color: #ffb8b8;
+		font-size: 0.8rem;
+		font-weight: 750;
+	}
+
+	@media (max-width: 520px) {
+		.watchtower-date-field__control {
+			grid-template-columns: minmax(0, 1fr) 2.5rem;
+		}
+
+		.watchtower-date-field__clear {
+			grid-column: 1 / -1;
+		}
+	}
+</style>

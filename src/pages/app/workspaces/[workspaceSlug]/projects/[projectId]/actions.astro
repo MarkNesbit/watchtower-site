@@ -2,35 +2,30 @@
 import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
 import DisabledActionHint from '../../../../../../components/app/DisabledActionHint.astro';
 import EmptyState from '../../../../../../components/app/EmptyState.astro';
+import DateField from '../../../../../../components/forms/DateField.astro';
 import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import { can } from '../../../../../../lib/permissions';
 import {
-	ACTION_DISPLAY_LABELS,
-	ACTION_REGISTER_PAGE_SIZES,
+	ACTION_REGISTER_LOAD_INCREMENT,
+	ACTION_REGISTER_SCOPE_LABELS,
 	ACTION_REGISTER_TAB_LABELS,
 	ACTION_REGISTER_TABS,
-	DEFAULT_ACTION_REGISTER_PAGE_SIZE,
 	actionConcernTone,
 	actionDueDateDisplay,
 	actionProfileName,
 	actionTimingDisplayLabel,
 	briefPreview,
 	createProjectAction,
-	deriveActionDistribution,
 	deriveActionTimingState,
+	filterProjectActionsByScope,
 	filterAndSortProjectActions,
-	getActionRegisterPageNumbers,
-	getProjectActionNeedsAttentionItems,
 	listEligibleActioners,
 	listProjectActions,
+	normaliseActionRegisterScope,
 	normaliseActionRegisterSort,
 	normaliseActionRegisterTab,
-	normaliseActionTimingFilter,
-	paginateProjectActions,
-	parseActionRegisterPage,
-	parseActionRegisterPageSize,
-	summariseProjectActions,
+	parseActionRegisterVisibleCount,
 	type ActionRegisterTab,
 	type ProjectAction,
 } from '../../../../../../lib/projectActions';
@@ -52,14 +47,6 @@ let actionsLoadError = '';
 let createError = '';
 let createValues = { brief: '', actionerId: '', dueDate: '' };
 let createModalOpen = false;
-
-const timingTone = (state) => {
-	if (state === 'overdue' || state === 'due_today') return 'red';
-	if (state === 'due_soon' || state === 'missing_due_date' || state === 'unassigned' || state === 'reassignment_required') return 'amber';
-	if (state === 'complete') return 'green';
-	if (state === 'cancelled') return 'grey';
-	return 'blue';
-};
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -150,84 +137,67 @@ const params = Astro.url.searchParams;
 const now = new Date();
 const selectedTab = normaliseActionRegisterTab(params.get('tab'));
 const defaultSort = normaliseActionRegisterSort(null, selectedTab);
-const selectedSort = params.has('sort') ? normaliseActionRegisterSort(params.get('sort'), selectedTab) : defaultSort;
 const selectedSearch = (params.get('q') ?? '').trim().slice(0, 120);
-const selectedTiming = normaliseActionTimingFilter(params.get('timing'));
-const selectedStatus = ACTION_DISPLAY_LABELS[params.get('status')] ? params.get('status') : '';
 const selectedActioner = (params.get('actioner') ?? '').trim();
 const selectedRaiser = (params.get('raiser') ?? '').trim();
-const selectedPage = parseActionRegisterPage(params.get('page'));
-const selectedPageSize = parseActionRegisterPageSize(params.get('pageSize'));
+const defaultScope = actorId && actions.some((action) => action.actioner_id === actorId) ? 'my' : 'project';
+const selectedScope = normaliseActionRegisterScope(params.get('scope'), defaultScope);
+const visibleCount = parseActionRegisterVisibleCount(params.get('visible'));
+const scopedActions = filterProjectActionsByScope(actions, selectedScope, actorId);
 const registerFilters = {
 	tab: selectedTab,
 	search: selectedSearch,
-	timing: selectedTiming,
-	status: selectedStatus,
 	actionerId: selectedActioner,
 	raiserId: selectedRaiser,
-	sort: selectedSort,
+	sort: defaultSort,
 };
-const filteredActions = filterAndSortProjectActions(actions, registerFilters, now);
-const paginated = paginateProjectActions(filteredActions, selectedPage, selectedPageSize);
-const pageNumbers = getActionRegisterPageNumbers(paginated.pagination.page, paginated.pagination.totalPages);
-const summary = summariseProjectActions(actions, now);
-const needsActionItems = getProjectActionNeedsAttentionItems(actions, 4, now);
-const distribution = deriveActionDistribution(actions);
-const chartRadius = 52;
-const circumference = 2 * Math.PI * chartRadius;
-let chartOffset = 0;
-const chartSegments = distribution.segments.filter((segment) => segment.count > 0).map((segment) => {
-	const arc = distribution.total ? (segment.count / distribution.total) * circumference : 0;
-	const item = { ...segment, dashArray: `${Math.max(0.75, arc - 2)} ${circumference}`, dashOffset: -(chartOffset + 1) };
-	chartOffset += arc;
-	return item;
-});
+const filteredActions = filterAndSortProjectActions(scopedActions, registerFilters, now);
+const visibleActions = filteredActions.slice(0, visibleCount);
+const hasMoreActions = visibleActions.length < filteredActions.length;
+const resultNoun = filteredActions.length === 1 ? 'action' : 'actions';
 const tabItems = ACTION_REGISTER_TABS.map((tab: ActionRegisterTab) => ({
 	id: tab,
 	label: ACTION_REGISTER_TAB_LABELS[tab],
-	count: actions.filter((action) => {
+	count: scopedActions.filter((action) => {
 		if (tab === 'outstanding') return ['open', 'returned_to_raiser', 'rejected_by_actioner', 'returned_to_actioner'].includes(action.status);
 		if (tab === 'awaiting_review') return action.status === 'submitted';
 		if (tab === 'complete') return action.status === 'complete';
 		if (tab === 'cancelled') return action.status === 'cancelled';
-		return true;
+		return false;
 	}).length,
 	active: selectedTab === tab,
 }));
-const actionerOptions = [...new Map(actions
+const actionerOptions = [...new Map(scopedActions
 	.filter((action) => action.actioner_id)
 	.map((action) => [action.actioner_id, actionProfileName(action.actioner, 'Workspace member')]))].sort((a, b) => a[1].localeCompare(b[1]));
-const raiserOptions = [...new Map(actions.map((action) => [action.raiser_id, actionProfileName(action.raiser, 'Workspace member')]))].sort((a, b) => a[1].localeCompare(b[1]));
-const hasUnassignedActions = actions.some((action) => !action.actioner_id);
+const raiserOptions = [...new Map(scopedActions.map((action) => [action.raiser_id, actionProfileName(action.raiser, 'Workspace member')]))].sort((a, b) => a[1].localeCompare(b[1]));
+const hasUnassignedActions = scopedActions.some((action) => !action.actioner_id);
 const buildRegisterPath = (overrides = {}) => {
 	const next = {
 		tab: selectedTab,
+		scope: selectedScope,
 		q: selectedSearch,
-		timing: selectedTiming,
-		status: selectedStatus,
 		actioner: selectedActioner,
 		raiser: selectedRaiser,
-		sort: selectedSort,
-		page: paginated.pagination.page,
-		pageSize: selectedPageSize,
+		visible: undefined,
 		...overrides,
 	};
 	const query = new URLSearchParams();
 	if (next.tab && next.tab !== 'outstanding') query.set('tab', next.tab);
+	if (next.scope && next.scope !== defaultScope) query.set('scope', next.scope);
 	if (next.q) query.set('q', next.q);
-	if (next.timing && next.timing !== 'all') query.set('timing', next.timing);
-	if (next.status) query.set('status', next.status);
 	if (next.actioner) query.set('actioner', next.actioner);
 	if (next.raiser) query.set('raiser', next.raiser);
-	if (next.sort && next.sort !== normaliseActionRegisterSort(null, next.tab)) query.set('sort', next.sort);
-	if (Number(next.page) > 1) query.set('page', String(next.page));
-	if (Number(next.pageSize) !== DEFAULT_ACTION_REGISTER_PAGE_SIZE) query.set('pageSize', String(next.pageSize));
+	if (Number(next.visible) > ACTION_REGISTER_LOAD_INCREMENT) query.set('visible', String(next.visible));
 	const qs = query.toString();
 	return qs ? `${registerPath}?${qs}` : registerPath;
 };
-const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstanding' : actionTimingDisplayLabel(summary.highestUrgency);
+const scopeItems = [
+	{ id: 'my', label: ACTION_REGISTER_SCOPE_LABELS.my, active: selectedScope === 'my', href: buildRegisterPath({ scope: 'my', visible: undefined }) },
+	{ id: 'project', label: ACTION_REGISTER_SCOPE_LABELS.project, active: selectedScope === 'project', href: buildRegisterPath({ scope: 'project', visible: undefined }) },
+];
 ---
-<AuthenticatedLayout title={project ? `Actions Register — ${project.name} | WatchTower` : 'Actions Register | WatchTower'}>
+<AuthenticatedLayout title={project ? `Actions — ${project.name} | WatchTower` : 'Actions | WatchTower'}>
 	<section class="actions-register-page" data-actions-register-route>
 		{project ? (
 			<>
@@ -235,14 +205,13 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 					workspaceName={workspaceName}
 					projectName={project.name}
 					projectRef={project.project_ref}
-					title="Actions Register"
-					description="A source-of-truth register of project assurance actions."
+					title="Actions"
+					description="Track project actions from creation to closure."
 					headingId="actions-register-heading"
 				/>
 
 				<ProjectContentPanel
-					title="Actions Register"
-					helper="Track and manage project actions from raise to closure. Timing, workflow status and owners are shown."
+					title="Action list"
 					headingId="actions-register-table-heading"
 				>
 					<div slot="action" class="actions-register-action">
@@ -266,194 +235,106 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 							<p>{actionsLoadError}</p>
 						</EmptyState>
 					) : (
-						<div class="actions-register-layout">
-							<div class="actions-register-main">
-								<section class="actions-summary" aria-label="Actions summary" data-actions-summary>
-									<article class="actions-summary-card actions-summary-card--blue">
-										<span aria-hidden="true">□</span>
-										<div><p>Open Actions</p><strong>{summary.openActions}</strong><small>Active project Actions</small></div>
-									</article>
-									<article class={`actions-summary-card ${summary.needAction > 0 ? 'actions-summary-card--amber' : 'actions-summary-card--neutral'}`}>
-										<span aria-hidden="true">!</span>
-										<div><p>Need Action</p><strong>{summary.needAction}</strong><small>Require attention</small></div>
-									</article>
-									<article class={`actions-summary-card actions-summary-card--${timingTone(summary.highestUrgency === 'none' ? 'open' : summary.highestUrgency)}`}>
-										<span aria-hidden="true">⌖</span>
-										<div><p>Highest urgency</p><strong>{highestUrgencyLabel}</strong><small>Across open Actions</small></div>
-									</article>
-								</section>
+						<div class="actions-register-main">
+							{actions.length === 0 ? (
+								<EmptyState title="No Actions have been recorded for this project yet." data-actions-empty-state>
+									<p>When Actions are raised, this register will show their reference, Actioner, due date and raiser.</p>
+									<p>{canCreateAction ? 'Create the first Action when assurance work needs to be tracked.' : 'Viewer access is read-only, so Action creation is unavailable for your role.'}</p>
+								</EmptyState>
+							) : (
+								<>
+									<nav class="actions-scope-switch" aria-label="Action scope" data-actions-scope-switch>
+										{scopeItems.map((scope) => (
+											<a class={`actions-scope-option${scope.active ? ' actions-scope-option--active' : ''}`} href={scope.href} aria-current={scope.active ? 'page' : undefined} data-actions-scope={scope.id}>{scope.label}</a>
+										))}
+									</nav>
 
-								{actions.length === 0 ? (
-									<EmptyState title="No Actions have been recorded for this project yet." data-actions-empty-state>
-										<p>When Actions are raised, this register will show their reference, Actioner, workflow, due date and raiser.</p>
-										<p>{canCreateAction ? 'Create the first Action when assurance work needs to be tracked.' : 'Viewer access is read-only, so Action creation is unavailable for your role.'}</p>
-									</EmptyState>
-								) : (
-									<>
-										<nav class="actions-tabs" aria-label="Actions Register views" data-actions-tabs>
-											{tabItems.map((tab) => (
-												<a class={`actions-tab${tab.active ? ' actions-tab--active' : ''}`} href={buildRegisterPath({ tab: tab.id, sort: normaliseActionRegisterSort(null, tab.id), page: 1 })} aria-current={tab.active ? 'page' : undefined} data-actions-tab={tab.id}>
-													<span>{tab.label}</span>
-													<span>{tab.count}</span>
-												</a>
-											))}
-										</nav>
+									<nav class="actions-tabs" aria-label="Actions workflow views" data-actions-tabs>
+										{tabItems.map((tab) => (
+											<a class={`actions-tab${tab.active ? ' actions-tab--active' : ''}`} href={buildRegisterPath({ tab: tab.id, visible: undefined })} aria-current={tab.active ? 'page' : undefined} data-actions-tab={tab.id}>
+												<span>{tab.label}</span>
+												<span>{tab.count}</span>
+											</a>
+										))}
+									</nav>
 
-										<form class="actions-toolbar" method="get" action={registerPath} data-actions-controls>
-											<input type="hidden" name="tab" value={selectedTab} />
-											<input type="hidden" name="pageSize" value={selectedPageSize} />
-											<label><span>Search actions</span><input type="search" name="q" value={selectedSearch} placeholder="Search actions..." autocomplete="off" /></label>
-											<label><span>Timing</span><select name="timing">
-												<option value="all" selected={selectedTiming === 'all'}>All timing</option>
-												{['open', 'due_soon', 'due_today', 'missing_due_date', 'overdue', 'unassigned', 'reassignment_required', 'complete', 'cancelled'].map((state) => (
-													<option value={state} selected={selectedTiming === state}>{actionTimingDisplayLabel(state)}</option>
-												))}
-											</select></label>
-											<label><span>Workflow status</span><select name="status">
-												<option value="" selected={!selectedStatus}>All statuses</option>
-												{Object.entries(ACTION_DISPLAY_LABELS).map(([status, label]) => <option value={status} selected={selectedStatus === status}>{label}</option>)}
-											</select></label>
-											<label><span>Actioner</span><select name="actioner">
-												<option value="" selected={!selectedActioner}>All actioners</option>
-												{hasUnassignedActions && <option value="unassigned" selected={selectedActioner === 'unassigned'}>Unassigned</option>}
-												{actionerOptions.map(([id, label]) => <option value={id} selected={selectedActioner === id}>{label}</option>)}
-											</select></label>
-											<label><span>Raiser</span><select name="raiser">
-												<option value="" selected={!selectedRaiser}>All raisers</option>
-												{raiserOptions.map(([id, label]) => <option value={id} selected={selectedRaiser === id}>{label}</option>)}
-											</select></label>
-											<label><span>Sort</span><select name="sort">
-												<option value="highest_urgency" selected={selectedSort === 'highest_urgency'}>Highest urgency</option>
-												<option value="due_date_earliest" selected={selectedSort === 'due_date_earliest'}>Due date earliest</option>
-												<option value="due_date_latest" selected={selectedSort === 'due_date_latest'}>Due date latest</option>
-												<option value="recently_updated" selected={selectedSort === 'recently_updated'}>Most recently updated</option>
-												<option value="oldest_updated" selected={selectedSort === 'oldest_updated'}>Oldest updated</option>
-												<option value="action_ref" selected={selectedSort === 'action_ref'}>Action reference</option>
-												<option value="actioner" selected={selectedSort === 'actioner'}>Actioner</option>
-											</select></label>
-											<div class="actions-toolbar__buttons">
-												<button class="button button--secondary" type="submit">Apply</button>
-												<a class="text-link" href={registerPath}>Reset filters</a>
-											</div>
-										</form>
-
-										<p class="actions-filter-status" role="status">{filteredActions.length} of {actions.length} Actions shown</p>
-
-										{filteredActions.length === 0 ? (
-											<EmptyState title="No Actions match the current filters." data-actions-filter-empty-state>
-												<p>Adjust the selected tab, search, filters or sort to bring matching Actions back into view.</p>
-												<a class="button button--secondary" href={registerPath}>Reset filters</a>
-											</EmptyState>
-										) : (
-											<>
-												<div class="actions-table-scroll">
-													<table class="simple-table actions-table" data-actions-table>
-														<thead>
-															<tr>
-																<th scope="col">Ref</th>
-																<th scope="col">Action</th>
-																<th scope="col">Actioner</th>
-																<th scope="col">Workflow</th>
-																<th scope="col">Due date</th>
-																<th scope="col">Raiser</th>
-															</tr>
-														</thead>
-														<tbody>
-															{paginated.items.map((action) => {
-																const timing = deriveActionTimingState(action, now);
-																const concernTone = actionConcernTone(action, now);
-																const dueDisplay = actionDueDateDisplay(action, now);
-																const detailHref = buildProjectActionPath(workspaceSlug ?? '', project.slug, action.id);
-																return (
-																	<tr>
-																		<td><a class={`actions-ref-pill actions-ref-pill--${concernTone}`} href={detailHref} aria-label={`Open ${action.action_ref} details`}>{action.action_ref}</a></td>
-																		<td><a class="actions-title" href={detailHref} title={action.brief}>{briefPreview(action.brief)}</a></td>
-																		<td><span class={action.actioner_id && !action.actioner?.isAssignable ? 'actions-person actions-person--warning' : 'actions-person'}>{action.actioner_id ? actionProfileName(action.actioner, 'Workspace member') : 'Unassigned'}</span></td>
-																		<td><span class={`actions-pill actions-pill--workflow actions-pill--${action.status}`}>{ACTION_DISPLAY_LABELS[action.status]}</span></td>
-																		<td><span class={`actions-due actions-due--${dueDisplay.tone}`} title={actionTimingDisplayLabel(timing)}>{dueDisplay.label}</span></td>
-																		<td>{actionProfileName(action.raiser, 'Workspace member')}</td>
-																	</tr>
-																);
-															})}
-														</tbody>
-													</table>
-												</div>
-												<div class="actions-pagination">
-													<form method="get" action={registerPath}>
-														{selectedTab !== 'outstanding' && <input type="hidden" name="tab" value={selectedTab} />}
-														{selectedSearch && <input type="hidden" name="q" value={selectedSearch} />}
-														{selectedTiming !== 'all' && <input type="hidden" name="timing" value={selectedTiming} />}
-														{selectedStatus && <input type="hidden" name="status" value={selectedStatus} />}
-														{selectedActioner && <input type="hidden" name="actioner" value={selectedActioner} />}
-														{selectedRaiser && <input type="hidden" name="raiser" value={selectedRaiser} />}
-														{selectedSort !== defaultSort && <input type="hidden" name="sort" value={selectedSort} />}
-														<label><span>Show</span><select name="pageSize" aria-label="Actions per page">
-															{ACTION_REGISTER_PAGE_SIZES.map((size) => <option value={size} selected={paginated.pagination.pageSize === size}>{size}</option>)}
-														</select></label>
-														<button class="button button--secondary" type="submit">Apply</button>
-														<span>{paginated.pagination.startItem}–{paginated.pagination.endItem} of {paginated.pagination.totalItems} Actions</span>
-													</form>
-													<nav aria-label="Actions Register pages">
-														{paginated.pagination.hasPrevious ? <a class="actions-page-link" href={buildRegisterPath({ page: paginated.pagination.page - 1 })}>Previous</a> : <button class="actions-page-link" type="button" disabled>Previous</button>}
-														{pageNumbers.map((pageNumber) => pageNumber === paginated.pagination.page ? <span class="actions-page-link actions-page-link--current" aria-current="page">{pageNumber}</span> : <a class="actions-page-link" href={buildRegisterPath({ page: pageNumber })}>{pageNumber}</a>)}
-														{paginated.pagination.hasNext ? <a class="actions-page-link" href={buildRegisterPath({ page: paginated.pagination.page + 1 })}>Next</a> : <button class="actions-page-link" type="button" disabled>Next</button>}
-													</nav>
-												</div>
-											</>
-										)}
-									</>
-								)}
-							</div>
-
-							<div class="actions-side-panels">
-								<aside class="actions-side-panel" aria-labelledby="actions-needs-heading" data-actions-needs-action-panel>
-									<h3 id="actions-needs-heading">Needs action</h3>
-									{needsActionItems.length === 0 ? <p>No project Actions currently require attention.</p> : (
-										<ul>
-											{needsActionItems.map((item) => (
-												<li>
-													<a href={buildProjectActionPath(workspaceSlug ?? '', project.slug, item.actionId)}>
-														<strong>{item.label}</strong>
-														<span>{item.actionRef} · {briefPreview(item.brief, 58)}</span>
-														<small>{item.reason}</small>
-													</a>
-												</li>
-											))}
-										</ul>
-									)}
-									<a class="text-link" href={buildRegisterPath({ tab: 'all', timing: '', status: '', sort: 'highest_urgency', page: 1 })}>View all need action items</a>
-								</aside>
-
-								<aside class="actions-side-panel actions-distribution" aria-labelledby="actions-distribution-heading" data-actions-distribution>
-									<h3 id="actions-distribution-heading">Action distribution</h3>
-									<p>Breakdown of open and closed Actions by status.</p>
-									<p class="visually-hidden">{distribution.summary}</p>
-									{distribution.total === 0 ? <p>No Actions to chart.</p> : (
-										<div class="actions-distribution__body">
-											<div class="actions-donut" aria-hidden="true">
-												<svg viewBox="0 0 140 140" focusable="false">
-													<circle class="actions-donut__track" cx="70" cy="70" r={chartRadius}></circle>
-													{chartSegments.map((segment) => <circle class={`actions-donut__segment actions-donut__segment--${segment.key}`} cx="70" cy="70" r={chartRadius} stroke-dasharray={segment.dashArray} stroke-dashoffset={segment.dashOffset}></circle>)}
-												</svg>
-												<div><strong>{distribution.total}</strong><span>Total</span></div>
-											</div>
-											<ul>
-												{distribution.segments.map((segment) => (
-													<li><span><i class={`actions-swatch actions-swatch--${segment.key}`}></i>{segment.label}</span><strong>{segment.count} <small>({segment.percentage}%)</small></strong></li>
-												))}
-											</ul>
+									<form class="actions-toolbar" method="get" action={registerPath} data-actions-controls>
+										{selectedTab !== 'outstanding' && <input type="hidden" name="tab" value={selectedTab} />}
+										{selectedScope !== defaultScope && <input type="hidden" name="scope" value={selectedScope} />}
+										<label><span>Search actions</span><input type="search" name="q" value={selectedSearch} placeholder="Search actions..." autocomplete="off" /></label>
+										<label><span>Actioner</span><select name="actioner">
+											<option value="" selected={!selectedActioner}>All actioners</option>
+											{hasUnassignedActions && <option value="unassigned" selected={selectedActioner === 'unassigned'}>Unassigned</option>}
+											{actionerOptions.map(([id, label]) => <option value={id} selected={selectedActioner === id}>{label}</option>)}
+										</select></label>
+										<label><span>Raiser</span><select name="raiser">
+											<option value="" selected={!selectedRaiser}>All raisers</option>
+											{raiserOptions.map(([id, label]) => <option value={id} selected={selectedRaiser === id}>{label}</option>)}
+										</select></label>
+										<div class="actions-toolbar__buttons">
+											<button class="button button--secondary" type="submit">Apply</button>
+											<a class="text-link" href={buildRegisterPath({ q: '', actioner: '', raiser: '', visible: undefined })}>Reset</a>
 										</div>
+									</form>
+
+									<p class="actions-filter-status" role="status">Showing {visibleActions.length} of {filteredActions.length} {resultNoun}</p>
+
+									{filteredActions.length === 0 ? (
+										<EmptyState title="No Actions match the current filters." data-actions-filter-empty-state>
+											<p>Adjust the selected search, Actioner or Raiser filter to bring matching Actions back into view.</p>
+											<a class="button button--secondary" href={buildRegisterPath({ q: '', actioner: '', raiser: '', visible: undefined })}>Reset</a>
+										</EmptyState>
+									) : (
+										<>
+											<div class="actions-table-scroll">
+												<table class="simple-table actions-table" data-actions-table>
+													<thead>
+														<tr>
+															<th scope="col">Ref</th>
+															<th scope="col">Action</th>
+															<th scope="col">Actioner</th>
+															<th scope="col">Due date</th>
+															<th scope="col">Raiser</th>
+														</tr>
+													</thead>
+													<tbody>
+														{visibleActions.map((action) => {
+															const timing = deriveActionTimingState(action, now);
+															const concernTone = actionConcernTone(action, now);
+															const dueDisplay = actionDueDateDisplay(action, now);
+															const detailHref = buildProjectActionPath(workspaceSlug ?? '', project.slug, action.id);
+															return (
+																<tr>
+																	<td><a class={`actions-ref-pill actions-ref-pill--${concernTone}`} href={detailHref} aria-label={`Open ${action.action_ref} details. Signal: ${actionTimingDisplayLabel(timing)}`}>{action.action_ref}</a></td>
+																	<td><a class="actions-title" href={detailHref} title={action.brief}>{briefPreview(action.brief)}</a></td>
+																	<td><span class={action.actioner_id && !action.actioner?.isAssignable ? 'actions-person actions-person--warning' : 'actions-person'}>{action.actioner_id ? actionProfileName(action.actioner, 'Workspace member') : 'Unassigned'}</span></td>
+																	<td><span class={`actions-due actions-due--${dueDisplay.tone}`} title={actionTimingDisplayLabel(timing)}>{dueDisplay.label}</span></td>
+																	<td>{actionProfileName(action.raiser, 'Workspace member')}</td>
+																</tr>
+															);
+														})}
+													</tbody>
+												</table>
+											</div>
+
+											{hasMoreActions && (
+												<form class="actions-load-more" method="get" action={registerPath} data-actions-load-more>
+													{selectedTab !== 'outstanding' && <input type="hidden" name="tab" value={selectedTab} />}
+													{selectedScope !== defaultScope && <input type="hidden" name="scope" value={selectedScope} />}
+													{selectedSearch && <input type="hidden" name="q" value={selectedSearch} />}
+													{selectedActioner && <input type="hidden" name="actioner" value={selectedActioner} />}
+													{selectedRaiser && <input type="hidden" name="raiser" value={selectedRaiser} />}
+													<input type="hidden" name="visible" value={visibleCount + ACTION_REGISTER_LOAD_INCREMENT} />
+													<button class="button button--secondary" type="submit" data-actions-load-more-button>Load 20 more</button>
+												</form>
+											)}
+										</>
 									)}
-								</aside>
-							</div>
+								</>
+							)}
 						</div>
 					)}
 
-					<div class="actions-guidance">
-						<div><strong>About Actions</strong><p>Actions are specific pieces of work raised to address project concerns. The raiser remains responsible for closure.</p></div>
-						<div><strong>Need to raise an Action?</strong><p>If you do not have edit rights, contact the Project Owner, Project Manager or Delivery Manager.</p></div>
-						<div><strong>Learn more</strong><p>Action guidance will be expanded as the workflow matures.</p></div>
-					</div>
 					<a class="text-link actions-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
 				</ProjectContentPanel>
 
@@ -474,22 +355,15 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 							<option value="" selected={!createValues.actionerId}>Unassigned</option>
 							{eligibleActioners.map((person) => <option value={person.id} selected={createValues.actionerId === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
 						</select></label>
-						<div class="action-create-form__field action-date-field">
-							<label for="action-create-due-date">Due date</label>
-							<div class="action-date-control">
-								<input
-									id="action-create-due-date"
-									type="date"
-									name="due_date"
-									value={createValues.dueDate}
-									aria-describedby="action-create-due-date-help"
-									data-action-date-input
-								/>
-								<button class="action-date-picker-button" type="button" data-action-date-picker aria-label="Open due date calendar"></button>
-								<button class="action-date-clear-button" type="button" data-action-date-clear>Clear</button>
-							</div>
-							<p class="action-field-help" id="action-create-due-date-help">No due date is allowed. Actions without a due date will appear as Amber attention.</p>
-						</div>
+						<DateField
+							id="action-create-due-date"
+							name="due_date"
+							label="Due date"
+							value={createValues.dueDate}
+							helperText="Actions with no due date or Actioner will display as Amber."
+							pickerLabel="Choose due date"
+							clearLabel="Clear due date"
+						/>
 						<div class="action-create-form__footer">
 							<button class="button button--secondary" type="button" data-action-create-cancel>Cancel</button>
 							<button class="button button--primary" type="submit" data-action-create-submit>Create Action</button>
@@ -512,9 +386,6 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 	const dialog = document.querySelector('[data-action-create-dialog]');
 	const openButton = document.querySelector('[data-action-create-open]');
 	const closeButtons = document.querySelectorAll('[data-action-create-close], [data-action-create-cancel]');
-	const dateInput = document.querySelector('[data-action-date-input]');
-	const datePickerButton = document.querySelector('[data-action-date-picker]');
-	const dateClearButton = document.querySelector('[data-action-date-clear]');
 	let lastTrigger = null;
 	const setScrollLocked = (locked) => {
 		document.documentElement.classList.toggle('modal-scroll-locked', locked);
@@ -541,29 +412,19 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		setScrollLocked(false);
 		lastTrigger?.focus();
 	});
-	const openNativeDatePicker = () => {
-		if (!(dateInput instanceof HTMLInputElement)) return;
-		dateInput.focus();
-		if (typeof dateInput.showPicker === 'function') {
-			try {
-				dateInput.showPicker();
-			} catch {
-				// The focused native date input remains usable when showPicker is not allowed.
-			}
-		}
-	};
-	dateInput?.addEventListener('click', openNativeDatePicker);
-	datePickerButton?.addEventListener('click', openNativeDatePicker);
-	dateClearButton?.addEventListener('click', () => {
-		if (!(dateInput instanceof HTMLInputElement)) return;
-		dateInput.value = '';
-		dateInput.focus();
-	});
 	dialog?.querySelector('form')?.addEventListener('submit', (event) => {
 		const submitButton = event.currentTarget?.querySelector('[data-action-create-submit]');
 		if (submitButton) {
 			submitButton.disabled = true;
 			submitButton.textContent = 'Creating...';
+		}
+	});
+	document.querySelector('[data-actions-load-more]')?.addEventListener('submit', (event) => {
+		const submitButton = event.currentTarget?.querySelector('[data-actions-load-more-button]');
+		if (submitButton) {
+			submitButton.disabled = true;
+			submitButton.setAttribute('aria-busy', 'true');
+			submitButton.textContent = 'Loading...';
 		}
 	});
 </script>
@@ -580,63 +441,33 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		justify-items: end;
 		gap: 0.4rem;
 	}
-	.actions-register-layout {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) clamp(19rem, 23vw, 22rem);
-		gap: 1rem;
-		align-items: start;
-	}
 	.actions-register-main {
 		display: grid;
 		gap: 1rem;
 		min-width: 0;
 		overflow: hidden;
 	}
-	.actions-side-panels {
-		display: grid;
-		gap: 1rem;
-		min-width: 0;
-	}
-	.actions-summary {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 0.8rem;
-	}
-	.actions-summary-card {
-		display: flex;
-		align-items: center;
-		gap: 1rem;
-		min-height: 6.5rem;
+	.actions-scope-switch {
+		display: inline-flex;
+		width: fit-content;
+		max-width: 100%;
 		border: 1px solid var(--border);
-		border-radius: 0.75rem;
-		padding: 1rem;
-		background: rgba(5, 15, 28, 0.58);
+		border-radius: 0.65rem;
+		padding: 0.2rem;
+		background: rgba(2, 8, 16, 0.62);
 	}
-	.actions-summary-card > span {
-		display: grid;
-		place-items: center;
-		width: 3.2rem;
-		height: 3.2rem;
-		border-radius: 50%;
-		border: 2px solid currentColor;
-		font-weight: 900;
-	}
-	.actions-summary-card p,
-	.actions-summary-card small {
-		margin: 0;
+	.actions-scope-option {
+		border-radius: 0.45rem;
+		padding: 0.5rem 0.75rem;
 		color: var(--muted-strong);
+		text-decoration: none;
+		font-weight: 850;
+		white-space: nowrap;
 	}
-	.actions-summary-card strong {
-		display: block;
-		margin: 0.1rem 0;
-		font-size: 1.7rem;
+	.actions-scope-option--active {
+		background: rgba(0, 160, 255, 0.14);
+		color: var(--text);
 	}
-	.actions-summary-card--blue { color: var(--accent-strong); border-color: rgba(0, 160, 255, 0.42); }
-	.actions-summary-card--amber { color: #ffb020; border-color: rgba(255, 176, 32, 0.5); }
-	.actions-summary-card--red { color: #ff5b5b; border-color: rgba(255, 91, 91, 0.5); }
-	.actions-summary-card--green { color: #4cd47e; border-color: rgba(76, 212, 126, 0.42); }
-	.actions-summary-card--grey,
-	.actions-summary-card--neutral { color: var(--muted-strong); }
 	.actions-tabs {
 		display: flex;
 		flex-wrap: wrap;
@@ -667,7 +498,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 	}
 	.actions-toolbar {
 		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-template-columns: minmax(14rem, 2fr) minmax(10rem, 1fr) minmax(10rem, 1fr) auto;
 		gap: 0.75rem;
 		align-items: end;
 	}
@@ -729,7 +560,7 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		text-decoration: none;
 		border-color: currentColor;
 	}
-	.actions-ref-pill--blue { border-color: rgba(0, 160, 255, 0.45); color: var(--accent-strong); background: rgba(0, 160, 255, 0.1); }
+	.actions-ref-pill--neutral { border-color: rgba(159, 174, 194, 0.32); color: var(--muted-strong); background: rgba(159, 174, 194, 0.08); }
 	.actions-ref-pill--amber { border-color: rgba(255, 176, 32, 0.55); color: #ffb020; background: rgba(255, 176, 32, 0.1); }
 	.actions-ref-pill--red { border-color: rgba(255, 91, 91, 0.55); color: #ff5b5b; background: rgba(255, 91, 91, 0.1); }
 	.actions-ref-pill--green { border-color: rgba(76, 212, 126, 0.45); color: #4cd47e; background: rgba(76, 212, 126, 0.1); }
@@ -755,137 +586,20 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		font-weight: 850;
 		white-space: nowrap;
 	}
-	.actions-pill--blue { border-color: rgba(0, 160, 255, 0.45); color: var(--accent-strong); background: rgba(0, 160, 255, 0.1); }
+	.actions-pill--neutral { border-color: rgba(159, 174, 194, 0.32); color: var(--muted-strong); background: rgba(159, 174, 194, 0.08); }
 	.actions-pill--amber { border-color: rgba(255, 176, 32, 0.55); color: #ffb020; background: rgba(255, 176, 32, 0.1); }
 	.actions-pill--red { border-color: rgba(255, 91, 91, 0.55); color: #ff5b5b; background: rgba(255, 91, 91, 0.1); }
 	.actions-pill--green { border-color: rgba(76, 212, 126, 0.45); color: #4cd47e; background: rgba(76, 212, 126, 0.1); }
 	.actions-pill--grey { border-color: rgba(159, 174, 194, 0.32); color: var(--muted-strong); background: rgba(159, 174, 194, 0.08); }
 	.actions-due--red { color: #ff5b5b; font-weight: 850; }
 	.actions-due--amber { color: #ffb020; font-weight: 850; }
-	.actions-due--blue { color: var(--accent-strong); font-weight: 850; }
+	.actions-due--neutral { color: var(--muted-strong); font-weight: 850; }
 	.actions-due--green { color: #4cd47e; font-weight: 850; }
 	.actions-due--grey { color: var(--muted-strong); font-weight: 850; }
-	.actions-pagination {
+	.actions-load-more {
 		display: flex;
-		justify-content: space-between;
-		gap: 1rem;
-		align-items: center;
-	}
-	.actions-pagination form,
-	.actions-pagination nav {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-	.actions-pagination label {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-	}
-	.actions-page-link {
-		border: 1px solid var(--border);
-		border-radius: 0.45rem;
-		padding: 0.45rem 0.7rem;
-		background: rgba(5, 15, 28, 0.58);
-		color: var(--text);
-		text-decoration: none;
-	}
-	.actions-page-link--current {
-		border-color: rgba(0, 160, 255, 0.55);
-		color: var(--accent-strong);
-	}
-	.actions-side-panel {
-		border: 1px solid var(--border);
-		border-radius: 0.75rem;
-		padding: 1rem;
-		background: rgba(5, 15, 28, 0.58);
-	}
-	.actions-side-panel h3 {
-		margin: 0 0 0.35rem;
-	}
-	.actions-side-panel ul {
-		display: grid;
-		gap: 0.65rem;
-		margin: 1rem 0;
-		padding: 0;
-		list-style: none;
-	}
-	.actions-side-panel li a {
-		display: grid;
-		gap: 0.2rem;
-		border: 1px solid var(--border);
-		border-radius: 0.55rem;
-		padding: 0.75rem;
-		color: var(--text);
-		text-decoration: none;
-	}
-	.actions-side-panel small {
-		color: #ffb020;
-	}
-	.actions-distribution__body {
-		display: grid;
-		grid-template-columns: 9rem 1fr;
-		gap: 1rem;
-		align-items: center;
-	}
-	.actions-donut {
-		position: relative;
-		display: grid;
-		place-items: center;
-	}
-	.actions-donut svg {
-		width: 9rem;
-		transform: rotate(-90deg);
-	}
-	.actions-donut__track,
-	.actions-donut__segment {
-		fill: none;
-		stroke-width: 18;
-	}
-	.actions-donut__track { stroke: rgba(255, 255, 255, 0.08); }
-	.actions-donut__segment--open { stroke: #179cf0; }
-	.actions-donut__segment--awaiting_review { stroke: #ffb020; }
-	.actions-donut__segment--complete { stroke: #4cd47e; }
-	.actions-donut__segment--cancelled { stroke: #ef5350; }
-	.actions-donut > div {
-		position: absolute;
-		text-align: center;
-		text-transform: uppercase;
-	}
-	.actions-donut strong {
-		display: block;
-		font-size: 1.35rem;
-	}
-	.actions-distribution li {
-		display: flex;
-		justify-content: space-between;
-		gap: 0.75rem;
-	}
-	.actions-distribution li span {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.45rem;
-	}
-	.actions-swatch {
-		width: 0.65rem;
-		height: 0.65rem;
-		border-radius: 0.2rem;
-		background: var(--accent-strong);
-	}
-	.actions-swatch--awaiting_review { background: #ffb020; }
-	.actions-swatch--complete { background: #4cd47e; }
-	.actions-swatch--cancelled { background: #ef5350; }
-	.actions-guidance {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 1rem;
-		border-top: 1px solid var(--border);
-		margin-top: 1.2rem;
-		padding-top: 1rem;
-	}
-	.actions-guidance p {
-		margin: 0.25rem 0 0;
-		color: var(--muted-strong);
+		justify-content: center;
+		padding-top: 0.25rem;
 	}
 	.actions-back-link {
 		display: inline-flex;
@@ -928,64 +642,6 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		background: transparent;
 		color: var(--text);
 	}
-	.action-create-form__field {
-		display: grid;
-		gap: 0.3rem;
-		color: var(--muted-strong);
-		font-size: 0.85rem;
-		font-weight: 800;
-	}
-	.action-date-control {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 2.5rem auto;
-		gap: 0.5rem;
-		align-items: stretch;
-	}
-	.action-date-control input::-webkit-calendar-picker-indicator {
-		opacity: 1;
-		cursor: pointer;
-		filter: invert(74%) sepia(93%) saturate(2682%) hue-rotate(164deg) brightness(101%) contrast(104%);
-	}
-	.action-date-picker-button,
-	.action-date-clear-button {
-		border: 1px solid var(--border);
-		border-radius: 0.45rem;
-		background: rgba(0, 160, 255, 0.1);
-		color: var(--text);
-		font: inherit;
-		font-size: 0.82rem;
-		font-weight: 850;
-		cursor: pointer;
-	}
-	.action-date-picker-button {
-		position: relative;
-		min-height: 2.35rem;
-	}
-	.action-date-picker-button::before {
-		content: "";
-		position: absolute;
-		inset: 0.55rem 0.65rem 0.5rem;
-		border: 2px solid var(--accent-strong);
-		border-top-width: 0.42rem;
-		border-radius: 0.18rem;
-		box-shadow: inset 0 0.28rem 0 rgba(0, 160, 255, 0.25);
-	}
-	.action-date-clear-button {
-		padding: 0 0.75rem;
-		background: rgba(255, 255, 255, 0.05);
-	}
-	.action-date-picker-button:hover,
-	.action-date-picker-button:focus-visible,
-	.action-date-clear-button:hover,
-	.action-date-clear-button:focus-visible {
-		border-color: rgba(0, 160, 255, 0.6);
-	}
-	.action-field-help {
-		margin: 0;
-		color: var(--muted-strong);
-		font-size: 0.8rem;
-		font-weight: 650;
-	}
 	.action-form-error {
 		border: 1px solid rgba(255, 91, 91, 0.45);
 		border-radius: 0.55rem;
@@ -994,10 +650,6 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		color: #ffb8b8;
 	}
 	@media (max-width: 1180px) {
-		.actions-register-layout,
-		.actions-guidance {
-			grid-template-columns: 1fr;
-		}
 		.actions-toolbar {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
@@ -1006,14 +658,13 @@ const highestUrgencyLabel = summary.highestUrgency === 'none' ? 'None outstandin
 		}
 	}
 	@media (max-width: 720px) {
-		.actions-summary,
-		.actions-distribution__body,
-		.actions-toolbar,
-		.action-date-control {
+		.actions-scope-switch,
+		.actions-toolbar {
 			grid-template-columns: 1fr;
 		}
-		.actions-pagination {
+		.actions-scope-switch {
 			display: grid;
+			width: 100%;
 		}
 	}
 </style>
