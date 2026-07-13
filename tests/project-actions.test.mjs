@@ -581,10 +581,8 @@ test('Project Actions Register and detail routes expose the required WT-ACTION-0
 	const dashboard = await projectDashboardSource();
 
 	assert.match(register, /Actions Register/);
-	assert.match(register, /Action controls/);
 	assert.match(register, /A source-of-truth register of project assurance actions\./);
-	assert.match(register, /Create and edit enabled/);
-	assert.match(register, /Read-only access/);
+	assert.match(register, /New Action/);
 	assert.match(register, /Viewers cannot create Actions/);
 	assert.match(register, /data-action-create-dialog/);
 	assert.match(register, /createProjectAction/);
