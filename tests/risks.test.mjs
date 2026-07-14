@@ -3554,9 +3554,9 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.doesNotMatch(route, /title="Project risks"/);
 	assert.doesNotMatch(route, /helper="Scan all project risks in one register\. Exposure, action state and lifecycle\/status are shown separately\."/);
 	assert.match(route, /class="content-card risk-register-panel"/);
-	assert.match(route, /class="risk-register-panel__top-actions"/);
-	assert.match(route, /<section class="content-card risk-register-panel" aria-label="Project risks">\s*<div class="risk-register-panel__top-actions">/);
-	assert.match(route, /<div class="risk-register-panel__top-actions">[\s\S]*risk-register-back-link[\s\S]*Risk Suggestions[\s\S]*data-risk-create-action/);
+	assert.match(route, /slot="actions" class="risk-register-hero-actions"/);
+	assert.match(route, /<ProjectPageHero[\s\S]*<div slot="actions" class="risk-register-hero-actions">[\s\S]*risk-register-back-link[\s\S]*Risk Suggestions[\s\S]*data-risk-create-action[\s\S]*<\/ProjectPageHero>/);
+	assert.doesNotMatch(route, /<section class="content-card risk-register-panel" aria-label="Project risks">\s*<div[^>]*actions/);
 	assert.match(route, /\{risksLoadError \? \([\s\S]*<a class="button button--secondary risk-register-back-link"/);
 	assert.match(route, /<a class="button button--secondary risk-register-back-link"[^>]*>Back to Project<\/a>\s*<\/section>/);
 	assert.equal((route.match(/Back to Project/g) ?? []).length, 2);

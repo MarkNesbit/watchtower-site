@@ -19,6 +19,7 @@ const {
 	inlineContext = false,
 } = Astro.props;
 const hasTitleSlot = Astro.slots.has('title');
+const hasActionsSlot = Astro.slots.has('actions');
 ---
 
 <section class="content-card project-page-hero" aria-labelledby={headingId}>
@@ -51,6 +52,11 @@ const hasTitleSlot = Astro.slots.has('title');
 	<div class="project-page-hero__mark" aria-hidden="true">
 		<img src="/images/watchtower-logo.svg" alt="" loading="lazy" />
 	</div>
+	{hasActionsSlot && (
+		<div class="project-page-hero__actions">
+			<slot name="actions" />
+		</div>
+	)}
 </section>
 
 <style>
@@ -143,10 +149,29 @@ const hasTitleSlot = Astro.slots.has('title');
 		width: min(100%, 11.5rem);
 	}
 
+	.project-page-hero__actions {
+		position: absolute;
+		right: clamp(1.1rem, 2.4vw, 1.5rem);
+		bottom: clamp(1.1rem, 2.4vw, 1.5rem);
+		left: clamp(1.1rem, 2.4vw, 1.5rem);
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
 	@media (max-width: 760px) {
 		.project-page-hero {
 			grid-template-columns: 1fr;
 			min-height: auto;
+		}
+
+		.project-page-hero__actions {
+			position: relative;
+			inset: auto;
+			flex-direction: column;
+			align-items: stretch;
 		}
 
 		.project-page-hero__mark {
