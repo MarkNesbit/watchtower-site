@@ -135,6 +135,8 @@ Search covers Action reference, brief, Actioner name and raiser name. Filters co
 
 The register initially shows 20 matching Actions and exposes a Load 20 more control while further rows exist. Changing scope, tab or filters resets the visible set to the first 20.
 
+The Action reference pill and title open the Action detail modal on the same register route. The modal is query-backed so the current scope, tab and filters are preserved. The Action reference pill uses the Action attention state: Red for overdue or due today, Amber for due soon, no due date or no Actioner, Neutral for future Outstanding Actions outside the warning window and Awaiting review unless a stronger rule applies, Green for Complete, and Grey for Cancelled. The pill always includes the Action reference text; colour is not the only indicator.
+
 Sorting is fixed by workflow tab: Outstanding shows overdue first, then due today, then future due dates nearest first, then no due date; Awaiting review uses `submitted_at` oldest first with `updated_at` as fallback; Complete uses `completed_at` newest first with `updated_at` as fallback; Cancelled uses `cancelled_at` newest first with `updated_at` as fallback.
 
 ## Timing Rules
@@ -165,7 +167,19 @@ Owner, Admin and Member can create Actions from the register using the New Actio
 
 The source defaults to Project. Arbitrary source linking is not exposed in this slice. Viewer sees the New Action button disabled with read-only guidance, and server-side RPC enforcement remains the security boundary.
 
-Successful creation redirects to the new Action detail page. Form values are preserved after validation or server errors.
+Successful creation redirects back to the Actions Register with the new Action detail modal open. Form values are preserved after validation or server errors.
+
+## Detail Modal and Linked Records
+
+The register detail modal shows the Action reference pill, workflow group, concise title, raised-by/date and Actioner/due-date metadata, the full Action brief, linked record context where present, latest progress update and role-sensitive workflow controls. The full brief appears once, preserves line breaks and is constrained to an internal scroll area so long pasted content does not expand the entire modal.
+
+The `Linked to` section appears only when the Action has a formal relationship to another Watchtower record. Direct project Actions hide the section entirely; they do not show an empty linked-record state.
+
+For linked Risks, the modal shows a clickable Risk reference pill, a separate lifecycle pill and the Risk title. The Risk reference pill uses the shared current Risk reference presentation: active Risks use the current derived Risk action/RAG signal, Draft Risks use neutral light blue, and Closed Risks use neutral grey. The lifecycle pill is informational only and shows the Risk lifecycle value: Draft, Open, Monitoring, Mitigating, Escalated, Materialised or Closed. The Risk reference opens the workspace-scoped Risk detail page in a new browser tab with `rel="noopener noreferrer"` and an accessible new-tab label.
+
+The directional design reference for Action and linked Risk pills is stored at `docs/design-reference/actions/action-risk-pill-reference.png`.
+
+The legacy detail page still exists for direct URLs and shows read-only immutable history, but normal register interaction happens in the modal.
 
 ## Detail and History
 
@@ -175,6 +189,8 @@ History is read-only and structured by event type, actor, timestamp, state chang
 
 Management controls are shown only when the current user has record authority and the operation is valid for the current state:
 
+- save progress;
+- submit for review;
 - amend brief;
 - change due date;
 - assign/reassign/unassign;
@@ -184,7 +200,7 @@ Management controls are shown only when the current user has record authority an
 - cancel;
 - Owner/Admin acceptance takeover.
 
-Actioner submit, return-to-raiser and reject response forms are intentionally deferred to WT-ACTION-003. Assigned Actioners see a note on the detail page where those controls will arrive.
+Assigned Actioners can save a progress update while an Action remains Outstanding, or submit for review with a meaningful update. When the same user is both Actioner and acceptance owner, the modal offers direct completion with a meaningful update rather than a submit-to-self loop.
 
 ## Permissions, RLS and RPCs
 
@@ -204,6 +220,7 @@ Database RLS permits active workspace members to read Actions and Action history
 All material writes go through named `security definer` RPC functions with `search_path = public`:
 
 - `create_project_action`
+- `save_project_action_progress`
 - `submit_project_action`
 - `return_project_action_to_raiser`
 - `reject_project_action`

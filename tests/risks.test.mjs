@@ -2094,7 +2094,7 @@ test('Risk reference pills use compact active action-state labels with full acce
 		riskDetailAvailable: true,
 	});
 	assert.deepEqual(getRiskReferencePillPresentation(draftRisk, now), {
-		tone: 'neutral',
+		tone: 'blue',
 		label: 'Risk-HHH-014',
 		statusLabel: '',
 		ariaLabel: 'Risk-HHH-014, Draft risk',
@@ -2134,7 +2134,7 @@ test('Narrative risk reference pill presentation uses current linked risk state 
 	assert.equal(getNarrativeReferencePillPresentation(historicalRedEntry, registerRisk({ risk_ref: 'Risk-HHH-001', review_date: '2026-07-13' }), now).statusLabel, 'Amber');
 	assert.equal(getNarrativeReferencePillPresentation(historicalRedEntry, registerRisk({ risk_ref: 'Risk-HHH-001', review_date: '2026-07-20' }), now).statusLabel, 'Green');
 	assert.deepEqual(getNarrativeReferencePillPresentation(historicalRedEntry, registerRisk({ risk_ref: 'Risk-HHH-001', status: 'draft' }), now), {
-		tone: 'neutral',
+		tone: 'blue',
 		label: 'Risk-HHH-001',
 		statusLabel: '',
 		ariaLabel: 'Risk-HHH-001, Draft risk',

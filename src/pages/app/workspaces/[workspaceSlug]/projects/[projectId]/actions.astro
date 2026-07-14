@@ -5,6 +5,7 @@ import EmptyState from '../../../../../../components/app/EmptyState.astro';
 import DateField from '../../../../../../components/forms/DateField.astro';
 import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
+import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
 import { can } from '../../../../../../lib/permissions';
 import {
 	ACTION_DISPLAY_LABELS,
@@ -43,6 +44,8 @@ import {
 	type ActionRegisterTab,
 	type ProjectAction,
 } from '../../../../../../lib/projectActions';
+import { getProjectRisk, riskDisplayLabel, type ProjectRisk } from '../../../../../../lib/projectRisks';
+import { getRiskReferencePillPresentation } from '../../../../../../lib/riskReferencePills';
 import { buildLoginRedirectPath, createSupabaseServerClient, getServerAccessToken, isSupabaseAuthSessionError } from '../../../../../../lib/supabaseServer';
 import { buildProjectActionsPath, buildProjectDetailsPath, buildProjectNarrativePath, buildProjectPath, buildProjectRiskPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 
@@ -65,7 +68,11 @@ let actionModalId = Astro.url.searchParams.get('action') ?? '';
 let actionError = '';
 let modalValues = { progress: '', reason: '', brief: '', actionerId: '', dueDate: '' };
 let modalFormSubmitted = false;
+let selectedLinkedRisk: ProjectRisk | null = null;
 
+const formatDate = (value, fallback = 'Not available') => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${String(value).slice(0, 10)}T00:00:00Z`))
+	: fallback;
 const formatDateTime = (value, fallback = 'Not available') => value
 	? `${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))} UTC`
 	: fallback;
@@ -90,6 +97,28 @@ const safeRegisterReturnPath = (value, registerBasePath, fallback) => {
 		return fallback;
 	}
 	return fallback;
+};
+const firstMeaningfulLine = (value) => value
+	.split(/\r?\n/)
+	.map((line) => line.trim())
+	.find(Boolean) ?? value.trim();
+const modalTitleForAction = (action) => briefPreview(firstMeaningfulLine(action.brief), 96);
+const actionWorkflowGroupLabel = (action) => {
+	if (action.status === 'submitted') return ACTION_REGISTER_TAB_LABELS.awaiting_review;
+	if (action.status === 'complete') return ACTION_REGISTER_TAB_LABELS.complete;
+	if (action.status === 'cancelled') return ACTION_REGISTER_TAB_LABELS.cancelled;
+	return ACTION_REGISTER_TAB_LABELS.outstanding;
+};
+const riskLifecyclePillTone = (status) => {
+	const value = String(status ?? '').toLowerCase();
+	if (value === 'draft') return 'draft';
+	if (value === 'open') return 'open';
+	if (value === 'monitoring') return 'monitoring';
+	if (value === 'mitigating') return 'mitigating';
+	if (value === 'escalated') return 'escalated';
+	if (value === 'materialised') return 'materialised';
+	if (value === 'closed') return 'closed';
+	return 'closed';
 };
 
 try {
@@ -219,6 +248,15 @@ try {
 				actionsLoadError = error instanceof Error ? error.message : 'Unable to load the Actions Register.';
 			}
 
+			const actionForModal = actionModalId ? actions.find((action) => action.id === actionModalId) ?? null : null;
+			if (actionForModal?.source_type === 'risk' && actionForModal.source_record_id) {
+				try {
+					selectedLinkedRisk = await getProjectRisk(organisation.id, data.id, actionForModal.source_record_id, workspace.role, serverSupabase);
+				} catch {
+					selectedLinkedRisk = null;
+				}
+			}
+
 			try {
 				eligibleActioners = await listEligibleActioners(organisation.id, workspace.role, serverSupabase);
 			} catch {
@@ -300,7 +338,15 @@ if (actionModalId && !selectedAction && project && !actionsLoadError) actionErro
 const selectedActionTiming = selectedAction ? deriveActionTimingState(selectedAction, now) : 'open';
 const selectedActionTone = selectedAction ? actionConcernTone(selectedAction, now) : 'neutral';
 const selectedActionDue = selectedAction ? actionDueDateDisplay(selectedAction, now) : { label: 'No due date', tone: 'amber' };
-const selectedSourceUrl = selectedAction && project ? sourceHref(selectedAction, project) : '';
+const selectedActionTitle = selectedAction ? modalTitleForAction(selectedAction) : '';
+const selectedWorkflowGroup = selectedAction ? actionWorkflowGroupLabel(selectedAction) : '';
+const selectedRaisedDate = selectedAction ? formatDate(selectedAction.created_at) : '';
+const selectedActionerName = selectedAction?.actioner_id ? actionProfileName(selectedAction.actioner, 'Workspace member') : 'Unassigned';
+const selectedLinkedRiskHref = selectedLinkedRisk && project ? buildProjectRiskPath(workspaceSlug ?? '', project.slug, selectedLinkedRisk.risk_id) : '';
+const selectedLinkedRiskPill = selectedLinkedRisk ? getRiskReferencePillPresentation(selectedLinkedRisk, now) : null;
+const selectedLinkedRiskLifecycleTone = selectedLinkedRisk ? riskLifecyclePillTone(selectedLinkedRisk.status) : '';
+const selectedFallbackLinkedHref = selectedAction && project ? sourceHref(selectedAction, project) : '';
+const selectedHasFallbackLink = Boolean(selectedAction && selectedAction.source_type !== 'project' && !selectedLinkedRisk && (selectedAction.source_ref || selectedAction.source_label || selectedFallbackLinkedHref));
 const modalCloseHref = buildRegisterPath({ action: '' });
 const actionSuccessMessage = Astro.url.searchParams.get('created') === '1'
 	? 'Action created.'
@@ -472,10 +518,19 @@ const scopeItems = [
 					<dialog class="action-detail-dialog" aria-labelledby="action-detail-title" data-action-detail-dialog open>
 						<div class="action-detail-modal">
 							<header class="action-detail-modal__header">
-								<div>
-									<p class="eyebrow">Project Action</p>
-									<h2 id="action-detail-title">{selectedAction.action_ref}</h2>
-									<p>{selectedAction.brief}</p>
+								<div class="action-detail-modal__intro">
+									<div class="action-detail-modal__headline">
+										<span class={`actions-ref-pill actions-ref-pill--${selectedActionTone}`}>{selectedAction.action_ref}</span>
+										<span class="action-detail-modal__workflow">{selectedWorkflowGroup}</span>
+									</div>
+									<h2 id="action-detail-title" title={selectedAction.brief}>{selectedActionTitle}</h2>
+									<div class="action-detail-modal__meta" aria-label="Action responsibility and timing">
+										<span>Raised by {actionProfileName(selectedAction.raiser, 'Workspace member')}</span>
+										<span>{selectedRaisedDate}</span>
+										<span>Actioner {selectedActionerName}</span>
+										<span>{selectedActionDue.label}</span>
+									</div>
+									<p class="action-detail-modal__updated">Last updated {formatDateTime(selectedAction.updated_at)}</p>
 								</div>
 								<a class="action-dialog-close" href={modalCloseHref} aria-label="Close Action detail">x</a>
 							</header>
@@ -483,25 +538,63 @@ const scopeItems = [
 							{actionSuccessMessage && <p class="action-form-success" role="status">{actionSuccessMessage}</p>}
 							{actionError && <p class="action-form-error" role="alert">{actionError}</p>}
 
-							<div class="action-detail-modal__summary">
-								<span class={`actions-ref-pill actions-ref-pill--${selectedActionTone}`}>{selectedAction.action_ref}</span>
+							<div class="action-detail-modal__summary" aria-label="Action state">
 								<span class={`actions-pill actions-pill--workflow actions-pill--${selectedAction.status}`}>{ACTION_DISPLAY_LABELS[selectedAction.status]}</span>
 								<span class={`actions-pill actions-pill--${selectedActionTone}`}>{actionTimingDisplayLabel(selectedActionTiming)}</span>
 							</div>
 
 							<section class="action-detail-modal__section">
 								<h3>Brief</h3>
-								<p>{selectedAction.brief}</p>
+								<div
+									class="action-detail-modal__brief"
+									role="region"
+									tabindex="0"
+									aria-label={`Full brief for ${selectedAction.action_ref}`}
+									title={selectedAction.brief}
+								>{selectedAction.brief}</div>
 							</section>
 
-							<dl class="action-detail-modal__facts">
-								<div><dt>Actioner</dt><dd>{selectedAction.actioner_id ? actionProfileName(selectedAction.actioner, 'Workspace member') : 'Unassigned'}</dd></div>
-								<div><dt>Due date</dt><dd><span class={`actions-due actions-due--${selectedActionDue.tone}`}>{selectedActionDue.label}</span></dd></div>
-								<div><dt>Raiser</dt><dd>{actionProfileName(selectedAction.raiser, 'Workspace member')}</dd></div>
-								<div><dt>Raised</dt><dd>{formatDateTime(selectedAction.created_at)}</dd></div>
-								<div><dt>Last updated</dt><dd>{formatDateTime(selectedAction.updated_at)}</dd></div>
-								<div><dt>Source</dt><dd>{selectedSourceUrl ? <a class="text-link" href={selectedSourceUrl}>Open source</a> : sourceLabelForAction(selectedAction)}</dd></div>
-							</dl>
+							{selectedLinkedRisk && selectedLinkedRiskPill && (
+								<section class="action-detail-modal__section" data-action-linked-record>
+									<h3>Linked to</h3>
+									<div class="action-linked-record">
+										<div class="action-linked-record__pills">
+											<a
+												class="action-linked-record__risk-link"
+												href={selectedLinkedRiskHref}
+												target="_blank"
+												rel="noopener noreferrer"
+												aria-label={`Open ${selectedLinkedRisk.risk_ref} in a new tab`}
+											>
+												<RagReferencePill
+													tone={selectedLinkedRiskPill.tone}
+													label={selectedLinkedRiskPill.label}
+													statusLabel={selectedLinkedRiskPill.statusLabel}
+													ariaLabel={selectedLinkedRiskPill.ariaLabel}
+													title={selectedLinkedRiskPill.title}
+													compactActionState={selectedLinkedRiskPill.compactActionState}
+												/>
+											</a>
+											<span class={`risk-lifecycle-pill risk-lifecycle-pill--${selectedLinkedRiskLifecycleTone}`}>{riskDisplayLabel(selectedLinkedRisk.status)}</span>
+										</div>
+										<span class="action-linked-record__title" title={selectedLinkedRisk.title}>{selectedLinkedRisk.title}</span>
+										<span class="action-linked-record__new-tab">Opens in new tab</span>
+									</div>
+								</section>
+							)}
+
+							{selectedHasFallbackLink && (
+								<section class="action-detail-modal__section" data-action-linked-record>
+									<h3>Linked to</h3>
+									<div class="action-linked-record">
+										{selectedFallbackLinkedHref ? (
+											<a class="text-link" href={selectedFallbackLinkedHref}>{sourceLabelForAction(selectedAction)}</a>
+										) : (
+											<span>{sourceLabelForAction(selectedAction)}</span>
+										)}
+									</div>
+								</section>
+							)}
 
 							<section class="action-detail-modal__section">
 								<h3>Latest progress update</h3>
@@ -972,6 +1065,47 @@ const scopeItems = [
 		gap: 1rem;
 		align-items: flex-start;
 	}
+	.action-detail-modal__intro {
+		display: grid;
+		gap: 0.45rem;
+		min-width: 0;
+	}
+	.action-detail-modal__headline,
+	.action-detail-modal__meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.45rem 0.7rem;
+	}
+	.action-detail-modal__headline .actions-ref-pill {
+		font-size: 1rem;
+		padding: 0.32rem 0.72rem;
+	}
+	.action-detail-modal__workflow {
+		color: var(--muted-strong);
+		font-weight: 850;
+	}
+	.action-detail-modal__header h2 {
+		margin: 0;
+		color: var(--text);
+		font-size: clamp(1.25rem, 2vw, 1.55rem);
+		line-height: 1.2;
+		overflow-wrap: anywhere;
+	}
+	.action-detail-modal__meta {
+		color: var(--muted-strong);
+		font-size: 0.9rem;
+	}
+	.action-detail-modal__meta span + span::before {
+		content: "·";
+		margin-right: 0.7rem;
+		color: var(--muted);
+	}
+	.action-detail-modal__updated {
+		margin: 0;
+		color: var(--muted);
+		font-size: 0.82rem;
+	}
 	.action-dialog-close {
 		border: 1px solid var(--border);
 		border-radius: 999px;
@@ -1017,30 +1151,81 @@ const scopeItems = [
 		color: var(--muted-strong);
 		white-space: pre-wrap;
 	}
-	.action-detail-modal__facts {
-		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-		gap: 0.75rem;
-		margin: 0;
-	}
-	.action-detail-modal__facts div {
-		display: grid;
-		gap: 0.2rem;
+	.action-detail-modal__brief {
+		max-height: calc(1.5rem * 4 + 1rem);
+		overflow-y: auto;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		word-break: break-word;
 		border: 1px solid var(--border);
 		border-radius: 0.55rem;
-		padding: 0.7rem;
-		background: rgba(255, 255, 255, 0.03);
+		padding: 0.7rem 0.75rem;
+		background: rgba(2, 8, 16, 0.44);
+		color: var(--muted-strong);
+		line-height: 1.5rem;
 	}
-	.action-detail-modal__facts dt {
+	.action-detail-modal__brief:focus-visible {
+		outline: 2px solid var(--accent-strong);
+		outline-offset: 2px;
+	}
+	.action-linked-record {
+		display: grid;
+		grid-template-columns: auto minmax(8rem, 1fr) auto;
+		gap: 0.7rem;
+		align-items: center;
+		border: 1px solid var(--border);
+		border-radius: 0.6rem;
+		padding: 0.65rem;
+		background: rgba(255, 255, 255, 0.03);
+		min-width: 0;
+	}
+	.action-linked-record__pills {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+		align-items: center;
+	}
+	.action-linked-record__risk-link {
+		display: inline-flex;
+		text-decoration: none;
+		border-radius: 999px;
+	}
+	.action-linked-record__risk-link:hover,
+	.action-linked-record__risk-link:focus-visible {
+		outline: 2px solid var(--accent-strong);
+		outline-offset: 2px;
+	}
+	.action-linked-record__title {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--muted-strong);
+	}
+	.action-linked-record__new-tab {
 		color: var(--muted);
 		font-size: 0.78rem;
-		font-weight: 850;
-		text-transform: uppercase;
+		white-space: nowrap;
 	}
-	.action-detail-modal__facts dd {
-		margin: 0;
-		color: var(--text);
-		font-weight: 750;
+	.risk-lifecycle-pill {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 999px;
+		padding: 0.28rem 0.7rem;
+		font-weight: 850;
+		white-space: nowrap;
+	}
+	.risk-lifecycle-pill--draft { background: #bfe3ff; color: #0b1f33; }
+	.risk-lifecycle-pill--open { background: #f4d35e; color: #1f1f1f; }
+	.risk-lifecycle-pill--monitoring { background: #b7e4c7; color: #123524; }
+	.risk-lifecycle-pill--mitigating { background: #2e7d32; color: #ffffff; }
+	.risk-lifecycle-pill--escalated { background: #c62828; color: #ffffff; }
+	.risk-lifecycle-pill--materialised { background: #8e1b1b; color: #ffffff; }
+	.risk-lifecycle-pill--closed { background: #d1d5db; color: #1f2937; }
+	.action-linked-record :global(.rag-reference-pill) {
+		padding: 0.28rem 0.7rem;
+		font-weight: 850;
 	}
 	.action-workflow-form,
 	.action-detail-modal__management {
@@ -1101,9 +1286,17 @@ const scopeItems = [
 			display: grid;
 			width: 100%;
 		}
-		.action-detail-modal__facts,
-		.action-detail-modal__split {
+		.action-detail-modal__split,
+		.action-linked-record {
 			grid-template-columns: 1fr;
+		}
+		.action-detail-modal__meta {
+			display: grid;
+			gap: 0.2rem;
+		}
+		.action-detail-modal__meta span + span::before {
+			content: "";
+			margin: 0;
 		}
 		.action-detail-modal__actions {
 			flex-direction: column;
