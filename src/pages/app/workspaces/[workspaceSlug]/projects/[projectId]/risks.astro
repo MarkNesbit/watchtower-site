@@ -350,8 +350,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 				/>
 
 				<section class="content-card risk-register-panel" aria-label="Project risks">
-					<div class="risk-register-panel__actions">
-						<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to Project</a>
+					<div class="risk-register-panel__top-actions">
 						<div class="risk-register-action">
 							<button
 								class="button button--secondary"
@@ -1531,10 +1530,10 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		padding: clamp(1rem, 2vw, 1.5rem);
 	}
 
-	.risk-register-panel__actions {
+	.risk-register-panel__top-actions {
 		display: flex;
-		align-items: flex-start;
-		justify-content: space-between;
+		align-items: center;
+		justify-content: flex-end;
 		gap: 1rem;
 	}
 
@@ -2456,7 +2455,6 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 
 	.risk-register-back-link {
 		justify-self: start;
-		margin-top: 0.2rem;
 	}
 
 	.risk-register-feedback {
@@ -3147,11 +3145,10 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	}
 
 	@media (max-width: 760px) {
-		.risk-register-panel__actions {
+		.risk-register-panel__top-actions {
 			flex-direction: column;
 		}
 
-		.risk-register-panel__actions > .button,
 		.risk-register-back-link {
 			justify-content: center;
 			width: 100%;

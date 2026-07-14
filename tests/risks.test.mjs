@@ -3554,7 +3554,10 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.doesNotMatch(route, /title="Project risks"/);
 	assert.doesNotMatch(route, /helper="Scan all project risks in one register\. Exposure, action state and lifecycle\/status are shown separately\."/);
 	assert.match(route, /class="content-card risk-register-panel"/);
-	assert.match(route, /class="risk-register-panel__actions"/);
+	assert.match(route, /class="risk-register-panel__top-actions"/);
+	assert.match(route, /<section class="content-card risk-register-panel" aria-label="Project risks">\s*<div class="risk-register-panel__top-actions">/);
+	assert.match(route, /\{risksLoadError \? \([\s\S]*<a class="button button--secondary risk-register-back-link"/);
+	assert.doesNotMatch(route, /risk-register-back-link[\s\S]*Risk Suggestions[\s\S]*<\/section>/);
 	assert.match(route, /Back to Project/);
 	assert.doesNotMatch(route, /ProjectControlPanel/);
 	assert.doesNotMatch(route, /Risk controls/);
