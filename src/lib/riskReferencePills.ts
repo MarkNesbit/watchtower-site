@@ -1,6 +1,7 @@
 import { getNarrativeDisplayRef } from './projectNarrative.ts';
 import {
 	deriveRiskReferenceTone,
+	isDraftRiskStatus,
 	isActiveRiskStatus,
 	riskLifecycleLabel,
 	riskReferenceStatusLabel,
@@ -47,7 +48,7 @@ export function getRiskReferencePillPresentation(
 	const lifecycle = riskLifecycleLabel(risk.status);
 	if (!isActiveRiskStatus(risk.status)) {
 		return {
-			tone: 'neutral',
+			tone: isDraftRiskStatus(risk.status) ? 'blue' : 'neutral',
 			label: risk.risk_ref,
 			statusLabel: '',
 			ariaLabel: `${risk.risk_ref}, ${lifecycle} risk`,

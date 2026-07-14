@@ -728,7 +728,25 @@ test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register s
 	assert.match(register, /data-action-create-dialog/);
 	assert.match(register, /data-action-detail-dialog/);
 	assert.match(register, /data-action-modal-open/);
+	assert.match(register, /import RagReferencePill/);
+	assert.match(register, /getProjectRisk/);
+	assert.match(register, /getRiskReferencePillPresentation/);
+	assert.match(register, /selectedLinkedRisk = await getProjectRisk\(organisation\.id, data\.id, actionForModal\.source_record_id, workspace\.role, serverSupabase\)/);
 	assert.match(register, /actions-ref-pill/);
+	assert.match(register, /action-detail-modal__headline/);
+	assert.match(register, /selectedWorkflowGroup/);
+	assert.match(register, /selectedActionTitle/);
+	assert.doesNotMatch(register, /<h2 id="action-detail-title">\{selectedAction\.action_ref\}<\/h2>/);
+	assert.doesNotMatch(register, /<p>\{selectedAction\.brief\}<\/p>[\s\S]*<section class="action-detail-modal__section">[\s\S]*<h3>Brief<\/h3>[\s\S]*<p>\{selectedAction\.brief\}<\/p>/);
+	assert.match(register, /class="action-detail-modal__brief"[\s\S]*role="region"[\s\S]*tabindex="0"[\s\S]*aria-label=\{`Full brief for \$\{selectedAction\.action_ref\}`\}/);
+	assert.match(register, /max-height: calc\(1\.5rem \* 4 \+ 1rem\)/);
+	assert.match(register, /overflow-y: auto/);
+	assert.match(register, /overflow-wrap: anywhere/);
+	assert.match(register, /Raised by \{actionProfileName\(selectedAction\.raiser, 'Workspace member'\)\}/);
+	assert.match(register, /Actioner \{selectedActionerName\}/);
+	assert.match(register, /selectedRaisedDate/);
+	assert.match(register, /selectedActionDue\.label/);
+	assert.doesNotMatch(register, /action-detail-modal__facts/);
 	assert.match(register, /query\.set\('action', next\.action\)/);
 	assert.match(register, /saveProjectActionProgress/);
 	assert.match(register, /submitProjectAction/);
@@ -741,7 +759,29 @@ test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register s
 	assert.match(register, /Unassigned/);
 	assert.match(register, /No due date/);
 	assert.match(register, /No progress update has been added/);
-	assert.match(register, /Open source/);
+	assert.doesNotMatch(register, />Source<\/(?:h3|dt)>|Open source/);
+	assert.match(register, /<h3>Linked to<\/h3>/);
+	assert.match(register, /selectedAction\.source_type !== 'project'/);
+	assert.match(register, /data-action-linked-record/);
+	assert.match(register, /selectedLinkedRiskPill\.tone/);
+	assert.match(register, /selectedLinkedRiskPill\.label/);
+	assert.match(register, /risk-lifecycle-pill--\$\{selectedLinkedRiskLifecycleTone\}/);
+	assert.match(register, /riskDisplayLabel\(selectedLinkedRisk\.status\)/);
+	assert.match(register, /target="_blank"/);
+	assert.match(register, /rel="noopener noreferrer"/);
+	assert.match(register, /aria-label=\{`Open \$\{selectedLinkedRisk\.risk_ref\} in a new tab`\}/);
+	assert.match(register, /Opens in new tab/);
+	for (const lifecycleClass of [
+		'risk-lifecycle-pill--draft',
+		'risk-lifecycle-pill--open',
+		'risk-lifecycle-pill--monitoring',
+		'risk-lifecycle-pill--mitigating',
+		'risk-lifecycle-pill--escalated',
+		'risk-lifecycle-pill--materialised',
+		'risk-lifecycle-pill--closed',
+	]) {
+		assert.match(register, new RegExp(lifecycleClass));
+	}
 	assert.match(register, /Save update/);
 	assert.match(register, /Submit for review/);
 	assert.match(register, /Return to Actioner/);
