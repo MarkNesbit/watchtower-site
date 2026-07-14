@@ -350,42 +350,6 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 				/>
 
 				<section class="content-card risk-register-panel" aria-label="Project risks">
-					<div class="risk-register-panel__actions">
-						<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to Project</a>
-						<div class="risk-register-action">
-							<button
-								class="button button--secondary"
-								type="button"
-								aria-haspopup="dialog"
-								data-risk-prompts-open
-							>Risk Suggestions</button>
-							{canCreateRisk ? (
-								<a
-									class="button button--primary"
-									href={buildProjectNewRiskPath(workspaceSlug ?? '', project.slug)}
-									data-risk-create-action
-								>New Risk</a>
-							) : (
-								<button
-									class="button button--primary"
-									type="button"
-									disabled
-									aria-describedby="risk-create-unavailable"
-									data-risk-create-disabled
-									data-viewer-read-only
-								>New Risk</button>
-							)}
-							{!canCreateRisk && (
-								<DisabledActionHint
-									id="risk-create-unavailable"
-									allowed={false}
-									allowedText=""
-									disabledText="Viewer access is read-only. Risk creation is unavailable."
-								/>
-							)}
-						</div>
-					</div>
-
 					{promptDraftFeedback && (
 						<div class="risk-register-feedback" role="status" data-risk-prompt-create-page-feedback>
 							<p>{promptDraftFeedback}</p>
@@ -740,7 +704,41 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 							</div>
 						</div>
 					)}
-					<a class="button button--secondary risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to Project</a>
+					<div class="risk-register-panel__actions">
+						<a class="button button--secondary risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to Project</a>
+						<div class="risk-register-action">
+							<button
+								class="button button--secondary"
+								type="button"
+								aria-haspopup="dialog"
+								data-risk-prompts-open
+							>Risk Suggestions</button>
+							{canCreateRisk ? (
+								<a
+									class="button button--primary"
+									href={buildProjectNewRiskPath(workspaceSlug ?? '', project.slug)}
+									data-risk-create-action
+								>New Risk</a>
+							) : (
+								<button
+									class="button button--primary"
+									type="button"
+									disabled
+									aria-describedby="risk-create-unavailable"
+									data-risk-create-disabled
+									data-viewer-read-only
+								>New Risk</button>
+							)}
+							{!canCreateRisk && (
+								<DisabledActionHint
+									id="risk-create-unavailable"
+									allowed={false}
+									allowedText=""
+									disabledText="Viewer access is read-only. Risk creation is unavailable."
+								/>
+							)}
+						</div>
+					</div>
 				</section>
 
 				<dialog class="risk-prompt-modal" aria-labelledby="risk-prompt-modal-title" data-risk-prompt-modal>
@@ -1533,7 +1531,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 
 	.risk-register-panel__actions {
 		display: flex;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: space-between;
 		gap: 1rem;
 	}
@@ -2456,7 +2454,6 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 
 	.risk-register-back-link {
 		justify-self: start;
-		margin-top: 0.2rem;
 	}
 
 	.risk-register-feedback {
