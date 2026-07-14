@@ -347,10 +347,8 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 					description="A clean register of source-of-truth project risks."
 					headingId="risk-register-heading"
 					inlineContext
-				/>
-
-				<section class="content-card risk-register-panel" aria-label="Project risks">
-					<div class="risk-register-panel__top-actions">
+				>
+					<div slot="actions" class="risk-register-hero-actions">
 						<a class="button button--secondary risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to Project</a>
 						<div class="risk-register-action">
 							<button
@@ -385,7 +383,9 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 							)}
 						</div>
 					</div>
+				</ProjectPageHero>
 
+				<section class="content-card risk-register-panel" aria-label="Project risks">
 					{promptDraftFeedback && (
 						<div class="risk-register-feedback" role="status" data-risk-prompt-create-page-feedback>
 							<p>{promptDraftFeedback}</p>
@@ -1531,7 +1531,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		padding: clamp(1rem, 2vw, 1.5rem);
 	}
 
-	.risk-register-panel__top-actions {
+	.risk-register-hero-actions {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -3146,7 +3146,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	}
 
 	@media (max-width: 760px) {
-		.risk-register-panel__top-actions {
+		.risk-register-hero-actions {
 			flex-direction: column;
 		}
 
