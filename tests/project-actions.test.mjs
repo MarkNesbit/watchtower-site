@@ -47,6 +47,7 @@ import {
 	rejectProjectAction,
 	returnProjectActionToActioner,
 	returnProjectActionToRaiser,
+	saveProjectActionProgress,
 	sortProjectActions,
 	sourceLabelForAction,
 	summariseProjectActions,
@@ -59,6 +60,7 @@ import { buildProjectActionPath, buildProjectActionsPath } from '../src/lib/proj
 const migrationUrl = new URL('../supabase/migrations/20260712000200_project_actions_schema_foundation.sql', import.meta.url);
 const lifecycleMigrationUrl = new URL('../supabase/migrations/20260712000300_project_actions_transactional_lifecycle.sql', import.meta.url);
 const optionalDueDateMigrationUrl = new URL('../supabase/migrations/20260713000100_project_actions_optional_due_date.sql', import.meta.url);
+const progressUpdateMigrationUrl = new URL('../supabase/migrations/20260714000100_project_action_progress_update.sql', import.meta.url);
 const projectActionsLibUrl = new URL('../src/lib/projectActions.ts', import.meta.url);
 const registerRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/actions.astro', import.meta.url);
 const detailRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/actions/[actionId].astro', import.meta.url);
@@ -66,6 +68,7 @@ const projectDashboardUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]
 const migrationSql = async () => readFile(migrationUrl, 'utf8');
 const lifecycleMigrationSql = async () => readFile(lifecycleMigrationUrl, 'utf8');
 const optionalDueDateMigrationSql = async () => readFile(optionalDueDateMigrationUrl, 'utf8');
+const progressUpdateMigrationSql = async () => readFile(progressUpdateMigrationUrl, 'utf8');
 const projectActionsLibSource = async () => readFile(projectActionsLibUrl, 'utf8');
 const registerRouteSource = async () => readFile(registerRouteUrl, 'utf8');
 const detailRouteSource = async () => readFile(detailRouteUrl, 'utf8');
@@ -249,7 +252,7 @@ test('Project Action identity and scope cannot be changed after creation', async
 test('Project Action helper constants and type guards match the locked MVP model', () => {
 	assert.deepEqual(ACTION_STATUSES, ['open', 'submitted', 'returned_to_raiser', 'rejected_by_actioner', 'returned_to_actioner', 'complete', 'cancelled']);
 	assert.deepEqual(ACTION_SOURCE_TYPES, ['project', 'risk', 'project_details', 'narrative']);
-	assert.deepEqual(ACTION_HISTORY_EVENT_TYPES, ['created', 'assigned', 'unassigned', 'reassigned', 'brief_amended', 'due_date_changed', 'submitted', 'returned_to_raiser', 'rejected_by_actioner', 'returned_to_actioner', 'reissued', 'acceptance_owner_taken_over', 'completed', 'cancelled']);
+	assert.deepEqual(ACTION_HISTORY_EVENT_TYPES, ['created', 'assigned', 'unassigned', 'reassigned', 'brief_amended', 'due_date_changed', 'submitted', 'returned_to_raiser', 'rejected_by_actioner', 'returned_to_actioner', 'progress_updated', 'reissued', 'acceptance_owner_taken_over', 'completed', 'cancelled']);
 	assert.equal(isActionStatus('submitted'), true);
 	assert.equal(isActionStatus('done'), false);
 	assert.equal(isActionSourceType('risk'), true);
@@ -400,6 +403,22 @@ test('Project Action optional due date migration relaxes due date storage and RP
 	assert.match(sql, /grant execute on function public\.change_project_action_due_date\(uuid, date, text, timestamptz\) to authenticated/);
 });
 
+test('Project Action progress update migration saves auditable progress without workflow transition', async () => {
+	const sql = await progressUpdateMigrationSql();
+	assert.match(sql, /project_action_history_event_type_check[\s\S]*'progress_updated'/);
+	assert.match(sql, /create or replace function public\.save_project_action_progress\(/);
+	assert.match(sql, /p_response text/);
+	assert.match(sql, /project_action_assert_expected_state\(current_action\.status, current_action\.updated_at, p_expected_status, p_expected_updated_at\)/);
+	assert.match(sql, /project_action_assert_non_terminal\(current_action\.status\)/);
+	assert.match(sql, /current_action\.status not in \('open', 'returned_to_actioner'\)/);
+	assert.match(sql, /set latest_response = btrim\(p_response\)/);
+	assert.match(sql, /'progress_updated'[\s\S]*current_action\.status,[\s\S]*current_action\.status/);
+	assert.match(sql, /'latest_response', current_action\.latest_response[\s\S]*'latest_response', updated_action\.latest_response/);
+	assert.match(sql, /grant execute on function public\.save_project_action_progress\(uuid, text, text, timestamptz\) to authenticated/);
+	assert.doesNotMatch(sql, /grant (?:insert|update|delete)[^;]*public\.project_actions[^;]*to authenticated/i);
+	assert.doesNotMatch(sql, /grant (?:insert|update|delete)[^;]*public\.project_action_history[^;]*to authenticated/i);
+});
+
 test('Project Action operation errors map controlled database failures for future UI', () => {
 	const expectations = [
 		['WT_ACTION_PERMISSION_DENIED: no', 'permission_denied'],
@@ -441,6 +460,7 @@ test('Project Action RPC wrappers call explicit lifecycle functions with expecte
 		sourceType: 'project',
 	});
 	await submitProjectAction(client, { ...expected, response: 'Done', evidenceUrl: 'https://example.com/evidence' });
+	await saveProjectActionProgress(client, { ...expected, response: 'Progress saved' });
 	await returnProjectActionToRaiser(client, { ...expected, reason: 'Need clarification' });
 	await rejectProjectAction(client, { ...expected, reason: 'Cannot accept ownership' });
 	await returnProjectActionToActioner(client, { ...expected, reason: 'Please expand the evidence' });
@@ -455,6 +475,7 @@ test('Project Action RPC wrappers call explicit lifecycle functions with expecte
 	assert.deepEqual(calls.map((call) => call.functionName), [
 		'create_project_action',
 		'submit_project_action',
+		'save_project_action_progress',
 		'return_project_action_to_raiser',
 		'reject_project_action',
 		'return_project_action_to_actioner',
@@ -469,9 +490,10 @@ test('Project Action RPC wrappers call explicit lifecycle functions with expecte
 	assert.equal(calls[1].args.p_expected_status, 'open');
 	assert.equal(calls[1].args.p_expected_updated_at, '2026-07-12T10:00:00.000Z');
 	assert.equal(calls[1].args.p_evidence_url, 'https://example.com/evidence');
+	assert.equal(calls[2].args.p_response, 'Progress saved');
 	assert.equal(calls[0].args.p_due_date, null);
-	assert.equal(calls[10].args.p_change_actioner, true);
-	assert.equal(calls[10].args.p_actioner_id, null);
+	assert.equal(calls[11].args.p_change_actioner, true);
+	assert.equal(calls[11].args.p_actioner_id, null);
 });
 
 test('Project Action RPC wrappers surface controlled operation errors', async () => {
@@ -704,8 +726,28 @@ test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register s
 	assert.match(register, /modal-scroll-locked/);
 	assert.match(register, /Viewers cannot create Actions/);
 	assert.match(register, /data-action-create-dialog/);
+	assert.match(register, /data-action-detail-dialog/);
+	assert.match(register, /data-action-modal-open/);
 	assert.match(register, /actions-ref-pill/);
-	assert.match(register, /buildProjectActionPath/);
+	assert.match(register, /query\.set\('action', next\.action\)/);
+	assert.match(register, /saveProjectActionProgress/);
+	assert.match(register, /submitProjectAction/);
+	assert.match(register, /returnProjectActionToActioner/);
+	assert.match(register, /completeProjectAction/);
+	assert.match(register, /assignProjectAction/);
+	assert.match(register, /changeProjectActionDueDate/);
+	assert.match(register, /cancelProjectAction/);
+	assert.match(register, /takeOverProjectActionAcceptance/);
+	assert.match(register, /Unassigned/);
+	assert.match(register, /No due date/);
+	assert.match(register, /No progress update has been added/);
+	assert.match(register, /Open source/);
+	assert.match(register, /Save update/);
+	assert.match(register, /Submit for review/);
+	assert.match(register, /Return to Actioner/);
+	assert.match(register, /Mark complete/);
+	assert.match(register, /Viewer access is read-only/);
+	assert.doesNotMatch(register, /buildProjectActionPath/);
 	assert.match(register, /createProjectAction/);
 	assert.match(register, /listProjectActions/);
 	assert.match(register, /listEligibleActioners/);
@@ -722,6 +764,8 @@ test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register s
 	assert.match(register, /Showing \{visibleActions\.length\} of \{filteredActions\.length\}/);
 	assert.match(register, /Back to project/);
 	assert.match(register, /\.actions-register-main \{[\s\S]*min-width: 0;[\s\S]*overflow: hidden;/);
+	assert.match(register, /showModal\(\)/);
+	assert.match(register, /sessionStorage\.setItem\(focusStorageKey/);
 	assert.doesNotMatch(register, /data-actions-summary|actions-summary-card|data-actions-needs-action-panel|data-actions-distribution|actions-guidance/);
 	assert.doesNotMatch(register, /Workflow status|Action distribution|Needs action|Highest urgency|Open Actions|Need Action/);
 	assert.doesNotMatch(register, /<th scope="col">Workflow<\/th>/);

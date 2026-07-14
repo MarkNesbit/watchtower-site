@@ -25,6 +25,7 @@ export const ACTION_HISTORY_EVENT_TYPES = [
 	'returned_to_raiser',
 	'rejected_by_actioner',
 	'returned_to_actioner',
+	'progress_updated',
 	'reissued',
 	'acceptance_owner_taken_over',
 	'completed',
@@ -115,6 +116,11 @@ export type SubmitProjectActionInput = ProjectActionExpectedState & {
 	actionId: string;
 	response: string;
 	evidenceUrl?: string | null;
+};
+
+export type SaveProjectActionProgressInput = ProjectActionExpectedState & {
+	actionId: string;
+	response: string;
 };
 
 export type ActionReasonInput = ProjectActionExpectedState & {
@@ -888,6 +894,13 @@ export async function submitProjectAction(client: ProjectActionRpcClient, input:
 		...actionRpcArgs(input),
 		p_response: input.response,
 		p_evidence_url: normaliseActionEvidenceUrl(input.evidenceUrl),
+	});
+}
+
+export async function saveProjectActionProgress(client: ProjectActionRpcClient, input: SaveProjectActionProgressInput): Promise<ProjectAction> {
+	return callProjectActionRpc(client, 'save_project_action_progress', {
+		...actionRpcArgs(input),
+		p_response: input.response,
 	});
 }
 
