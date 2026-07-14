@@ -6,6 +6,7 @@ type Props = {
 	title: string;
 	description?: string;
 	headingId?: string;
+	inlineContext?: boolean;
 };
 
 const {
@@ -15,20 +16,34 @@ const {
 	title,
 	description = '',
 	headingId = 'project-page-heading',
+	inlineContext = false,
 } = Astro.props;
 const hasTitleSlot = Astro.slots.has('title');
 ---
 
 <section class="content-card project-page-hero" aria-labelledby={headingId}>
 	<div class="project-page-hero__copy">
-		{workspaceName && (
-			<p class="project-page-hero__context">Workspace: <span>{workspaceName}</span></p>
-		)}
-		{projectName && (
-			<p class="project-page-hero__project">
-				Project: <strong>{projectName}</strong>
-				{projectRef && <span>{projectRef}</span>}
+		{inlineContext ? (
+			<p class="project-page-hero__context project-page-hero__context--inline">
+				{workspaceName && <>Workspace: <span>{workspaceName}</span></>}
+				{workspaceName && projectName && <span class="project-page-hero__separator" aria-hidden="true">|</span>}
+				{projectName && <>
+					Project: <strong>{projectName}</strong>
+					{projectRef && <span class="project-page-hero__ref">{projectRef}</span>}
+				</>}
 			</p>
+		) : (
+			<>
+				{workspaceName && (
+					<p class="project-page-hero__context">Workspace: <span>{workspaceName}</span></p>
+				)}
+				{projectName && (
+					<p class="project-page-hero__project">
+						Project: <strong>{projectName}</strong>
+						{projectRef && <span>{projectRef}</span>}
+					</p>
+				)}
+			</>
 		)}
 		{hasTitleSlot ? <slot name="title" /> : <h1 id={headingId}>{title}</h1>}
 		{description && <p class="project-page-hero__description">{description}</p>}
@@ -72,11 +87,24 @@ const hasTitleSlot = Astro.slots.has('title');
 		color: var(--accent-strong);
 	}
 
+	.project-page-hero__context strong,
 	.project-page-hero__project strong {
 		color: var(--text);
 	}
 
-	.project-page-hero__project span {
+	.project-page-hero__context--inline {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.3rem 0.65rem;
+	}
+
+	.project-page-hero__separator {
+		color: rgba(215, 226, 234, 0.48);
+	}
+
+	.project-page-hero__project span,
+	.project-page-hero__ref {
 		display: inline-flex;
 		margin-left: 0.65rem;
 		border: 1px solid rgba(0, 160, 255, 0.32);
