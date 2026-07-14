@@ -25,6 +25,7 @@ These Architecture Decision Records (ADRs) are the source of truth for platform 
 5. ADR-004 Security and Access Control Model
 6. ADR-005 Data Ownership and Entity Relationships
 7. ADR-006 Data Ingestion and Source-of-Truth Strategy
+8. Timeline Foundation Architecture
 
 ## Rule
 
