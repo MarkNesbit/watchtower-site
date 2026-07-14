@@ -2,7 +2,6 @@
 import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
 import DisabledActionHint from '../../../../../../components/app/DisabledActionHint.astro';
 import EmptyState from '../../../../../../components/app/EmptyState.astro';
-import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
@@ -149,13 +148,11 @@ const requestedPage = parseRiskRegisterPage(registerParams.get('page'));
 const selectedPageSize = parseRiskRegisterPageSize(registerParams.get('pageSize'));
 const selectedSearch = (registerParams.get('q') ?? '').trim().slice(0, 120);
 const requestedExposure = registerParams.get('exposure') ?? '';
-const requestedActionState = registerParams.get('actionState') ?? '';
-const requestedLifecycle = registerParams.get('lifecycle') ?? '';
 const selectedExposure = selectedView === 'closed'
 	? ''
 	: RISK_REGISTER_EXPOSURE_FILTERS.includes(requestedExposure) ? requestedExposure : '';
-const selectedActionState = ['red', 'amber', 'green'].includes(requestedActionState) ? requestedActionState : '';
-const selectedLifecycle = ['draft', 'active', 'closed'].includes(requestedLifecycle) ? requestedLifecycle : '';
+const selectedActionState = '';
+const selectedLifecycle = '';
 const promptDraftsCreated = Math.max(0, Number(registerParams.get('promptDraftsCreated')) || 0);
 const promptDraftsSkipped = Math.max(0, Number(registerParams.get('promptDraftsSkipped')) || 0);
 const promptDraftFeedback = promptDraftsCreated > 0
@@ -218,11 +215,6 @@ const sortLabels = {
 	'review-due': 'Review due soonest',
 	'recently-updated': 'Recently updated',
 };
-const lifecycleFilterLabels = {
-	draft: 'Draft',
-	active: 'Active / Open',
-	closed: 'Closed / Resolved',
-};
 const draftTabTone = (count) => count > 5 ? 'red' : count > 0 ? 'amber' : 'neutral';
 const buildRegisterPath = (overrides = {}) => {
 	const next = {
@@ -241,9 +233,7 @@ const buildRegisterPath = (overrides = {}) => {
 	if (next.view && next.view !== 'active') params.set('view', next.view);
 	if (next.q) params.set('q', next.q);
 	if (next.exposure) params.set('exposure', next.exposure);
-	if (next.actionState) params.set('actionState', next.actionState);
 	if (next.owner) params.set('owner', next.owner);
-	if (next.lifecycle) params.set('lifecycle', next.lifecycle);
 	if (next.sort && next.sort !== defaultRiskRegisterSortForView(next.view)) params.set('sort', next.sort);
 	if (next.page && Number(next.page) > 1) params.set('page', String(next.page));
 	if (next.pageSize && Number(next.pageSize) !== DEFAULT_RISK_REGISTER_PAGE_SIZE) params.set('pageSize', String(next.pageSize));
@@ -258,9 +248,7 @@ const needsActionHref = buildRegisterPath({
 	view: 'need-action',
 	q: '',
 	exposure: '',
-	actionState: '',
 	owner: '',
-	lifecycle: '',
 	sort: 'action-needed',
 	page: 1,
 });
@@ -279,9 +267,7 @@ const pageSizeHiddenFields = [
 	['view', selectedView !== 'active' ? selectedView : ''],
 	['q', selectedSearch],
 	['exposure', selectedExposure],
-	['actionState', selectedActionState],
 	['owner', selectedOwnerId],
-	['lifecycle', selectedLifecycle],
 	['sort', selectedSort !== defaultSort ? selectedSort : ''],
 	['page', '1'],
 ].filter(([, value]) => Boolean(value));
@@ -291,13 +277,11 @@ const ownerFilterLabel = selectedOwnerId === 'unassigned'
 const activeFilterChips = [
 	selectedSearch ? `Search: ${selectedSearch}` : '',
 	selectedExposure ? `Exposure: ${riskDisplayLabel(selectedExposure)}` : '',
-	selectedActionState ? `Action state: ${riskDisplayLabel(selectedActionState)}` : '',
 	selectedOwnerId ? `Owner: ${ownerFilterLabel}` : '',
-	selectedLifecycle ? `Lifecycle: ${lifecycleFilterLabels[selectedLifecycle]}` : '',
 	selectedSort !== defaultSort ? `Sort: ${sortLabels[selectedSort]}` : '',
 ].filter(Boolean);
 const hasSelectedControls = selectedView !== 'active' || activeFilterChips.length > 0;
-const hasNarrowedFilters = Boolean(selectedSearch || selectedExposure || selectedActionState || selectedOwnerId || selectedLifecycle);
+const hasNarrowedFilters = Boolean(selectedSearch || selectedExposure || selectedOwnerId);
 const filteredEmptyTitle = hasNarrowedFilters
 	? 'No risks match the current filters.'
 	: selectedView === 'need-action'
@@ -351,7 +335,7 @@ const riskPromptAreaTabLabels: Record<string, string> = {
 };
 const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][number]) => riskPromptAreaTabLabels[area.risk_area_key] ?? area.risk_area_title;
 ---
-<AuthenticatedLayout title={project ? `Risk Register — ${project.name} | WatchTower` : 'Risk Register | WatchTower'}>
+<AuthenticatedLayout title={project ? `Project Risks — ${project.name} | WatchTower` : 'Project Risks | WatchTower'}>
 	<section class="risk-register-page" data-risk-management-route data-risk-register-route data-feature-state={featureAccess.state}>
 		{project ? (
 			<>
@@ -359,49 +343,13 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 					workspaceName={workspaceName}
 					projectName={project.name}
 					projectRef={project.project_ref}
-					title="Risk Register"
+					title="Project Risks"
 					description="A clean register of source-of-truth project risks."
 					headingId="risk-register-heading"
+					inlineContext
 				/>
 
-				<ProjectContentPanel
-					title="Project risks"
-					helper="Scan all project risks in one register. Exposure, action state and lifecycle/status are shown separately."
-					headingId="risk-register-table-heading"
-				>
-					<div slot="action" class="risk-register-action">
-						<button
-							class="button button--secondary"
-							type="button"
-							aria-haspopup="dialog"
-							data-risk-prompts-open
-						>Risk Suggestions</button>
-						{canCreateRisk ? (
-							<a
-								class="button button--primary"
-								href={buildProjectNewRiskPath(workspaceSlug ?? '', project.slug)}
-								data-risk-create-action
-							>New Risk</a>
-						) : (
-							<button
-								class="button button--primary"
-								type="button"
-								disabled
-								aria-describedby="risk-create-unavailable"
-								data-risk-create-disabled
-								data-viewer-read-only
-							>New Risk</button>
-						)}
-						{!canCreateRisk && (
-							<DisabledActionHint
-								id="risk-create-unavailable"
-								allowed={false}
-								allowedText=""
-								disabledText="Viewer access is read-only. Risk creation is unavailable."
-							/>
-						)}
-					</div>
-
+				<section class="content-card risk-register-panel" aria-label="Project risks">
 					{promptDraftFeedback && (
 						<div class="risk-register-feedback" role="status" data-risk-prompt-create-page-feedback>
 							<p>{promptDraftFeedback}</p>
@@ -468,15 +416,6 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 												{selectedView === 'closed' && <span class="risk-register-field__note" id="risk-register-exposure-filter-note">Closed risks have no current exposure.</span>}
 											</label>
 											<label class="risk-register-field">
-												<span>Action state</span>
-												<select name="actionState">
-													<option value="" selected={!selectedActionState}>All action states</option>
-													{['red', 'amber', 'green'].map((state) => (
-														<option value={state} selected={selectedActionState === state}>{riskDisplayLabel(state)}</option>
-													))}
-												</select>
-											</label>
-											<label class="risk-register-field">
 												<span>Owner</span>
 												<select name="owner">
 													<option value="" selected={!selectedOwnerId}>All owners</option>
@@ -484,15 +423,6 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 													{ownerOptions.map(([ownerId, label]) => (
 														<option value={ownerId} selected={selectedOwnerId === ownerId}>{label}</option>
 													))}
-												</select>
-											</label>
-											<label class="risk-register-field">
-												<span>Lifecycle</span>
-												<select name="lifecycle">
-													<option value="" selected={!selectedLifecycle}>All lifecycle states</option>
-													<option value="draft" selected={selectedLifecycle === 'draft'}>Draft</option>
-													<option value="active" selected={selectedLifecycle === 'active'}>Active / Open</option>
-													<option value="closed" selected={selectedLifecycle === 'closed'}>Closed / Resolved</option>
 												</select>
 											</label>
 											<label class="risk-register-field">
@@ -505,7 +435,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 											</label>
 											<div class="risk-register-toolbar__actions">
 												<button class="button button--secondary" type="submit">Apply</button>
-												<a class="text-link" href={registerPath} data-risk-register-reset>Reset filters</a>
+												<a class="button button--secondary" href={registerPath} data-risk-register-reset>Reset</a>
 											</div>
 										</form>
 
@@ -524,7 +454,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 										{filteredRisks.length === 0 ? (
 											<EmptyState title={filteredEmptyTitle} data-risk-filter-empty-state>
 												<p>Adjust the search, filters or selected view to bring matching risks back into the register.</p>
-												<a class="button button--secondary" href={registerPath}>Reset filters</a>
+												<a class="button button--secondary" href={registerPath}>Reset</a>
 											</EmptyState>
 										) : (
 											<>
@@ -774,8 +704,42 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 							</div>
 						</div>
 					)}
-					<a class="text-link risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project</a>
-				</ProjectContentPanel>
+					<div class="risk-register-panel__actions">
+						<a class="button button--secondary risk-register-back-link" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to Project</a>
+						<div class="risk-register-action">
+							<button
+								class="button button--secondary"
+								type="button"
+								aria-haspopup="dialog"
+								data-risk-prompts-open
+							>Risk Suggestions</button>
+							{canCreateRisk ? (
+								<a
+									class="button button--primary"
+									href={buildProjectNewRiskPath(workspaceSlug ?? '', project.slug)}
+									data-risk-create-action
+								>New Risk</a>
+							) : (
+								<button
+									class="button button--primary"
+									type="button"
+									disabled
+									aria-describedby="risk-create-unavailable"
+									data-risk-create-disabled
+									data-viewer-read-only
+								>New Risk</button>
+							)}
+							{!canCreateRisk && (
+								<DisabledActionHint
+									id="risk-create-unavailable"
+									allowed={false}
+									allowedText=""
+									disabledText="Viewer access is read-only. Risk creation is unavailable."
+								/>
+							)}
+						</div>
+					</div>
+				</section>
 
 				<dialog class="risk-prompt-modal" aria-labelledby="risk-prompt-modal-title" data-risk-prompt-modal>
 					<div class="risk-prompt-modal__header">
@@ -1559,8 +1523,17 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 		gap: 0.9rem;
 	}
 
-	.risk-register-page :global(.project-content-panel h2) {
-		font-size: clamp(1.45rem, 2.4vw, 2rem);
+	.risk-register-panel {
+		display: grid;
+		gap: 1rem;
+		padding: clamp(1rem, 2vw, 1.5rem);
+	}
+
+	.risk-register-panel__actions {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
 	}
 
 	.risk-register-action {
@@ -2072,7 +2045,7 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 
 	.risk-register-toolbar {
 		display: grid;
-		grid-template-columns: minmax(13rem, 1.35fr) repeat(5, minmax(8.5rem, 1fr)) auto;
+		grid-template-columns: minmax(13rem, 1.35fr) repeat(3, minmax(8.5rem, 1fr)) auto;
 		gap: 0.65rem;
 		align-items: end;
 		margin-top: 0.65rem;
@@ -3171,6 +3144,16 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 	}
 
 	@media (max-width: 760px) {
+		.risk-register-panel__actions {
+			flex-direction: column;
+		}
+
+		.risk-register-panel__actions > .button,
+		.risk-register-back-link {
+			justify-content: center;
+			width: 100%;
+		}
+
 		.risk-register-action {
 			align-items: stretch;
 			flex-direction: column;

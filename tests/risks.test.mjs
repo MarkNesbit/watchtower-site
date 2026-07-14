@@ -3548,9 +3548,16 @@ test('Risk Register route renders a table-led scoped register and create access 
 
 	assert.match(route, /data-risk-register-route/);
 	assert.match(route, /ProjectPageHero/);
-	assert.match(route, /title="Risk Register"/);
-	assert.match(route, /title="Project risks"/);
-	assert.match(route, /helper="Scan all project risks in one register\. Exposure, action state and lifecycle\/status are shown separately\."/);
+	assert.match(route, /title="Project Risks"/);
+	assert.match(route, /inlineContext/);
+	assert.match(route, /aria-label="Project risks"/);
+	assert.doesNotMatch(route, /title="Project risks"/);
+	assert.doesNotMatch(route, /helper="Scan all project risks in one register\. Exposure, action state and lifecycle\/status are shown separately\."/);
+	assert.match(route, /class="content-card risk-register-panel"/);
+	assert.match(route, /class="risk-register-panel__actions"/);
+	assert.doesNotMatch(route, /<section class="content-card risk-register-panel" aria-label="Project risks">\s*<div class="risk-register-panel__actions">/);
+	assert.match(route, /\{risksLoadError \? \([\s\S]*<div class="risk-register-panel__actions">/);
+	assert.match(route, /Back to Project/);
 	assert.doesNotMatch(route, /ProjectControlPanel/);
 	assert.doesNotMatch(route, /Risk controls/);
 	assert.doesNotMatch(route, /Create and edit enabled/);
@@ -3651,9 +3658,11 @@ test('Risk Register route renders a table-led scoped register and create access 
 		assert.match(route, new RegExp(tab));
 	}
 	assert.doesNotMatch(route, /All risks/);
-	for (const control of ['Search risks', 'Exposure', 'Action state', 'Owner', 'Lifecycle', 'Sort']) {
+	for (const control of ['Search risks', 'Exposure', 'Owner', 'Sort']) {
 		assert.match(route, new RegExp(control));
 	}
+	assert.doesNotMatch(route, />Action state<\/span>[\s\S]*?<select name="actionState">/);
+	assert.doesNotMatch(route, />Lifecycle<\/span>[\s\S]*?<select name="lifecycle">/);
 	assert.match(route, /Closed risks have no current exposure\./);
 	assert.match(route, /RISK_REGISTER_EXPOSURE_FILTERS/);
 	assert.match(route, /Highest exposure first/);
@@ -3661,6 +3670,8 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /Review due soonest/);
 	assert.match(route, /Recently updated/);
 	assert.match(route, /data-risk-register-reset/);
+	assert.match(route, />Reset<\/a>/);
+	assert.doesNotMatch(route, /Reset filters/);
 	assert.match(route, /No risks match the current filters\./);
 	assert.match(route, /No risks currently need action\./);
 	assert.match(route, /No draft risks\./);
@@ -3710,9 +3721,9 @@ test('Risk Register route renders a table-led scoped register and create access 
 	assert.match(route, /<form class="risk-register-toolbar" method="get"/);
 	assert.match(route, /<input type="search" name="q"/);
 	assert.match(route, /<select name="exposure" disabled=\{selectedView === 'closed'\}/);
-	assert.match(route, /<select name="actionState">/);
+	assert.doesNotMatch(route, /<select name="actionState">/);
 	assert.match(route, /<select name="owner">/);
-	assert.match(route, /<select name="lifecycle">/);
+	assert.doesNotMatch(route, /<select name="lifecycle">/);
 	assert.match(route, /<select name="sort">/);
 	assert.doesNotMatch(route, /<textarea\b/);
 	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(/);
