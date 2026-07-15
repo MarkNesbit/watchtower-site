@@ -2,6 +2,8 @@ export * from './timelineAdapter.ts';
 export * from './timelineAggregator.ts';
 export * from './timelineCalendarGrid.ts';
 export * from './timelineDateRange.ts';
+export * from './timelineEventLayout.ts';
+export * from './timelineFixtures.ts';
 export * from './timelineLayers.ts';
 export * from './timelineModalRegistry.ts';
 export * from './timelineTypes.ts';
