@@ -149,6 +149,8 @@ Each visible date is a semantic button. Pointer, Enter and Space activation use 
 
 Adjacent-month dates are selectable. Only one date is selected at a time.
 
+Month navigation uses one explicit selected-date rule: previous and next month controls select the first day of the newly displayed month, while Today returns to the current month and selects today. The selected-day panel must always show the selected date that is visible in the rendered grid.
+
 ## Weekend Today And Selected States
 
 Saturday and Sunday headings and cells use a distinct dashed/striped treatment plus visible Weekend labels in cells where space allows. The distinction is not colour-only.

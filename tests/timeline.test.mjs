@@ -9,6 +9,9 @@ import {
 	getTimelineMonthFromDate,
 	getTodayDateOnly,
 	normaliseTimelineEvent,
+	timelineDayAriaLabel,
+	timelineDayClassName,
+	timelineMonthStartDate,
 	timelineMonthValue,
 	timelineEventOverlapsRange,
 } from '../src/lib/timeline/index.ts';
@@ -261,6 +264,13 @@ test('Timeline month navigation moves from December to January', () => {
 	assert.deepEqual(addTimelineMonths({ year: 2026, month: 12 }, 1), { year: 2027, month: 1 });
 });
 
+test('Timeline month navigation selects the first day of the newly displayed month', () => {
+	const previousMonth = addTimelineMonths({ year: 2026, month: 7 }, -1);
+	const nextMonth = addTimelineMonths({ year: 2026, month: 7 }, 1);
+	assert.equal(timelineMonthStartDate(previousMonth), '2026-06-01');
+	assert.equal(timelineMonthStartDate(nextMonth), '2026-08-01');
+});
+
 test('Timeline Today behaviour resolves the current month from today', () => {
 	const today = getTodayDateOnly(new Date('2026-07-14T12:00:00'));
 	assert.equal(today, '2026-07-14');
@@ -289,6 +299,21 @@ test('Timeline calendar identifies weekends separately from current-month state'
 	assert.equal(saturday?.isWeekend, true);
 	assert.equal(monday?.isWeekend, false);
 	assert.equal(saturday?.isCurrentMonth, true);
+});
+
+test('Timeline day cell class and aria helpers preserve the full state contract', () => {
+	const day = {
+		date: '2026-08-01',
+		dayNumber: 1,
+		isCurrentMonth: false,
+		isWeekend: true,
+		isToday: true,
+	};
+	assert.equal(
+		timelineDayClassName(day, '2026-08-01'),
+		'timeline-day timeline-day--adjacent timeline-day--weekend timeline-day--today timeline-day--selected',
+	);
+	assert.match(timelineDayAriaLabel(day, '2026-08-01'), /Saturday, 1 August 2026, today, selected, adjacent month, weekend/);
 });
 
 test('Timeline page uses the shared shell route and no live source adapters', async () => {
@@ -322,4 +347,26 @@ test('Timeline page includes accessible month controls states and selected-day p
 	assert.match(page, /data-timeline-error-state/);
 	assert.match(page, /\.timeline-layout \{[\s\S]*?grid-template-columns: minmax\(0, 2\.6fr\) minmax\(17rem, 1fr\);/);
 	assert.match(page, /@media \(max-width: 980px\) \{[\s\S]*?grid-template-columns: 1fr;/);
+});
+
+test('Timeline client month render clones the full server day-cell contract', async () => {
+	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
+	assert.match(page, /<template data-timeline-week-template>[\s\S]*?class="timeline-week" role="row"/);
+	assert.match(page, /<template data-timeline-day-template>[\s\S]*?data-timeline-day-contract="timeline-day-v1"[\s\S]*?data-timeline-day-number[\s\S]*?data-timeline-today-marker[\s\S]*?data-timeline-weekend-marker[\s\S]*?timeline-day__range-lanes[\s\S]*?timeline-day__point-area[\s\S]*?timeline-day__overflow/);
+	assert.match(page, /const row = createWeekRow\(\)/);
+	assert.match(page, /for \(const day of week\.days\) row\.append\(createDayButton\(day\)\)/);
+	assert.match(page, /templateContent\?\.cloneNode\(true\)/);
+	assert.match(page, /applyDayState\(resolvedButton, day\)/);
+	assert.doesNotMatch(page, /button\.innerHTML\s*=/);
+	assert.doesNotMatch(page, /const button = document\.createElement\('button'\);[\s\S]*?button\.className = \[/);
+});
+
+test('Timeline client navigation keeps selected date and panel consistent with the displayed month', async () => {
+	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
+	assert.match(page, /function navigateMonth\(offset\) \{[\s\S]*?const nextMonth = addTimelineMonths\(activeMonth, offset\);[\s\S]*?selectedDate = timelineMonthStartDate\(nextMonth\);[\s\S]*?renderMonth\(nextMonth\);/);
+	assert.match(page, /previousButton\?\.addEventListener\('click', \(\) => navigateMonth\(-1\)\)/);
+	assert.match(page, /nextButton\?\.addEventListener\('click', \(\) => navigateMonth\(1\)\)/);
+	assert.match(page, /todayButton\?\.addEventListener\('click', \(\) => \{[\s\S]*?selectedDate = todayDate;[\s\S]*?renderMonth\(getTimelineMonthFromDate\(todayDate\)\);/);
+	assert.match(page, /if \(selectedHeading\) selectedHeading\.textContent = formatTimelineDateLong\(selectedDate\)/);
+	assert.match(page, /page\?\.setAttribute\('data-timeline-selected-date', selectedDate\)/);
 });

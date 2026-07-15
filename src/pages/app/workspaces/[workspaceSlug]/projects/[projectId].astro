@@ -90,9 +90,9 @@ const projectTiles: ProjectTile[] = [
 		title: 'Timeline',
 		icon: '▦',
 		tone: 'blue',
-		attentionTone: 'neutral',
-		statusLabel: 'Informational',
-		ariaLabel: 'Open Timeline, Neutral state',
+		attentionTone: 'green',
+		statusLabel: 'Available',
+		ariaLabel: 'Open Timeline, Available',
 		href: null,
 		destination: 'timeline',
 	},
@@ -246,7 +246,7 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => {
 		: tile.destination === 'narrative'
 			? projectNarrativeTileSignal
 			: tile.destination === 'timeline'
-				? 'neutral'
+				? 'green'
 			: tile.destination === 'risks'
 				? riskTileSignal
 				: tile.destination === 'actions'
