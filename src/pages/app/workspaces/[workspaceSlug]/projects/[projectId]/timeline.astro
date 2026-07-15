@@ -312,10 +312,12 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 					</section>
 
 					<aside class="content-card timeline-day-panel" aria-labelledby="timeline-selected-date-heading" data-timeline-day-panel>
-						<p class="eyebrow">Selected day</p>
-						<h2 id="timeline-selected-date-heading" data-timeline-selected-heading>{initialSelectedDateLabel}</h2>
-						<p data-timeline-selected-copy>Fixture Timeline entries for this date will appear here when visible layers overlap the selected day.</p>
-						<div class="timeline-day-panel__groups" data-timeline-day-groups>
+						<div class="timeline-day-panel__header" data-timeline-day-panel-header>
+							<p class="eyebrow">Selected day</p>
+							<h2 id="timeline-selected-date-heading" data-timeline-selected-heading>{initialSelectedDateLabel}</h2>
+							<p data-timeline-selected-copy>Fixture Timeline entries for this date will appear here when visible layers overlap the selected day.</p>
+						</div>
+						<div class="timeline-day-panel__groups" data-timeline-day-groups tabindex="0" aria-label="Selected day Timeline entries">
 							<EmptyState title="No project activity is currently shown for this date.">
 								<p>No visible fixture entries overlap this date.</p>
 							</EmptyState>
@@ -509,6 +511,32 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 			meta: `${eventTypeLabel(event)} · ${event.status || event.attentionTone || 'No status'}`,
 			date: eventSummaryDateLabel(event, activeDate),
 			summary: event.summary || '',
+		};
+	}
+
+	function eventReferenceLabel(event) {
+		return event.sourceReference || event.category || 'Fixture';
+	}
+
+	function eventReferenceIdentifiesSource(event) {
+		if (!event.sourceReference) return false;
+		return /^(RISK|ISSUE|DEP|DEC|ACT)-/i.test(event.sourceReference);
+	}
+
+	function eventStatusDuplicatesTone(event) {
+		const status = (event.status || '').toLowerCase();
+		const tone = eventTone(event).toLowerCase();
+		return ['red', 'amber', 'green', 'neutral'].includes(status) && status === tone;
+	}
+
+	function panelPresentationForEvent(event) {
+		return {
+			referenceLabel: eventReferenceLabel(event),
+			referenceTone: eventTone(event),
+			showTypePill: (!event.sourceReference && !event.category) || (!eventReferenceIdentifiesSource(event) && event.sourceType !== 'project-date'),
+			typeLabel: eventTypeLabel(event),
+			showStatusPill: Boolean(event.status) && !eventStatusDuplicatesTone(event),
+			statusLabel: event.status || '',
 		};
 	}
 
@@ -763,6 +791,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		const item = createTemplateElement(panelRowTemplate, 'li', '');
 		const button = item.querySelector('[data-timeline-panel-event]');
 		if (!(button instanceof HTMLButtonElement)) return item;
+		const presentation = panelPresentationForEvent(event);
 		button.className = eventClassName('timeline-panel-event', event);
 		button.setAttribute('data-timeline-event-id', event.id);
 		button.setAttribute('aria-selected', selectedEventId === event.id ? 'true' : 'false');
@@ -771,13 +800,20 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		const icon = button.querySelector('[data-timeline-event-icon]');
 		if (icon) icon.textContent = eventIcon(event);
 		const reference = button.querySelector('[data-timeline-event-reference]');
-		if (reference) reference.textContent = event.sourceReference || 'Fixture';
+		if (reference) {
+			reference.textContent = presentation.referenceLabel;
+			reference.className = `timeline-panel-event__reference timeline-panel-event__reference--${presentation.referenceTone}`;
+		}
 		const type = button.querySelector('[data-timeline-event-type]');
-		if (type) type.textContent = eventTypeLabel(event);
+		if (type) {
+			type.textContent = presentation.typeLabel;
+			type.toggleAttribute('hidden', !presentation.showTypePill);
+		}
 		const status = button.querySelector('[data-timeline-event-status]');
 		if (status) {
-			status.textContent = event.status || event.attentionTone || 'Neutral';
+			status.textContent = presentation.statusLabel;
 			status.className = `timeline-pill timeline-pill--status timeline-pill--${eventTone(event)}`;
+			status.toggleAttribute('hidden', !presentation.showStatusPill);
 		}
 		const title = button.querySelector('[data-timeline-event-title]');
 		if (title) title.textContent = event.title;
@@ -903,13 +939,19 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	.timeline-layout {
 		display: grid;
 		grid-template-columns: minmax(0, 2.6fr) minmax(17rem, 1fr);
-		align-items: start;
+		align-items: stretch;
 		gap: 1rem;
 	}
 
 	.timeline-calendar-card,
 	.timeline-day-panel {
 		min-width: 0;
+		min-height: 0;
+	}
+
+	.timeline-calendar-card {
+		display: grid;
+		align-content: start;
 	}
 
 	.timeline-month-nav {
@@ -1450,12 +1492,19 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		position: sticky;
 		top: 1rem;
 		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
 		gap: 0.85rem;
+		overflow: hidden;
 	}
 
 	.timeline-day-panel h2 {
 		margin: 0;
 		font-size: clamp(1.25rem, 2vw, 1.65rem);
+	}
+
+	.timeline-day-panel__header {
+		display: grid;
+		gap: 0.55rem;
 	}
 
 	.timeline-day-panel .eyebrow,
@@ -1465,8 +1514,20 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 
 	.timeline-day-panel__groups {
 		display: grid;
+		align-content: start;
 		gap: 0.75rem;
+		min-height: 0;
+		margin: -0.15rem;
+		padding: 0.15rem 0.25rem 0.15rem 0.15rem;
 		outline: none;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		scrollbar-gutter: stable;
+	}
+
+	.timeline-day-panel__groups:focus-visible {
+		outline: 2px solid var(--accent-strong);
+		outline-offset: 2px;
 	}
 
 	.timeline-panel-group {
@@ -1543,7 +1604,9 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	}
 
 	.timeline-panel-event__reference {
-		color: var(--accent-strong);
+		color: var(--event-accent);
+		border-color: var(--event-border);
+		background: var(--event-background);
 	}
 
 	.timeline-pill--type {
@@ -1560,6 +1623,11 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	.timeline-pill--amber { color: var(--rag-amber-accent); border-color: var(--rag-amber-border); background: var(--rag-amber-background); }
 	.timeline-pill--green { color: var(--rag-green-accent); border-color: var(--rag-green-border); background: var(--rag-green-background); }
 	.timeline-pill--neutral { color: var(--rag-neutral-accent); border-color: var(--rag-neutral-border); background: var(--rag-neutral-background); }
+
+	.timeline-panel-event__reference--red { color: var(--rag-red-accent); border-color: var(--rag-red-border); background: var(--rag-red-background); }
+	.timeline-panel-event__reference--amber { color: var(--rag-amber-accent); border-color: var(--rag-amber-border); background: var(--rag-amber-background); }
+	.timeline-panel-event__reference--green { color: var(--rag-green-accent); border-color: var(--rag-green-border); background: var(--rag-green-background); }
+	.timeline-panel-event__reference--neutral { color: var(--rag-neutral-accent); border-color: var(--rag-neutral-border); background: var(--rag-neutral-background); }
 
 	.timeline-panel-event__title {
 		font-weight: 900;
@@ -1629,6 +1697,10 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 
 		.timeline-day-panel {
 			position: static;
+		}
+
+		.timeline-day-panel__groups {
+			max-height: 28rem;
 		}
 	}
 

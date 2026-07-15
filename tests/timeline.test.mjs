@@ -511,6 +511,62 @@ test('Timeline page exposes fixture event rendering layer controls and panel tem
 	assert.match(page, /if \(selectedEvent && !visibleLayerKeys\.has\(selectedEvent\.layer\)\) selectedEventId = ''/);
 });
 
+test('Timeline selected-day panel uses fixed header and internal scroll region', async () => {
+	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
+	assert.match(page, /<aside class="content-card timeline-day-panel"[\s\S]*?<div class="timeline-day-panel__header" data-timeline-day-panel-header>[\s\S]*?data-timeline-selected-heading[\s\S]*?data-timeline-selected-copy[\s\S]*?<\/div>\s*<div class="timeline-day-panel__groups" data-timeline-day-groups tabindex="0" aria-label="Selected day Timeline entries">/);
+	assert.match(page, /\.timeline-layout \{[\s\S]*?align-items: stretch;/);
+	assert.match(page, /\.timeline-day-panel \{[\s\S]*?grid-template-rows: auto minmax\(0, 1fr\);[\s\S]*?overflow: hidden;/);
+	assert.match(page, /\.timeline-day-panel__groups \{[\s\S]*?min-height: 0;[\s\S]*?overflow-y: auto;[\s\S]*?scrollbar-gutter: stable;/);
+	assert.match(page, /@media \(max-width: 980px\) \{[\s\S]*?\.timeline-day-panel \{[\s\S]*?position: static;[\s\S]*?\.timeline-day-panel__groups \{[\s\S]*?max-height: 28rem;/);
+});
+
+test('Timeline panel reference pills carry tone and remove redundant RAID pills', async () => {
+	const events = await aggregateTimelineEvents(
+		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
+		[createTimelineFixtureAdapter()],
+	);
+	const visibleEvents = filterTimelineEventsByLayers(events, getDefaultVisibleTimelineLayerKeys(DEFAULT_TIMELINE_LAYERS));
+	const selectedEvents = getTimelineEventsActiveOnDate(visibleEvents, '2026-07-16', DEFAULT_TIMELINE_LAYERS);
+	const redRisk = selectedEvents.find((event) => event.sourceReference === 'RISK-WAT-012');
+	const amberRisk = selectedEvents.find((event) => event.sourceReference === 'RISK-WAT-018');
+	const scheduledRisk = selectedEvents.find((event) => event.sourceReference === 'RISK-WAT-010');
+	const dependency = selectedEvents.find((event) => event.sourceReference === 'DEP-WAT-007');
+	const issue = selectedEvents.find((event) => event.sourceReference === 'ISSUE-WAT-009');
+	assert.equal(redRisk?.attentionTone, 'red');
+	assert.equal(redRisk?.status, 'Red');
+	assert.equal(amberRisk?.attentionTone, 'amber');
+	assert.equal(amberRisk?.status, 'Amber');
+	assert.equal(scheduledRisk?.attentionTone, 'neutral');
+	assert.equal(scheduledRisk?.status, 'Scheduled');
+	assert.equal(dependency?.attentionTone, 'amber');
+	assert.equal(dependency?.status, 'Amber');
+	assert.equal(issue?.attentionTone, 'amber');
+	assert.equal(issue?.status, 'Open');
+
+	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
+	assert.match(page, /function panelPresentationForEvent\(event\) \{[\s\S]*?referenceTone: eventTone\(event\),[\s\S]*?showTypePill: \(!event\.sourceReference && !event\.category\) \|\| \(!eventReferenceIdentifiesSource\(event\) && event\.sourceType !== 'project-date'\),[\s\S]*?showStatusPill: Boolean\(event\.status\) && !eventStatusDuplicatesTone\(event\),/);
+	assert.match(page, /reference\.className = `timeline-panel-event__reference timeline-panel-event__reference--\$\{presentation\.referenceTone\}`/);
+	assert.match(page, /type\.toggleAttribute\('hidden', !presentation\.showTypePill\)/);
+	assert.match(page, /status\.toggleAttribute\('hidden', !presentation\.showStatusPill\)/);
+	assert.match(page, /\.timeline-panel-event__reference--red \{ color: var\(--rag-red-accent\);/);
+	assert.match(page, /\.timeline-panel-event__reference--amber \{ color: var\(--rag-amber-accent\);/);
+});
+
+test('Timeline panel keeps project delivery category and distinct status presentation', async () => {
+	const events = await aggregateTimelineEvents(
+		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
+		[createTimelineFixtureAdapter()],
+	);
+	const plannedUat = events.find((event) => event.title === 'Planned UAT');
+	const integration = events.find((event) => event.title === 'Integration window');
+	assert.equal(plannedUat?.sourceReference, 'UAT');
+	assert.equal(plannedUat?.status, 'On track');
+	assert.equal(plannedUat?.attentionTone, 'green');
+	assert.equal(integration?.sourceReference, 'INT');
+	assert.equal(integration?.status, 'Amber');
+	assert.equal(integration?.attentionTone, 'amber');
+});
+
 test('Timeline event summaries use one shared overlay without native duplicate tooltips', async () => {
 	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
 	assert.equal((page.match(/data-timeline-event-summary-overlay/g) ?? []).length, 2);

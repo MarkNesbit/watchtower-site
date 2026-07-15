@@ -216,7 +216,17 @@ The selected-day panel includes every visible event active on the date:
 - point events whose start date equals the selected date;
 - range events whose inclusive range contains the selected date.
 
-Events are grouped by configured Timeline layer order. Empty groups are hidden. Rows show source icon, reference, title, source-type pill, status/attention pill, summary, date or range context and a future-open affordance. For ranges, the panel shows the full range plus day number within the range.
+At laptop and desktop widths, the selected-day panel stretches to the same visual height as the calendar card. Its header and explanatory copy remain outside the scrolling region. Event groups sit inside an internally scrollable body so busy days do not extend the page below the calendar. In the stacked narrower layout, the event body keeps a capped scroll height rather than forcing the whole page to grow excessively.
+
+Events are grouped by configured Timeline layer order. Empty groups are hidden. Rows show source icon, reference or category code, title, optional distinct status, summary, date or range context and a future-open affordance. For ranges, the panel shows the full range plus day number within the range.
+
+Reference and status presentation follows this rule:
+
+- the reference pill carries the current attention or action-state treatment;
+- a separate source-type pill is hidden when the reference already identifies the source type, such as `RISK-WAT-012`, `ISSUE-WAT-006`, `DEP-WAT-007`, `DEC-WAT-009` or future `ACT-WAT` records;
+- a secondary status pill is shown only when it adds different lifecycle or delivery meaning, such as Scheduled, Pending, On track, Watch or Upcoming;
+- duplicate Red, Amber, Green or neutral status pills are hidden where the reference pill already carries that same tone;
+- project-delivery rows may keep their short category/reference code plus a distinct delivery status.
 
 Selecting a point icon, range segment or panel row sets one selected event, keeps the selected-day context and highlights the matching row/control. If a layer toggle hides the selected event, selected-event state is cleared while selected-day state remains.
 
