@@ -1,13 +1,13 @@
 # Timeline Foundation Architecture
 
-**Status:** Foundation architecture plus fixture event rendering through `WT-TIMELINE-FOUNDATION-003`
+**Status:** Foundation architecture plus live Project Dates integration through `WT-TIMELINE-FOUNDATION-004`
 **Date:** 15 July 2026
 
 ## Purpose
 
 The Watchtower Timeline is a visualisation layer for significant delivery and assurance dates within a project. It is designed to show Project Dates, Risks, Issues, Dependencies, Assumptions, Decisions, Actions, future Project Events and future Delivery Periods in one consistent calendar model.
 
-The first visible route is now available at `/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline`. The page is read-only and currently uses bounded development fixtures to prove visual rendering. It does not create a Timeline database table, database migration, source modal or live source adapter.
+The first visible route is available at `/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline`. The page is read-only and now projects live Project Dates from Project Details through the shared Timeline adapter contract. It does not create a Timeline database table, duplicate source records, source modal or Timeline-native editing flow.
 
 ## Source Of Truth
 
@@ -169,13 +169,33 @@ An empty Timeline event collection is valid. The calendar still renders and the 
 
 Genuine route or context failures render a safe error state with a route back to the project area where possible. Internal errors, stack traces and raw identifiers are not exposed.
 
-`WT-TIMELINE-FOUNDATION-003` calls the Timeline aggregation contract with one explicit fixture adapter. It does not query Project Dates, Risks, Issues, Decisions, Dependencies or Actions.
+`WT-TIMELINE-FOUNDATION-004` calls the Timeline aggregation contract with a live Project Date adapter. The Timeline page itself does not query `project_dates`; it resolves workspace/project context and passes the visible rendered grid range to the adapter.
+
+## Live Project Date Source
+
+Project Dates are the first live Timeline source. Project Details remains authoritative: creating, changing, hiding or removing a Project Date changes what the Timeline displays after refresh, and the Timeline stores no duplicate event rows.
+
+The Project Date schema now supports:
+
+- `title`
+- controlled `date_type` category values: `project-start`, `target-end`, `review`, `gateway`, `milestone`, `uat`, `testing`, `load-testing`, `integration`, `deployment`, `cutover`, `training`, `go-live`, `hypercare`, `other`
+- `start_date`
+- optional inclusive `end_date`
+- optional `description`
+- lifecycle `status`: `scheduled`, `upcoming`, `started`, `complete`, `delayed`, `at-risk`, `cancelled`
+- `show_on_timeline`, defaulting to true
+
+The migration backfills existing `start_date` values from legacy `target_date`, maps older date types such as `stage_gate` and `load_test` to the new category values, preserves comments and audit fields, and leaves `target_date` in place for compatibility while the application writes both values.
+
+`src/lib/timeline/projectDateTimelineAdapter.ts` maps visible, non-removed, `show_on_timeline = true` Project Dates to `TimelineEvent` records under the `project-delivery` layer. It preserves source IDs, workspace/project ownership, Project Details edit readiness, `canMove: false`, category presentation and inclusive ranges. Hidden, wrong-project, wrong-workspace and out-of-range records are excluded.
+
+Project Date category and status remain separate. Category drives icon/category presentation. Status and date-readiness drive only source-derived attention treatment; a scheduled future Project Date is not automatically Green on the Timeline merely because it exists.
 
 ## Fixture Strategy
 
 Fixture events live in `src/lib/timeline/timelineFixtures.ts`. They are created as `TimelineEvent` objects, scoped to the currently resolved workspace and project context, and passed through `aggregateTimelineEvents`.
 
-The fixture set includes July 2026 UAT, integration, cutover, training and hypercare ranges, Risk, Issue, Dependency and Decision point events, adjacent-month events and a hidden-by-default Action. The fixtures are non-persistent and must not be described as live production records.
+Project delivery fixtures are no longer used as ordinary Timeline data. They remain available only when tests or an explicit development fixture mode request them. RAID fixtures may be enabled only through `PUBLIC_WATCHTOWER_TIMELINE_FIXTURES === 'true'` in development, remain non-persistent and must not be described as live production records. Live RAID adapters are excluded from this slice.
 
 ## Event Rendering Rules
 
@@ -183,7 +203,7 @@ Point events render as compact focusable icon controls inside the day cell point
 
 Range events render as horizontal bars over the week row. A same-day range is normalised to a point event before rendering. Ranges use their source/category presentation for shape and label while Red, Amber, Green and neutral status remains a separate tone treatment.
 
-Completed fixtures remain visible with a subdued presentation. Neutral fixtures are not presented as Green unless their source state explicitly says Green.
+Completed events remain visible with a subdued presentation. Neutral events are not presented as Green unless their source state explicitly says Green.
 
 ## Range Segmentation And Lanes
 
@@ -263,7 +283,7 @@ This ordering is also used for visible point icons and range lane allocation.
 
 ## Legend And Accessibility
 
-The legend shows only source types represented by fixture events and uses icon plus text. It does not imply that colour alone communicates status.
+The legend shows only source types represented by currently loaded Timeline events and uses icon plus text. It does not imply that colour alone communicates status.
 
 Event controls expose title, source type, point/range shape, date or range, status and summary through accessible labels. Hover and focus show one shared compact summary overlay. The summary is rendered as a fixed-position overlay outside day-cell content, is associated with the active trigger through `aria-describedby`, and does not use native `title` attributes for event triggers. Escape closes the active summary and the layer details panel.
 
@@ -350,7 +370,6 @@ Future Timeline UI must provide accessible event labels and must not rely on col
 
 The monthly page shell still excludes:
 
-- live Project Date integration;
 - live Risk, Issue, Decision, Dependency or Action adapters;
 - reusable source modals;
 - event creation;

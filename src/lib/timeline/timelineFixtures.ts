@@ -4,6 +4,10 @@ import type { TimelineEvent } from './timelineTypes.ts';
 const FIXTURE_SOURCE = 'timeline-foundation-003-fixture';
 
 type FixtureEventSeed = Omit<TimelineEvent, 'workspaceId' | 'projectId' | 'canView' | 'canEdit' | 'canMove' | 'allDay'>;
+export type TimelineFixtureOptions = {
+	includeProjectDelivery?: boolean;
+	includeRaid?: boolean;
+};
 
 const TIMELINE_FIXTURE_EVENT_SEEDS: FixtureEventSeed[] = [
 	{
@@ -246,8 +250,16 @@ const TIMELINE_FIXTURE_EVENT_SEEDS: FixtureEventSeed[] = [
 	},
 ];
 
-export function createTimelineFixtureEvents(context: Pick<TimelineAdapterContext, 'workspaceId' | 'projectId'>): TimelineEvent[] {
-	return TIMELINE_FIXTURE_EVENT_SEEDS.map((event) => ({
+export function createTimelineFixtureEvents(
+	context: Pick<TimelineAdapterContext, 'workspaceId' | 'projectId'>,
+	options: TimelineFixtureOptions = {},
+): TimelineEvent[] {
+	const includeProjectDelivery = options.includeProjectDelivery ?? false;
+	const includeRaid = options.includeRaid ?? true;
+	return TIMELINE_FIXTURE_EVENT_SEEDS.filter((event) => (
+		(event.sourceType === 'project-date' && includeProjectDelivery)
+		|| (event.sourceType !== 'project-date' && includeRaid)
+	)).map((event) => ({
 		...event,
 		id: `${FIXTURE_SOURCE}:${event.id}`,
 		sourceId: `${FIXTURE_SOURCE}:${event.sourceId}`,
@@ -261,9 +273,9 @@ export function createTimelineFixtureEvents(context: Pick<TimelineAdapterContext
 	}));
 }
 
-export function createTimelineFixtureAdapter(): TimelineSourceAdapter {
+export function createTimelineFixtureAdapter(options: TimelineFixtureOptions = {}): TimelineSourceAdapter {
 	return {
 		sourceType: 'project-date',
-		getEvents: async (context) => createTimelineFixtureEvents(context),
+		getEvents: async (context) => createTimelineFixtureEvents(context, options),
 	};
 }

@@ -670,11 +670,11 @@ The priority is to establish the database foundation safely and repeatably throu
 
 WT-PROJ-DATES-001 adds `project_dates` and `project_date_comments` as structured, workspace-scoped project setup records.
 
-`project_dates` belongs to one `organisation_id` and one `project_id`, with a composite foreign key back to `projects(id, organisation_id)`. Supported `date_type` values are limited to seven options: `start_date`, `target_end_date`, `review_date`, `uat`, `stage_gate`, `load_test` and `other`. `other` requires `custom_label`; non-`other` values keep `custom_label` null. `warning_days` defaults to 14 so future configurable warning periods can be added without changing the table shape. `removed_at` is used for soft removal.
+`project_dates` belongs to one `organisation_id` and one `project_id`, with a composite foreign key back to `projects(id, organisation_id)`. Supported `date_type` category values are `project-start`, `target-end`, `review`, `gateway`, `milestone`, `uat`, `testing`, `load-testing`, `integration`, `deployment`, `cutover`, `training`, `go-live`, `hypercare` and `other`. `title` is required for display. `start_date` is the application-required Timeline start date for new records, while the legacy `target_date` column is retained during compatibility migration. `end_date` is optional and inclusive. `description` is optional. `status` is controlled separately from category with `scheduled`, `upcoming`, `started`, `complete`, `delayed`, `at-risk` and `cancelled`. `show_on_timeline` defaults true so existing records remain visible after migration. `warning_days` defaults to 14 so future configurable warning periods can be added without changing the table shape. `removed_at` is used for soft removal.
 
 `project_date_comments` belongs to one project date and repeats `organisation_id` and `project_id` for explicit workspace/project scoping. A composite foreign key ensures comments cannot cross-link to a date from another project or workspace. Comments preserve author and timestamp and do not change the date itself.
 
-Project dates are intended to auto-populate the future Project Timeline capability. They do not replace Risks, Issues, Dependencies, Assumptions, Actions, Decisions or Project Narrative.
+Project dates now auto-populate the Project delivery layer of the Timeline through a transient adapter projection. The Timeline does not persist duplicate event rows. They do not replace Risks, Issues, Dependencies, Assumptions, Actions, Decisions or Project Narrative.
 
 ---
 

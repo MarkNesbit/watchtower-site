@@ -3,6 +3,7 @@ import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.a
 import EmptyState from '../../../../../../components/app/EmptyState.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import { can } from '../../../../../../lib/permissions';
+import { canChangeProjectDates } from '../../../../../../lib/projectDates';
 import { buildProjectPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
 import {
@@ -12,6 +13,7 @@ import {
 	TIMELINE_WEEKDAYS,
 	aggregateTimelineEvents,
 	buildTimelineCalendarGrid,
+	createProjectDateTimelineAdapter,
 	createTimelineFixtureAdapter,
 	formatTimelineDateLong,
 	formatTimelineMonthHeading,
@@ -31,6 +33,8 @@ const accessToken = getServerAccessToken(Astro.cookies);
 const todayDate = getTodayDateOnly();
 const currentMonth = getTimelineMonthFromDate(todayDate);
 const calendarWeeks = buildTimelineCalendarGrid(currentMonth, todayDate);
+const initialVisibleStartDate = calendarWeeks[0]?.days[0]?.date ?? timelineMonthStartDate(currentMonth);
+const initialVisibleEndDate = calendarWeeks.at(-1)?.days.at(-1)?.date ?? initialVisibleStartDate;
 const initialSelectedDate = todayDate;
 const initialSelectedDateLabel = formatTimelineDateLong(initialSelectedDate);
 const initialMonthHeading = formatTimelineMonthHeading(currentMonth);
@@ -83,22 +87,38 @@ try {
 		} else {
 			project = data;
 			try {
+				let canEditProjectDates = false;
+				try {
+					canEditProjectDates = await canChangeProjectDates(workspace, organisation.id, data.id, serverSupabase, accessToken);
+				} catch {
+					canEditProjectDates = false;
+				}
 				const { data: userData } = accessToken
 					? await serverSupabase.auth.getUser(accessToken)
 					: await serverSupabase.auth.getUser();
+				const timelineAdapters = [
+					createProjectDateTimelineAdapter({
+						client: serverSupabase,
+						workspaceRole: workspace.role,
+						canEditProjectDates,
+					}),
+				];
+				if (import.meta.env.DEV && import.meta.env.PUBLIC_WATCHTOWER_TIMELINE_FIXTURES === 'true') {
+					timelineAdapters.push(createTimelineFixtureAdapter({ includeRaid: true, includeProjectDelivery: false }));
+				}
 				const aggregatedTimelineEvents = await aggregateTimelineEvents(
 					{
 						workspaceId: organisation.id,
 						projectId: data.id,
-						visibleStartDate: '2026-06-01',
-						visibleEndDate: '2026-08-31',
+						visibleStartDate: initialVisibleStartDate,
+						visibleEndDate: initialVisibleEndDate,
 						viewerId: userData.user?.id ?? '',
 						permissionContext: {
 							viewerId: userData.user?.id ?? '',
 							workspaceRole: workspace.role,
 						},
 					},
-					[createTimelineFixtureAdapter()],
+					timelineAdapters,
 				);
 				timelineEventCount = aggregatedTimelineEvents.length;
 				timelineEvents = aggregatedTimelineEvents;
@@ -315,11 +335,11 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 						<div class="timeline-day-panel__header" data-timeline-day-panel-header>
 							<p class="eyebrow">Selected day</p>
 							<h2 id="timeline-selected-date-heading" data-timeline-selected-heading>{initialSelectedDateLabel}</h2>
-							<p data-timeline-selected-copy>Fixture Timeline entries for this date will appear here when visible layers overlap the selected day.</p>
+							<p data-timeline-selected-copy>Live Project Dates appear here when visible layers overlap the selected day.</p>
 						</div>
 						<div class="timeline-day-panel__groups" data-timeline-day-groups tabindex="0" aria-label="Selected day Timeline entries">
 							<EmptyState title="No project activity is currently shown for this date.">
-								<p>No visible fixture entries overlap this date.</p>
+								<p>No visible Timeline entries overlap this date.</p>
 							</EmptyState>
 						</div>
 						<template data-timeline-panel-group-template>
@@ -433,6 +453,29 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		'project-event': { label: 'Project event', icon: '○' },
 		'delivery-period': { label: 'Delivery period', icon: '▬' },
 	};
+	const iconPresentation = {
+		'project-start': '▶',
+		'target-end': '■',
+		review: '◌',
+		gateway: '◇',
+		milestone: '◆',
+		uat: '✓',
+		testing: '✓',
+		'load-testing': '▣',
+		integration: '↔',
+		deployment: '⬆',
+		cutover: '⇄',
+		training: '◉',
+		'go-live': '✦',
+		hypercare: '+',
+		'project-date': '◆',
+		risk: '!',
+		issue: '!',
+		dependency: '↔',
+		assumption: '?',
+		decision: '✓',
+		action: '☑',
+	};
 	const parseJson = (selector, fallback) => {
 		const element = document.querySelector(selector);
 		if (!element?.textContent) return fallback;
@@ -488,7 +531,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	}
 
 	function eventIcon(event) {
-		return sourcePresentation[event.sourceType]?.icon || '•';
+		return iconPresentation[event.iconKey] || sourcePresentation[event.sourceType]?.icon || '•';
 	}
 
 	function eventTone(event) {
@@ -536,10 +579,11 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	}
 
 	function eventSummaryText(event, activeDate = selectedDate) {
+		const typeLabel = event.category ? `${eventTypeLabel(event)} · ${event.category}` : eventTypeLabel(event);
 		return {
 			reference: event.sourceReference || '',
 			title: event.title,
-			meta: `${eventTypeLabel(event)} · ${event.status || event.attentionTone || 'No status'}`,
+			meta: `${typeLabel} · ${event.status || event.attentionTone || 'No status'}`,
 			date: eventSummaryDateLabel(event, activeDate),
 			summary: event.summary || '',
 		};
@@ -580,8 +624,8 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		const selectedEvents = getTimelineEventsActiveOnDate(visibleEvents, selectedDate, timelineLayers);
 		if (selectedHeading) selectedHeading.textContent = `${formatTimelineDateLong(selectedDate)} · ${selectedEvents.length} ${selectedEvents.length === 1 ? 'entry' : 'entries'}`;
 		if (selectedCopy) selectedCopy.textContent = selectedEvents.length
-			? 'Fixture entries only. Source opening and editing arrive in later Timeline slices.'
-			: 'No visible fixture entries overlap this date.';
+			? 'Project Dates are shown from Project Details. Source opening and editing arrive in later Timeline slices.'
+			: 'No visible Timeline entries overlap this date.';
 		page?.setAttribute('data-timeline-selected-date', selectedDate);
 		page?.setAttribute('data-timeline-selected-event', selectedEventId);
 		renderSelectedPanel(selectedEvents);
@@ -861,7 +905,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		if (!selectedEvents.length) {
 			const empty = document.createElement('div');
 			empty.className = 'empty-state empty-state--neutral';
-			empty.innerHTML = '<h3>No project activity is currently shown for this date.</h3><p>No visible fixture entries overlap this date.</p>';
+			empty.innerHTML = '<h3>No project activity is currently shown for this date.</h3><p>No visible Timeline entries overlap this date.</p>';
 			panelGroups.replaceChildren(empty);
 			return;
 		}

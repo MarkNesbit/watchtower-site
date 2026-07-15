@@ -13,6 +13,8 @@ import {
 	canChangeProjectDates,
 	deriveProjectDateStatus,
 	isProjectDateType,
+	normaliseProjectDateType,
+	projectDateStatusLabel,
 	projectDateTypeLabel,
 	projectDateWarningDays,
 	saveProjectDate,
@@ -22,6 +24,7 @@ const migrationUrl = new URL('../supabase/migrations/20260630000200_project_peop
 const projectInfoMigrationUrl = new URL('../supabase/migrations/20260630000300_project_information_fields.sql', import.meta.url);
 const projectDatesMigrationUrl = new URL('../supabase/migrations/20260701000100_project_dates_timeline_readiness.sql', import.meta.url);
 const projectDatesWarningDaysMigrationUrl = new URL('../supabase/migrations/20260702000200_allow_start_date_zero_warning_days.sql', import.meta.url);
+const projectDatesTimelineMigrationUrl = new URL('../supabase/migrations/20260715000100_project_dates_live_timeline_integration.sql', import.meta.url);
 const detailsPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/details.astro', import.meta.url);
 const routesUrl = new URL('../src/lib/projectRoutes.ts', import.meta.url);
 const projectsLibraryUrl = new URL('../src/lib/projects.ts', import.meta.url);
@@ -134,30 +137,32 @@ test('Project people roles are controlled and human-readable', () => {
 });
 
 test('Project date types and derived status are controlled and timeline-ready', () => {
-	assert.deepEqual(PROJECT_DATE_TYPES, ['start_date', 'target_end_date', 'review_date', 'uat', 'stage_gate', 'load_test', 'other']);
-	assert.equal(PROJECT_DATE_TYPES.length, 7);
-	assert.equal(isProjectDateType('stage_gate'), true);
+	assert.deepEqual(PROJECT_DATE_TYPES, ['project-start', 'target-end', 'review', 'gateway', 'milestone', 'uat', 'testing', 'load-testing', 'integration', 'deployment', 'cutover', 'training', 'go-live', 'hypercare', 'other']);
+	assert.equal(PROJECT_DATE_TYPES.length, 15);
+	assert.equal(isProjectDateType('gateway'), true);
+	assert.equal(normaliseProjectDateType('stage_gate'), 'gateway');
 	assert.equal(isProjectDateType('forecast_date'), false);
 	assert.equal(projectDateTypeLabel('uat'), 'UAT');
 	assert.equal(projectDateTypeLabel('other', 'Board approval'), 'Board approval');
+	assert.equal(projectDateStatusLabel('at-risk'), 'At risk');
 	const now = new Date('2026-07-01T12:00:00Z');
-	assert.equal(projectDateWarningDays('start_date'), 0);
-	assert.equal(projectDateWarningDays('review_date'), 2);
+	assert.equal(projectDateWarningDays('project-start'), 0);
+	assert.equal(projectDateWarningDays('review'), 2);
 	assert.equal(projectDateWarningDays('uat'), 7);
-	assert.equal(projectDateWarningDays('load_test'), 7);
-	assert.equal(projectDateWarningDays('stage_gate'), 14);
+	assert.equal(projectDateWarningDays('load-testing'), 7);
+	assert.equal(projectDateWarningDays('gateway'), 14);
 	assert.equal(projectDateWarningDays('other'), 14);
-	assert.deepEqual(deriveProjectDateStatus(null, projectDateWarningDays('start_date'), now, 'start_date'), { tone: 'amber', label: 'Amber', text: 'Amber - date not set' });
-	assert.deepEqual(deriveProjectDateStatus('2026-06-30', projectDateWarningDays('start_date'), now, 'start_date'), { tone: 'green', label: 'Green', text: 'Green - started' });
-	assert.deepEqual(deriveProjectDateStatus('2026-07-01', projectDateWarningDays('start_date'), now, 'start_date'), { tone: 'green', label: 'Green', text: 'Green - starting today' });
-	assert.deepEqual(deriveProjectDateStatus('2026-06-30', projectDateWarningDays('target_end_date'), now, 'target_end_date'), { tone: 'red', label: 'Red', text: 'Red - overdue' });
-	assert.deepEqual(deriveProjectDateStatus('2026-07-03', projectDateWarningDays('review_date'), now, 'review_date'), { tone: 'amber', label: 'Amber', text: 'Amber - within 2 days' });
-	assert.deepEqual(deriveProjectDateStatus('2026-07-04', projectDateWarningDays('review_date'), now, 'review_date'), { tone: 'green', label: 'Green', text: 'Green - scheduled' });
-	assert.deepEqual(deriveProjectDateStatus('2026-06-30', projectDateWarningDays('review_date'), now, 'review_date'), { tone: 'red', label: 'Red', text: 'Red - review overdue' });
+	assert.deepEqual(deriveProjectDateStatus(null, projectDateWarningDays('project-start'), now, 'project-start'), { tone: 'amber', label: 'Amber', text: 'Amber - date not set' });
+	assert.deepEqual(deriveProjectDateStatus('2026-06-30', projectDateWarningDays('project-start'), now, 'project-start'), { tone: 'green', label: 'Green', text: 'Green - started' });
+	assert.deepEqual(deriveProjectDateStatus('2026-07-01', projectDateWarningDays('project-start'), now, 'project-start'), { tone: 'green', label: 'Green', text: 'Green - starting today' });
+	assert.deepEqual(deriveProjectDateStatus('2026-06-30', projectDateWarningDays('target-end'), now, 'target-end'), { tone: 'red', label: 'Red', text: 'Red - overdue' });
+	assert.deepEqual(deriveProjectDateStatus('2026-07-03', projectDateWarningDays('review'), now, 'review'), { tone: 'amber', label: 'Amber', text: 'Amber - within 2 days' });
+	assert.deepEqual(deriveProjectDateStatus('2026-07-04', projectDateWarningDays('review'), now, 'review'), { tone: 'green', label: 'Green', text: 'Green - scheduled' });
+	assert.deepEqual(deriveProjectDateStatus('2026-06-30', projectDateWarningDays('review'), now, 'review'), { tone: 'red', label: 'Red', text: 'Red - review overdue' });
 	assert.deepEqual(deriveProjectDateStatus('2026-07-08', projectDateWarningDays('uat'), now, 'uat'), { tone: 'amber', label: 'Amber', text: 'Amber - within 7 days' });
 	assert.deepEqual(deriveProjectDateStatus('2026-07-09', projectDateWarningDays('uat'), now, 'uat'), { tone: 'green', label: 'Green', text: 'Green - scheduled' });
-	assert.deepEqual(deriveProjectDateStatus('2026-07-08', projectDateWarningDays('load_test'), now, 'load_test'), { tone: 'amber', label: 'Amber', text: 'Amber - within 7 days' });
-	assert.deepEqual(deriveProjectDateStatus('2026-07-15', projectDateWarningDays('stage_gate'), now, 'stage_gate'), { tone: 'amber', label: 'Amber', text: 'Amber - within 14 days' });
+	assert.deepEqual(deriveProjectDateStatus('2026-07-08', projectDateWarningDays('load-testing'), now, 'load-testing'), { tone: 'amber', label: 'Amber', text: 'Amber - within 7 days' });
+	assert.deepEqual(deriveProjectDateStatus('2026-07-15', projectDateWarningDays('gateway'), now, 'gateway'), { tone: 'amber', label: 'Amber', text: 'Amber - within 14 days' });
 	assert.deepEqual(deriveProjectDateStatus('2026-07-15', projectDateWarningDays('other'), now, 'other'), { tone: 'amber', label: 'Amber', text: 'Amber - within 14 days' });
 	assert.deepEqual(deriveProjectDateStatus('2026-07-16', projectDateWarningDays('other'), now, 'other'), { tone: 'green', label: 'Green', text: 'Green - scheduled' });
 });
@@ -226,11 +231,11 @@ test('Project date cards preserve default slots and hide removed added dates', (
 		},
 	], { start_date: '2026-05-01', target_end_date: '2026-12-01', next_review_date: null }, now);
 
-	const startCard = cards.find((card) => card.dateType === 'start_date' && card.isDefault);
+	const startCard = cards.find((card) => card.dateType === 'project-start' && card.isDefault);
 	assert.equal(startCard?.id, 'active-start');
 	assert.equal(startCard?.targetDate, '2026-05-01');
 	assert.equal(startCard?.status.tone, 'green');
-	const targetEndCard = cards.find((card) => card.dateType === 'target_end_date' && card.isDefault);
+	const targetEndCard = cards.find((card) => card.dateType === 'target-end' && card.isDefault);
 	assert.equal(targetEndCard?.id, 'active-target-end');
 	assert.equal(targetEndCard?.targetDate, '2026-12-01');
 	assert.equal(targetEndCard?.status.tone, 'green');
@@ -278,15 +283,15 @@ test('Project date cards use legacy default dates over stale structured rows', (
 		next_review_date: '2026-07-15',
 	}, now);
 
-	const startCard = cards.find((card) => card.dateType === 'start_date' && card.isDefault);
+	const startCard = cards.find((card) => card.dateType === 'project-start' && card.isDefault);
 	assert.equal(startCard?.id, 'stale-start');
 	assert.equal(startCard?.targetDate, '2026-06-15');
 	assert.deepEqual(startCard?.status, { tone: 'green', label: 'Green', text: 'Green - started' });
-	const targetEndCard = cards.find((card) => card.dateType === 'target_end_date' && card.isDefault);
+	const targetEndCard = cards.find((card) => card.dateType === 'target-end' && card.isDefault);
 	assert.equal(targetEndCard?.id, 'empty-target-end');
 	assert.equal(targetEndCard?.targetDate, '2026-09-30');
 	assert.equal(targetEndCard?.status.tone, 'green');
-	const reviewCard = cards.find((card) => card.dateType === 'review_date' && card.isDefault);
+	const reviewCard = cards.find((card) => card.dateType === 'review' && card.isDefault);
 	assert.equal(reviewCard?.id, null);
 	assert.equal(reviewCard?.targetDate, '2026-07-15');
 	assert.equal(reviewCard?.status.tone, 'green');
@@ -306,7 +311,7 @@ test('Project date cards show saved structured Start date when legacy Start date
 		},
 	], { start_date: null, target_end_date: null, next_review_date: null }, new Date('2026-07-01T12:00:00Z'));
 
-	const startCard = cards.find((card) => card.dateType === 'start_date' && card.isDefault);
+	const startCard = cards.find((card) => card.dateType === 'project-start' && card.isDefault);
 	assert.equal(startCard?.id, 'saved-start');
 	assert.equal(startCard?.targetDate, '2026-06-30');
 	assert.deepEqual(startCard?.status, { tone: 'green', label: 'Green', text: 'Green - started' });
@@ -325,21 +330,33 @@ test('Saving Start date from a default missing card writes the structured row an
 	const { client, operations } = createProjectDateSaveClient();
 	const savedDate = await saveProjectDate('acme-delivery', 'alpha', {
 		projectDateId: '',
-		dateType: 'start_date',
+		dateType: 'project-start',
 		customLabel: '',
-		targetDate: '2026-06-30',
+		title: 'Project start',
+		startDate: '2026-06-30',
+		endDate: '',
+		description: 'Kick-off date',
+		status: 'started',
+		showOnTimeline: 'true',
 		comment: '',
 	}, client, 'access-token');
 
-	assert.equal(savedDate?.date_type, 'start_date');
+	assert.equal(savedDate?.date_type, 'project-start');
+	assert.equal(savedDate?.start_date, '2026-06-30');
 	assert.equal(savedDate?.target_date, '2026-06-30');
 	const dateInsert = operations.find((operation) => operation.table === 'project_dates' && operation.action === 'insert');
 	assert.deepEqual(dateInsert?.payload, {
 		organisation_id: 'org-1',
 		project_id: 'project-1',
-		date_type: 'start_date',
+		date_type: 'project-start',
 		custom_label: null,
+		title: 'Project start',
+		start_date: '2026-06-30',
 		target_date: '2026-06-30',
+		end_date: null,
+		description: 'Kick-off date',
+		status: 'started',
+		show_on_timeline: true,
 		warning_days: 0,
 		is_key_date: true,
 	});
@@ -414,8 +431,28 @@ test('Project date warning-days migration permits Start date persistence without
 	assert.match(sql, /drop constraint if exists project_dates_warning_days_check/);
 	assert.match(sql, /add constraint project_dates_warning_days_check check \(warning_days between 0 and 365\)/);
 	assert.doesNotMatch(sql, /create table public\.project_dates|date_type in|alter table public\.projects/i);
-	assert.equal(projectDateWarningDays('start_date'), 0);
-	assert.equal(projectDateWarningDays('target_end_date'), 14);
+	assert.equal(projectDateWarningDays('project-start'), 0);
+	assert.equal(projectDateWarningDays('target-end'), 14);
+});
+
+test('Project Dates live Timeline migration preserves existing records and adds range visibility fields', async () => {
+	const sql = await readFile(projectDatesTimelineMigrationUrl, 'utf8');
+	for (const field of ['title', 'start_date', 'end_date', 'description', 'status', 'show_on_timeline']) {
+		assert.match(sql, new RegExp(`add column if not exists ${field}`));
+	}
+	assert.match(sql, /start_date = coalesce\(start_date, target_date\)/);
+	assert.match(sql, /when 'start_date' then 'project-start'/);
+	assert.match(sql, /when 'target_end_date' then 'target-end'/);
+	assert.match(sql, /when 'review_date' then 'review'/);
+	assert.match(sql, /when 'stage_gate' then 'gateway'/);
+	assert.match(sql, /when 'load_test' then 'load-testing'/);
+	assert.match(sql, /show_on_timeline = coalesce\(show_on_timeline, true\)/);
+	assert.match(sql, /project_dates_type_check[\s\S]*'project-start'[\s\S]*'go-live'[\s\S]*'hypercare'[\s\S]*'other'/);
+	assert.match(sql, /project_dates_range_check[\s\S]*end_date >= start_date/);
+	assert.match(sql, /project_dates_status_check[\s\S]*'scheduled'[\s\S]*'at-risk'[\s\S]*'cancelled'/);
+	assert.match(sql, /project_dates_timeline_idx[\s\S]*show_on_timeline[\s\S]*start_date[\s\S]*end_date/);
+	assert.match(sql, /grant insert \([\s\S]*title[\s\S]*start_date[\s\S]*show_on_timeline[\s\S]*\) on public\.project_dates to authenticated/);
+	assert.doesNotMatch(sql, /create table public\.timeline|create table public\.timeline_events/i);
 });
 
 test('Project people helper enforces central RBAC and scopes assignment writes through workspace project route', async () => {
@@ -457,9 +494,10 @@ test('Project information helper validates controlled values dates permissions a
 
 test('Project date helper validates authority scope comments and legacy compatibility', async () => {
 	const source = await readFile(datesLibraryUrl, 'utf8');
-	assert.match(source, /export const PROJECT_DATE_TYPES = \['start_date', 'target_end_date', 'review_date', 'uat', 'stage_gate', 'load_test', 'other'\]/);
+	assert.match(source, /export const PROJECT_DATE_TYPES = \[[\s\S]*'project-start'[\s\S]*'target-end'[\s\S]*'review'[\s\S]*'gateway'[\s\S]*'milestone'[\s\S]*'go-live'[\s\S]*'hypercare'[\s\S]*'other'/);
+	assert.match(source, /export const PROJECT_DATE_STATUSES = \['scheduled', 'upcoming', 'started', 'complete', 'delayed', 'at-risk', 'cancelled'\]/);
 	assert.match(source, /export const PROJECT_DATE_WARNING_DAYS = 14/);
-	assert.match(source, /PROJECT_DATE_TYPE_WARNING_DAYS[\s\S]*start_date: 0[\s\S]*review_date: 2[\s\S]*uat: 7[\s\S]*stage_gate: 14[\s\S]*load_test: 7[\s\S]*other: 14/);
+	assert.match(source, /PROJECT_DATE_TYPE_WARNING_DAYS[\s\S]*'project-start': 0[\s\S]*review: 2[\s\S]*gateway: 14[\s\S]*uat: 7[\s\S]*'load-testing': 7[\s\S]*other: 14/);
 	assert.match(source, /PROJECT_DATE_EDIT_ASSIGNMENT_ROLES = \['project_manager', 'delivery_lead', 'product_owner'\]/);
 	assert.match(source, /export function deriveProjectDateStatus/);
 	assert.match(source, /Amber - date not set/);
@@ -476,12 +514,14 @@ test('Project date helper validates authority scope comments and legacy compatib
 	assert.match(source, /canCommentOnProjectDates/);
 	assert.match(source, /workspace\.role === 'owner' \|\| workspace\.role === 'admin'/);
 	assert.match(source, /hasActiveProjectPersonAssignment/);
-	assert.match(source, /Custom date label is required when Other is selected/);
+	assert.match(source, /End date cannot be before start date/);
+	assert.match(source, /cleanRequiredDate\(input\.startDate \?\? input\.targetDate, 'start date'\)/);
+	assert.match(source, /showOnTimeline: cleanBoolean\(input\.showOnTimeline, true\)/);
 	assert.match(source, /createProjectDateComment/);
 	assert.match(source, /mirrorLegacyProjectDate/);
-	assert.match(source, /dateType === 'start_date'[\s\S]*'start_date'[\s\S]*dateType === 'target_end_date'[\s\S]*'target_end_date'/);
-	assert.match(source, /\.insert\(\{[\s\S]*date_type: cleaned\.dateType[\s\S]*target_date: cleaned\.targetDate[\s\S]*warning_days: projectDateWarningDays\(cleaned\.dateType\)/);
-	assert.match(source, /\.update\(\{[\s\S]*date_type: cleaned\.dateType[\s\S]*target_date: cleaned\.targetDate[\s\S]*warning_days: projectDateWarningDays\(cleaned\.dateType\)/);
+	assert.match(source, /category === 'project-start'[\s\S]*'start_date'[\s\S]*category === 'target-end'[\s\S]*'target_end_date'/);
+	assert.match(source, /\.insert\(\{[\s\S]*date_type: cleaned\.dateType[\s\S]*title: cleaned\.title[\s\S]*start_date: cleaned\.startDate[\s\S]*end_date: cleaned\.endDate[\s\S]*show_on_timeline: cleaned\.showOnTimeline[\s\S]*warning_days: projectDateWarningDays\(cleaned\.dateType\)/);
+	assert.match(source, /\.update\(\{[\s\S]*date_type: cleaned\.dateType[\s\S]*title: cleaned\.title[\s\S]*start_date: cleaned\.startDate[\s\S]*end_date: cleaned\.endDate[\s\S]*show_on_timeline: cleaned\.showOnTimeline[\s\S]*warning_days: projectDateWarningDays\(cleaned\.dateType\)/);
 	assert.match(source, /\.update\(\{ removed_at: new Date\(\)\.toISOString\(\) \}\)/);
 	assert.match(source, /projectDateWarningDays\(cleaned\.dateType\)/);
 	assert.doesNotMatch(source, /from\('project_risks'\)|from\('issues'\)|from\('dependencies'\)|from\('assumptions'\)|\.delete\(\)/);
@@ -617,18 +657,32 @@ test('Project Details loads project dates as status cards and keeps governance s
 	assert.match(source, /<RagReferencePill tone=\{card\.status\.tone\} label=\{card\.status\.text\} \/>/);
 	assert.match(source, /projectDateId: String\(formData\.get\('project_date_id'\) \?\? ''\)/);
 	assert.match(source, /dateType: String\(formData\.get\('date_type'\) \?\? ''\)/);
-	assert.match(source, /targetDate: String\(formData\.get\('target_date'\) \?\? ''\)/);
+	assert.match(source, /title: String\(formData\.get\('title'\) \?\? ''\)/);
+	assert.match(source, /startDate: String\(formData\.get\('start_date'\) \?\? formData\.get\('target_date'\) \?\? ''\)/);
+	assert.match(source, /endDate: String\(formData\.get\('end_date'\) \?\? ''\)/);
+	assert.match(source, /description: String\(formData\.get\('description'\) \?\? ''\)/);
+	assert.match(source, /status: String\(formData\.get\('status'\) \?\? 'scheduled'\)/);
+	assert.match(source, /showOnTimeline: formData\.get\('show_on_timeline'\) \?\? 'false'/);
 	assert.match(source, /<input type="hidden" name="project_date_id" value=\{card\.id \?\? ''\} \/>/);
 	assert.match(source, /<input type="hidden" name="date_type" value=\{card\.dateType\} \/>/);
-	assert.match(source, /<input name="target_date" type="date" value=\{card\.targetDate \?\? ''\} data-project-date-input \/>/);
+	assert.match(source, /<input type="hidden" name="title" value=\{card\.title\} \/>/);
+	assert.match(source, /name="start_date" type="date" value=\{card\.startDate \?\? ''\} required data-project-date-input/);
+	assert.match(source, /name="end_date" type="date" value=\{card\.endDate \?\? ''\} data-project-date-input data-project-date-optional-end/);
+	assert.match(source, /name="show_on_timeline" value="true" checked=\{card\.showOnTimeline\}/);
 	const ragStyles = await readFile(new URL('../src/styles/rag.css', import.meta.url), 'utf8');
 	assert.match(ragStyles, /\.rag-card,[\s\S]*?border-left: 0\.35rem solid var\(--rag-accent, var\(--rag-neutral-accent\)\);/);
 	assert.doesNotMatch(ragStyles, /\.rag-card,[\s\S]*?--rag-tone: var\(--rag-neutral/);
 	assert.match(source, /Add new date/);
 	assert.match(source, /PROJECT_DATE_TYPES\.map/);
+	assert.match(source, /name="title" maxlength="160" required/);
 	assert.match(source, /name="date_type"/);
 	assert.match(source, /name="custom_label"/);
-	assert.match(source, /name="target_date" type="date"/);
+	assert.match(source, /name="start_date" type="date" required/);
+	assert.match(source, /name="end_date" type="date"/);
+	assert.match(source, /PROJECT_DATE_STATUSES\.map/);
+	assert.match(source, /name="description" rows="3" maxlength="500"/);
+	assert.match(source, /Show on Timeline/);
+	assert.match(source, /data-project-date-clear/);
 	assert.match(source, /data-project-date-picker/);
 	assert.match(source, /Open calendar/);
 	assert.match(source, /name="comment"/);
