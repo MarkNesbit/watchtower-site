@@ -216,7 +216,7 @@ The selected-day panel includes every visible event active on the date:
 - point events whose start date equals the selected date;
 - range events whose inclusive range contains the selected date.
 
-At laptop and desktop widths, the selected-day panel stretches to the same visual height as the calendar card. Its header and explanatory copy remain outside the scrolling region. Event groups sit inside an internally scrollable body so busy days do not extend the page below the calendar. In the stacked narrower layout, the event body keeps a capped scroll height rather than forcing the whole page to grow excessively.
+At laptop and desktop widths, the rendered calendar card is the height authority. The calendar keeps its natural content height, including the month grid, guidance and legend. The selected-day panel is synchronised to that measured calendar height after render and resize, then its event groups scroll internally. Busy selected days must not make the calendar card or the desktop row grow. In the stacked narrower layout, height synchronisation is removed and the event body keeps a capped scroll height rather than forcing the whole page to grow excessively.
 
 Events are grouped by configured Timeline layer order. Empty groups are hidden. Rows show source icon, reference or category code, title, optional distinct status, summary, date or range context and a future-open affordance. For ranges, the panel shows the full range plus day number within the range.
 

@@ -511,13 +511,24 @@ test('Timeline page exposes fixture event rendering layer controls and panel tem
 	assert.match(page, /if \(selectedEvent && !visibleLayerKeys\.has\(selectedEvent\.layer\)\) selectedEventId = ''/);
 });
 
-test('Timeline selected-day panel uses fixed header and internal scroll region', async () => {
+test('Timeline selected-day panel uses calendar-height sync with fixed header and internal scroll region', async () => {
 	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
+	const calendarCardCss = page.match(/\.timeline-calendar-card \{(?<body>[\s\S]*?)\n\t\}/)?.groups?.body ?? '';
 	assert.match(page, /<aside class="content-card timeline-day-panel"[\s\S]*?<div class="timeline-day-panel__header" data-timeline-day-panel-header>[\s\S]*?data-timeline-selected-heading[\s\S]*?data-timeline-selected-copy[\s\S]*?<\/div>\s*<div class="timeline-day-panel__groups" data-timeline-day-groups tabindex="0" aria-label="Selected day Timeline entries">/);
-	assert.match(page, /\.timeline-layout \{[\s\S]*?align-items: stretch;/);
-	assert.match(page, /\.timeline-day-panel \{[\s\S]*?grid-template-rows: auto minmax\(0, 1fr\);[\s\S]*?overflow: hidden;/);
+	assert.match(page, /<section class="content-card timeline-calendar-card" aria-labelledby="timeline-month-heading" data-timeline-calendar-card>/);
+	assert.match(page, /const calendarCard = document\.querySelector\('\[data-timeline-calendar-card\]'\)/);
+	assert.match(page, /const dayPanel = document\.querySelector\('\[data-timeline-day-panel\]'\)/);
+	assert.match(page, /function syncPanelHeightToCalendar\(\) \{[\s\S]*?const calendarHeight = Math\.ceil\(calendarCard\.getBoundingClientRect\(\)\.height\);[\s\S]*?dayPanel\.style\.setProperty\('--timeline-calendar-card-height', `\$\{calendarHeight\}px`\);/);
+	assert.match(page, /new ResizeObserver\(\(\) => schedulePanelHeightSync\(\)\)/);
+	assert.match(page, /desktopPanelHeightQuery\.addEventListener\('change', \(\) => schedulePanelHeightSync\(\)\)/);
+	assert.match(page, /\.timeline-layout \{[\s\S]*?align-items: start;/);
+	assert.doesNotMatch(page, /\.timeline-layout \{[\s\S]*?align-items: stretch;/);
+	assert.doesNotMatch(calendarCardCss, /height:\s*100%/);
+	assert.doesNotMatch(calendarCardCss, /min-height:/);
+	assert.match(page, /\.timeline-calendar-card \{[\s\S]*?align-self: start;/);
+	assert.match(page, /\.timeline-day-panel \{[\s\S]*?grid-template-rows: auto minmax\(0, 1fr\);[\s\S]*?height: var\(--timeline-calendar-card-height, auto\);[\s\S]*?max-height: var\(--timeline-calendar-card-height, none\);[\s\S]*?overflow: hidden;/);
 	assert.match(page, /\.timeline-day-panel__groups \{[\s\S]*?min-height: 0;[\s\S]*?overflow-y: auto;[\s\S]*?scrollbar-gutter: stable;/);
-	assert.match(page, /@media \(max-width: 980px\) \{[\s\S]*?\.timeline-day-panel \{[\s\S]*?position: static;[\s\S]*?\.timeline-day-panel__groups \{[\s\S]*?max-height: 28rem;/);
+	assert.match(page, /@media \(max-width: 980px\) \{[\s\S]*?\.timeline-day-panel \{[\s\S]*?position: static;[\s\S]*?height: auto;[\s\S]*?max-height: none;[\s\S]*?\.timeline-day-panel__groups \{[\s\S]*?max-height: 28rem;/);
 });
 
 test('Timeline panel reference pills carry tone and remove redundant RAID pills', async () => {
