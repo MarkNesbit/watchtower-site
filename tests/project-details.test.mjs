@@ -437,9 +437,31 @@ test('Project date warning-days migration permits Start date persistence without
 
 test('Project Dates live Timeline migration preserves existing records and adds range visibility fields', async () => {
 	const sql = await readFile(projectDatesTimelineMigrationUrl, 'utf8');
+	const baseSql = await readFile(projectDatesMigrationUrl, 'utf8');
 	for (const field of ['title', 'start_date', 'end_date', 'description', 'status', 'show_on_timeline']) {
 		assert.match(sql, new RegExp(`add column if not exists ${field}`));
 	}
+	assert.match(baseSql, /create or replace function public\.set_project_date_audit_fields\(\)/);
+	assert.match(baseSql, /raise exception 'Authenticated user is required for project date audit fields\.'/);
+	assert.match(baseSql, /create trigger set_project_date_audit_fields[\s\S]*before insert or update on public\.project_dates/);
+	assert.match(sql, /disable trigger set_project_date_audit_fields/);
+	assert.match(sql, /enable trigger set_project_date_audit_fields/);
+	assert.match(sql, /disable trigger set_project_dates_updated_at/);
+	assert.match(sql, /enable trigger set_project_dates_updated_at/);
+	assert.doesNotMatch(sql, /disable trigger all|session_replication_role|current_setting\(|set_config\(|00000000-0000-0000-0000-000000000000/i);
+	assert.doesNotMatch(sql, /\b(?:created_by|updated_by|created_at|updated_at)\s*=/);
+	assert.ok(
+		sql.indexOf('drop constraint if exists project_dates_type_check') < sql.indexOf('set date_type = case date_type'),
+		'legacy type check must be dropped before old date types are normalised',
+	);
+	assert.ok(
+		sql.indexOf('disable trigger set_project_date_audit_fields') < sql.indexOf('update public.project_dates'),
+		'audit trigger must be disabled before the existing-row backfill',
+	);
+	assert.ok(
+		sql.lastIndexOf('enable trigger set_project_date_audit_fields') > sql.lastIndexOf('update public.project_dates'),
+		'audit trigger must be re-enabled after Project Dates backfill updates',
+	);
 	assert.match(sql, /start_date = coalesce\(start_date, target_date\)/);
 	assert.match(sql, /when 'start_date' then 'project-start'/);
 	assert.match(sql, /when 'target_end_date' then 'target-end'/);

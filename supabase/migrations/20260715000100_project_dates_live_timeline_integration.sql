@@ -9,43 +9,6 @@ alter table public.project_dates
   add column if not exists status text not null default 'scheduled',
   add column if not exists show_on_timeline boolean not null default true;
 
-update public.project_dates
-set
-  start_date = coalesce(start_date, target_date),
-  title = coalesce(
-    nullif(btrim(title), ''),
-    nullif(btrim(custom_label), ''),
-    case date_type
-      when 'start_date' then 'Project start'
-      when 'project-start' then 'Project start'
-      when 'target_end_date' then 'Target end'
-      when 'target-end' then 'Target end'
-      when 'review_date' then 'Review'
-      when 'review' then 'Review'
-      when 'stage_gate' then 'Gateway'
-      when 'gateway' then 'Gateway'
-      when 'load_test' then 'Load testing'
-      when 'load-testing' then 'Load testing'
-      when 'uat' then 'UAT'
-      else 'Project date'
-    end
-  ),
-  status = coalesce(nullif(status, ''), 'scheduled'),
-  show_on_timeline = coalesce(show_on_timeline, true);
-
-alter table public.project_dates
-  alter column title set not null;
-
-update public.project_dates
-set date_type = case date_type
-  when 'start_date' then 'project-start'
-  when 'target_end_date' then 'target-end'
-  when 'review_date' then 'review'
-  when 'stage_gate' then 'gateway'
-  when 'load_test' then 'load-testing'
-  else date_type
-end;
-
 alter table public.project_dates
   drop constraint if exists project_dates_type_check,
   drop constraint if exists project_dates_other_label_check,
@@ -54,6 +17,61 @@ alter table public.project_dates
   drop constraint if exists project_dates_description_check,
   drop constraint if exists project_dates_status_check,
   drop constraint if exists project_dates_range_check;
+
+do $$
+begin
+  -- The backfill is schema-normalisation, not a user edit. Keep application audit
+  -- enforcement unchanged by disabling only Project Date audit-maintenance triggers
+  -- while existing rows are normalised, then restore them immediately.
+  execute 'alter table public.project_dates disable trigger set_project_date_audit_fields';
+  execute 'alter table public.project_dates disable trigger set_project_dates_updated_at';
+
+  update public.project_dates
+  set
+    start_date = coalesce(start_date, target_date),
+    title = coalesce(
+      nullif(btrim(title), ''),
+      nullif(btrim(custom_label), ''),
+      case date_type
+        when 'start_date' then 'Project start'
+        when 'project-start' then 'Project start'
+        when 'target_end_date' then 'Target end'
+        when 'target-end' then 'Target end'
+        when 'review_date' then 'Review'
+        when 'review' then 'Review'
+        when 'stage_gate' then 'Gateway'
+        when 'gateway' then 'Gateway'
+        when 'load_test' then 'Load testing'
+        when 'load-testing' then 'Load testing'
+        when 'uat' then 'UAT'
+        else 'Project date'
+      end
+    ),
+    status = coalesce(nullif(status, ''), 'scheduled'),
+    show_on_timeline = coalesce(show_on_timeline, true);
+
+  update public.project_dates
+  set date_type = case date_type
+    when 'start_date' then 'project-start'
+    when 'target_end_date' then 'target-end'
+    when 'review_date' then 'review'
+    when 'stage_gate' then 'gateway'
+    when 'load_test' then 'load-testing'
+    else date_type
+  end;
+
+  execute 'alter table public.project_dates enable trigger set_project_dates_updated_at';
+  execute 'alter table public.project_dates enable trigger set_project_date_audit_fields';
+exception
+  when others then
+    execute 'alter table public.project_dates enable trigger set_project_dates_updated_at';
+    execute 'alter table public.project_dates enable trigger set_project_date_audit_fields';
+    raise;
+end;
+$$;
+
+alter table public.project_dates
+  alter column title set not null;
 
 alter table public.project_dates
   add constraint project_dates_type_check
