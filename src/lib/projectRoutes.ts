@@ -10,6 +10,10 @@ export function buildProjectDetailsPath(workspaceSlug: string, projectSlug: stri
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/details`;
 }
 
+export function buildProjectTimelinePath(workspaceSlug: string, projectSlug: string): string {
+	return `${buildProjectPath(workspaceSlug, projectSlug)}/timeline`;
+}
+
 export function buildProjectRisksPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/risks`;
 }

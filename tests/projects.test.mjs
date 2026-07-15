@@ -26,6 +26,7 @@ import {
 	buildProjectRiskEditPath,
 	buildProjectRiskPath,
 	buildProjectRisksPath,
+	buildProjectTimelinePath,
 } from '../src/lib/projectRoutes.ts';
 
 const migrationPath = new URL('../supabase/migrations/20260617000100_create_projects.sql', import.meta.url);
@@ -107,6 +108,7 @@ test('Project slug generation creates URL-safe slugs', () => {
 test('Project route helpers build workspace-safe risk paths', () => {
 	assert.equal(buildProjectPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub');
 	assert.equal(buildProjectDetailsPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub/details');
+	assert.equal(buildProjectTimelinePath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub/timeline');
 	assert.equal(buildProjectRisksPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub/risks');
 	assert.equal(buildProjectNewRiskPath('alpha-workspace', 'delivery-hub'), '/app/workspaces/alpha-workspace/projects/delivery-hub/risks/new');
 	assert.equal(
@@ -520,7 +522,7 @@ test('Project dashboard is read-only and displays metadata including description
 	assert.doesNotMatch(detailSource, /<dt>Project name<\/dt>|<dt>Project reference<\/dt>|<dt>Workspace<\/dt>/);
 });
 
-test('Project dashboard capability tiles lead with Project Narrative while keeping Timeline separate', async () => {
+test('Project dashboard capability tiles link to the read-only Timeline route', async () => {
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
 	const narrativeIndex = detailSource.indexOf("title: 'Project Narrative'");
 	const timelineIndex = detailSource.indexOf("title: 'Timeline'");
@@ -529,9 +531,10 @@ test('Project dashboard capability tiles lead with Project Narrative while keepi
 	assert.notEqual(narrativeIndex, -1);
 	assert.match(detailSource, /title: 'Project Details'[\s\S]*?destination: 'details'/);
 	assert.match(detailSource, /title: 'Project Narrative'[\s\S]*?destination: 'narrative',[\s\S]*?featureKey: 'projectDiary'/);
+	assert.match(detailSource, /title: 'Timeline'[\s\S]*?destination: 'timeline'/);
 	assert.ok(narrativeIndex < timelineIndex);
 	assert.ok(timelineIndex < risksIndex);
-	assert.match(detailSource, /title: 'Timeline'.*href: '#timeline'/);
+	assert.match(detailSource, /buildProjectTimelinePath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(detailSource, /buildProjectNarrativePath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(detailSource, /\.from\('project_people'\)[\s\S]*\.select\('project_role, user_id, demo_person_id, status'\)/);
 	assert.match(detailSource, /projectDetailsTileSignal = deriveProjectDetailsTileSignal\(project, projectDateCards, projectDetailAssignments\)/);
@@ -683,6 +686,7 @@ test('Workspace-scoped project route builders use readable slugs for every proje
 	assert.equal(buildProjectPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check');
 	assert.equal(buildProjectDetailsPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/details');
 	assert.equal(buildProjectEditPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/edit');
+	assert.equal(buildProjectTimelinePath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/timeline');
 	assert.equal(buildProjectRisksPath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/risks');
 	assert.equal(buildProjectNarrativePath('client-alpha', 'health-check'), '/app/workspaces/client-alpha/projects/health-check/narrative');
 	for (const route of [
@@ -706,6 +710,7 @@ test('Every workspace-scoped project page binds project slug to the matched work
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro',
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/details.astro',
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/edit.astro',
+		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro',
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/risks.astro',
 		'../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/narrative.astro',
 	]) {
