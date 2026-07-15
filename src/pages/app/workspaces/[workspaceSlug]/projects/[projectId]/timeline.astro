@@ -1,0 +1,709 @@
+---
+import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
+import EmptyState from '../../../../../../components/app/EmptyState.astro';
+import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
+import { can } from '../../../../../../lib/permissions';
+import { buildProjectPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
+import {
+	TIMELINE_WEEKDAYS,
+	aggregateTimelineEvents,
+	buildTimelineCalendarGrid,
+	formatTimelineDateLong,
+	formatTimelineMonthHeading,
+	getTimelineMonthFromDate,
+	getTodayDateOnly,
+	timelineDayAriaLabel,
+	timelineDayClassName,
+	timelineMonthStartDate,
+	timelineMonthValue,
+} from '../../../../../../lib/timeline';
+
+const projectSlug = Astro.params.projectId;
+const workspaceSlug = Astro.params.workspaceSlug;
+const accessToken = getServerAccessToken(Astro.cookies);
+const todayDate = getTodayDateOnly();
+const currentMonth = getTimelineMonthFromDate(todayDate);
+const calendarWeeks = buildTimelineCalendarGrid(currentMonth, todayDate);
+const visibleStartDate = calendarWeeks[0]?.days[0]?.date ?? todayDate;
+const visibleEndDate = calendarWeeks.at(-1)?.days.at(-1)?.date ?? todayDate;
+const initialSelectedDate = todayDate;
+const initialSelectedDateLabel = formatTimelineDateLong(initialSelectedDate);
+const initialMonthHeading = formatTimelineMonthHeading(currentMonth);
+const initialMonthValue = timelineMonthValue(currentMonth);
+let project = null;
+let workspaceName = '';
+let message = '';
+let timelineLoadError = '';
+let timelineEventCount = 0;
+
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug ?? '', accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+
+	if (!workspace || !organisation) {
+		message = 'Project not found or you do not have access.';
+		Astro.response.status = 404;
+	} else if (!can(workspace.role, 'project.viewDashboard')) {
+		message = 'Your workspace role does not permit project Timeline access.';
+		Astro.response.status = 403;
+	} else {
+		workspaceName = organisation.name;
+		const { data, error } = await serverSupabase
+			.from('projects')
+			.select('id, name, project_ref, slug')
+			.eq('slug', projectSlug)
+			.eq('organisation_id', organisation.id)
+			.is('deleted_at', null)
+			.is('archived_at', null)
+			.maybeSingle();
+		if (error) throw error;
+
+		if (!data) {
+			message = 'Project not found or you do not have access.';
+			Astro.response.status = 404;
+		} else {
+			project = data;
+			try {
+				const { data: userData } = accessToken
+					? await serverSupabase.auth.getUser(accessToken)
+					: await serverSupabase.auth.getUser();
+				const timelineEvents = await aggregateTimelineEvents(
+					{
+						workspaceId: organisation.id,
+						projectId: data.id,
+						visibleStartDate,
+						visibleEndDate,
+						viewerId: userData.user?.id ?? '',
+						permissionContext: {
+							viewerId: userData.user?.id ?? '',
+							workspaceRole: workspace.role,
+						},
+					},
+					[],
+				);
+				timelineEventCount = timelineEvents.length;
+			} catch {
+				timelineLoadError = 'Timeline entries could not be loaded. The calendar shell is still available.';
+			}
+		}
+	}
+} catch {
+	message = 'Unable to load project Timeline.';
+	Astro.response.status = 500;
+}
+---
+<AuthenticatedLayout title={project ? `Timeline — ${project.name} | WatchTower` : 'Timeline | WatchTower'}>
+	<section
+		class="timeline-page"
+		data-project-timeline-route
+		data-timeline-month={initialMonthValue}
+		data-timeline-today={todayDate}
+		data-timeline-selected-date={initialSelectedDate}
+		data-timeline-event-count={timelineEventCount}
+	>
+		{project ? (
+			<>
+				<ProjectPageHero
+					workspaceName={workspaceName}
+					projectName={project.name}
+					projectRef={project.project_ref}
+					title="Timeline"
+					description="View significant project delivery dates and assurance events across the month."
+					headingId="project-timeline-heading"
+				>
+					<div slot="actions" class="timeline-hero-actions">
+						<a class="button button--secondary" href={buildProjectPath(workspaceSlug ?? '', project.slug)}>Back to project dashboard</a>
+					</div>
+				</ProjectPageHero>
+
+				<div class="timeline-loading-state content-card" data-timeline-loading hidden aria-live="polite">
+					<div class="timeline-loading-state__calendar" aria-hidden="true">
+						{Array.from({ length: 35 }).map(() => <span></span>)}
+					</div>
+					<div class="timeline-loading-state__panel" aria-hidden="true">
+						<span></span>
+						<span></span>
+						<span></span>
+					</div>
+					<p class="visually-hidden">Loading Timeline month.</p>
+				</div>
+
+				<div class="timeline-layout" data-timeline-ready>
+					<section class="content-card timeline-calendar-card" aria-labelledby="timeline-month-heading">
+						<div class="timeline-month-nav">
+							<button class="button button--secondary timeline-month-nav__button" type="button" data-timeline-previous aria-label="Show previous month">‹</button>
+							<div class="timeline-month-nav__heading">
+								<p class="eyebrow">Monthly view</p>
+								<h2 id="timeline-month-heading" data-timeline-month-heading>{initialMonthHeading}</h2>
+							</div>
+							<button class="button button--secondary timeline-month-nav__button" type="button" data-timeline-next aria-label="Show next month">›</button>
+							<button class="button button--secondary timeline-month-nav__today" type="button" data-timeline-today-control>Today</button>
+						</div>
+
+						{timelineLoadError && (
+							<div class="timeline-inline-error" role="status">
+								<p>{timelineLoadError}</p>
+							</div>
+						)}
+
+						<div
+							class="timeline-calendar-grid"
+							role="grid"
+							aria-labelledby="timeline-month-heading"
+							aria-describedby="timeline-calendar-help"
+							data-timeline-calendar-grid
+						>
+							<div class="timeline-weekdays" role="row">
+								{TIMELINE_WEEKDAYS.map((weekday) => (
+									<div
+										class={`timeline-weekday${weekday.isWeekend ? ' timeline-weekday--weekend' : ''}`}
+										role="columnheader"
+										aria-label={weekday.label}
+									>
+										<span aria-hidden="true">{weekday.shortLabel}</span>
+										<span class="visually-hidden">{weekday.label}</span>
+									</div>
+								))}
+							</div>
+
+							<div class="timeline-week-rows" data-timeline-week-rows>
+								{calendarWeeks.map((week) => (
+									<div class="timeline-week" role="row">
+										{week.days.map((day) => {
+											return (
+												<button
+													class={timelineDayClassName(day, initialSelectedDate)}
+													type="button"
+													role="gridcell"
+													data-timeline-day-contract="timeline-day-v1"
+													data-timeline-day={day.date}
+													data-current-month={day.isCurrentMonth ? 'true' : 'false'}
+													data-weekend={day.isWeekend ? 'true' : 'false'}
+													aria-label={timelineDayAriaLabel(day, initialSelectedDate)}
+													aria-pressed={day.date === initialSelectedDate ? 'true' : 'false'}
+													aria-current={day.isToday ? 'date' : undefined}
+												>
+													<span class="timeline-day__header">
+														<span class="timeline-day__number" data-timeline-day-number>{day.dayNumber}</span>
+														<span class="timeline-day__markers">
+															<span class="timeline-day__today-marker" data-timeline-today-marker hidden={!day.isToday}>Today</span>
+															<span class="timeline-day__weekend-marker" data-timeline-weekend-marker hidden={!day.isWeekend}>Weekend</span>
+														</span>
+													</span>
+													<span class="timeline-day__range-lanes" aria-hidden="true"></span>
+													<span class="timeline-day__point-area" aria-hidden="true"></span>
+													<span class="timeline-day__overflow" aria-hidden="true"></span>
+												</button>
+											);
+										})}
+									</div>
+								))}
+							</div>
+						</div>
+						<template data-timeline-week-template>
+							<div class="timeline-week" role="row"></div>
+						</template>
+						<template data-timeline-day-template>
+							<button
+								class="timeline-day"
+								type="button"
+								role="gridcell"
+								data-timeline-day-contract="timeline-day-v1"
+								data-timeline-day=""
+								data-current-month="false"
+								data-weekend="false"
+								aria-label=""
+								aria-pressed="false"
+							>
+								<span class="timeline-day__header">
+									<span class="timeline-day__number" data-timeline-day-number></span>
+									<span class="timeline-day__markers">
+										<span class="timeline-day__today-marker" data-timeline-today-marker hidden>Today</span>
+										<span class="timeline-day__weekend-marker" data-timeline-weekend-marker hidden>Weekend</span>
+									</span>
+								</span>
+								<span class="timeline-day__range-lanes" aria-hidden="true"></span>
+								<span class="timeline-day__point-area" aria-hidden="true"></span>
+								<span class="timeline-day__overflow" aria-hidden="true"></span>
+							</button>
+						</template>
+						<p id="timeline-calendar-help" class="timeline-calendar-help">
+							Use the month controls to move between months. Select any visible day to update the activity panel.
+						</p>
+					</section>
+
+					<aside class="content-card timeline-day-panel" aria-labelledby="timeline-selected-date-heading" data-timeline-day-panel>
+						<p class="eyebrow">Selected day</p>
+						<h2 id="timeline-selected-date-heading" data-timeline-selected-heading>{initialSelectedDateLabel}</h2>
+						<p data-timeline-selected-copy>Significant Timeline entries for this date will appear here as source layers are connected.</p>
+						<div class="timeline-day-panel__groups" data-timeline-day-groups>
+							<EmptyState title="No project activity is currently shown for this date.">
+								<p>Timeline entries will appear here in a later slice.</p>
+							</EmptyState>
+						</div>
+					</aside>
+				</div>
+			</>
+		) : (
+			<section class="content-card timeline-error-state" data-timeline-error-state>
+				<EmptyState title="Timeline could not be loaded." tone="error">
+					<p>{message || 'The Timeline is unavailable right now.'}</p>
+					<a class="button button--secondary" href={workspaceSlug && projectSlug ? buildProjectPath(workspaceSlug, projectSlug) : '/app/projects'}>Back to project</a>
+				</EmptyState>
+			</section>
+		)}
+	</section>
+</AuthenticatedLayout>
+
+<script>
+	import {
+		addTimelineMonths,
+		buildTimelineCalendarGrid,
+		formatTimelineDateLong,
+		formatTimelineMonthHeading,
+		getTimelineMonthFromDate,
+		getTodayDateOnly,
+		timelineDayAriaLabel,
+		timelineDayClassName,
+		timelineMonthStartDate,
+		timelineMonthValue,
+	} from '../../../../../../lib/timeline';
+
+	const page = document.querySelector('[data-project-timeline-route]');
+	const heading = document.querySelector('[data-timeline-month-heading]');
+	const weekRows = document.querySelector('[data-timeline-week-rows]');
+	const previousButton = document.querySelector('[data-timeline-previous]');
+	const nextButton = document.querySelector('[data-timeline-next]');
+	const todayButton = document.querySelector('[data-timeline-today-control]');
+	const selectedHeading = document.querySelector('[data-timeline-selected-heading]');
+	const selectedCopy = document.querySelector('[data-timeline-selected-copy]');
+	const weekTemplate = document.querySelector('[data-timeline-week-template]');
+	const dayTemplate = document.querySelector('[data-timeline-day-template]');
+	const todayDate = page?.getAttribute('data-timeline-today') || getTodayDateOnly();
+	let activeMonth = getTimelineMonthFromDate(page?.getAttribute('data-timeline-month') ? `${page.getAttribute('data-timeline-month')}-01` : todayDate);
+	let selectedDate = page?.getAttribute('data-timeline-selected-date') || todayDate;
+
+	function updateSelectedPanel() {
+		if (selectedHeading) selectedHeading.textContent = formatTimelineDateLong(selectedDate);
+		if (selectedCopy) selectedCopy.textContent = 'Significant Timeline entries for this date will appear here as source layers are connected.';
+		page?.setAttribute('data-timeline-selected-date', selectedDate);
+	}
+
+	function applyDayState(button, day) {
+		button.className = timelineDayClassName(day, selectedDate);
+		button.setAttribute('data-timeline-day', day.date);
+		button.setAttribute('data-current-month', day.isCurrentMonth ? 'true' : 'false');
+		button.setAttribute('data-weekend', day.isWeekend ? 'true' : 'false');
+		button.setAttribute('aria-label', timelineDayAriaLabel(day, selectedDate));
+		button.setAttribute('aria-pressed', day.date === selectedDate ? 'true' : 'false');
+		if (day.isToday) button.setAttribute('aria-current', 'date');
+		else button.removeAttribute('aria-current');
+		const dayNumber = button.querySelector('[data-timeline-day-number]');
+		if (dayNumber) dayNumber.textContent = String(day.dayNumber);
+		const todayMarker = button.querySelector('[data-timeline-today-marker]');
+		todayMarker?.toggleAttribute('hidden', !day.isToday);
+		const weekendMarker = button.querySelector('[data-timeline-weekend-marker]');
+		weekendMarker?.toggleAttribute('hidden', !day.isWeekend);
+	}
+
+	function updateRenderedDayStates() {
+		const weeks = buildTimelineCalendarGrid(activeMonth, todayDate);
+		const dayByDate = new Map(weeks.flatMap((week) => week.days.map((day) => [day.date, day])));
+		document.querySelectorAll('[data-timeline-day]').forEach((button) => {
+			const date = button.getAttribute('data-timeline-day') || '';
+			const day = dayByDate.get(date);
+			if (day) applyDayState(button, day);
+		});
+	}
+
+	function selectDate(date) {
+		selectedDate = date;
+		updateRenderedDayStates();
+		updateSelectedPanel();
+	}
+
+	function createWeekRow() {
+		const templateContent = weekTemplate instanceof HTMLTemplateElement ? weekTemplate.content.firstElementChild : null;
+		const row = templateContent?.cloneNode(true);
+		if (row instanceof HTMLElement) return row;
+		const fallbackRow = document.createElement('div');
+		fallbackRow.className = 'timeline-week';
+		fallbackRow.setAttribute('role', 'row');
+		return fallbackRow;
+	}
+
+	function createDayButton(day) {
+		const templateContent = dayTemplate instanceof HTMLTemplateElement ? dayTemplate.content.firstElementChild : null;
+		const button = templateContent?.cloneNode(true);
+		const resolvedButton = button instanceof HTMLButtonElement ? button : document.createElement('button');
+		resolvedButton.type = 'button';
+		resolvedButton.setAttribute('role', 'gridcell');
+		resolvedButton.setAttribute('data-timeline-day-contract', 'timeline-day-v1');
+		applyDayState(resolvedButton, day);
+		resolvedButton.addEventListener('click', () => selectDate(day.date));
+		return resolvedButton;
+	}
+
+	function renderMonth(month) {
+		if (!weekRows || !heading) return;
+		activeMonth = month;
+		const weeks = buildTimelineCalendarGrid(activeMonth, todayDate);
+		heading.textContent = formatTimelineMonthHeading(activeMonth);
+		page?.setAttribute('data-timeline-month', timelineMonthValue(activeMonth));
+		weekRows.replaceChildren(...weeks.map((week) => {
+			const row = createWeekRow();
+			for (const day of week.days) row.append(createDayButton(day));
+			return row;
+		}));
+		updateSelectedPanel();
+	}
+
+	document.querySelectorAll('[data-timeline-day]').forEach((button) => {
+		button.addEventListener('click', () => {
+			const date = button.getAttribute('data-timeline-day');
+			if (date) selectDate(date);
+		});
+	});
+
+	function navigateMonth(offset) {
+		const nextMonth = addTimelineMonths(activeMonth, offset);
+		selectedDate = timelineMonthStartDate(nextMonth);
+		renderMonth(nextMonth);
+		const selectedCell = document.querySelector(`[data-timeline-day="${CSS.escape(selectedDate)}"]`);
+		if (selectedCell instanceof HTMLElement) selectedCell.focus();
+	}
+
+	previousButton?.addEventListener('click', () => navigateMonth(-1));
+	nextButton?.addEventListener('click', () => navigateMonth(1));
+	todayButton?.addEventListener('click', () => {
+		selectedDate = todayDate;
+		renderMonth(getTimelineMonthFromDate(todayDate));
+		const todayCell = document.querySelector(`[data-timeline-day="${CSS.escape(todayDate)}"]`);
+		if (todayCell instanceof HTMLElement) todayCell.focus();
+	});
+</script>
+
+<style>
+	.timeline-page {
+		display: grid;
+		gap: 0.9rem;
+	}
+
+	.timeline-hero-actions {
+		display: flex;
+		justify-content: flex-end;
+		width: 100%;
+	}
+
+	.timeline-layout {
+		display: grid;
+		grid-template-columns: minmax(0, 2.6fr) minmax(17rem, 1fr);
+		align-items: start;
+		gap: 1rem;
+	}
+
+	.timeline-calendar-card,
+	.timeline-day-panel {
+		min-width: 0;
+	}
+
+	.timeline-month-nav {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto auto;
+		align-items: center;
+		gap: 0.7rem;
+		margin-bottom: 1rem;
+	}
+
+	.timeline-month-nav__button {
+		display: grid;
+		place-items: center;
+		width: 3.15rem;
+		padding-inline: 0;
+		font-size: 1.7rem;
+		line-height: 1;
+	}
+
+	.timeline-month-nav__heading {
+		display: grid;
+		gap: 0.15rem;
+		justify-items: center;
+		text-align: center;
+	}
+
+	.timeline-month-nav__heading h2 {
+		margin: 0;
+		font-size: clamp(1.35rem, 2.4vw, 2rem);
+	}
+
+	.timeline-month-nav__heading .eyebrow {
+		margin: 0;
+	}
+
+	.timeline-inline-error {
+		margin-bottom: 0.9rem;
+		border: 1px solid rgba(255, 129, 122, 0.52);
+		border-radius: 0.9rem;
+		padding: 0.8rem 0.95rem;
+		background: rgba(80, 20, 20, 0.18);
+	}
+
+	.timeline-inline-error p {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.timeline-calendar-grid {
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.timeline-weekdays,
+	.timeline-week {
+		display: grid;
+		grid-template-columns: repeat(7, minmax(0, 1fr));
+		gap: 0.45rem;
+	}
+
+	.timeline-week-rows {
+		display: grid;
+		gap: 0.45rem;
+	}
+
+	.timeline-weekday {
+		border: 1px solid var(--border);
+		border-radius: 0.65rem;
+		padding: 0.45rem 0.25rem;
+		background: rgba(255, 255, 255, 0.04);
+		color: var(--muted-strong);
+		font-size: 0.78rem;
+		font-weight: 900;
+		text-align: center;
+		text-transform: uppercase;
+	}
+
+	.timeline-weekday--weekend {
+		border-style: dashed;
+		background: rgba(215, 226, 234, 0.08);
+	}
+
+	.timeline-day {
+		appearance: none;
+		display: grid;
+		grid-template-rows: auto minmax(1.8rem, 1fr) 1rem 0.8rem;
+		gap: 0.35rem;
+		min-height: 7.9rem;
+		border: 1px solid var(--border);
+		border-radius: 0.8rem;
+		padding: 0.62rem;
+		background: rgba(7, 17, 29, 0.74);
+		color: var(--text);
+		font: inherit;
+		text-align: left;
+		cursor: pointer;
+		transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+	}
+
+	.timeline-day:hover,
+	.timeline-day:focus-visible {
+		border-color: rgba(124, 199, 244, 0.78);
+		background: rgba(16, 32, 51, 0.96);
+		box-shadow: 0 12px 30px rgba(0, 160, 255, 0.16);
+		outline: none;
+		transform: translateY(-1px);
+	}
+
+	.timeline-day:focus-visible {
+		outline: 3px solid var(--accent-strong);
+		outline-offset: 3px;
+	}
+
+	.timeline-day--adjacent {
+		border-style: dashed;
+		color: var(--muted);
+		background: rgba(7, 17, 29, 0.4);
+	}
+
+	.timeline-day--weekend {
+		background:
+			repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.035) 0 0.35rem, transparent 0.35rem 0.7rem),
+			rgba(7, 17, 29, 0.72);
+	}
+
+	.timeline-day--today {
+		border-color: rgba(57, 194, 255, 0.68);
+	}
+
+	.timeline-day--selected {
+		border-color: rgba(57, 194, 255, 0.9);
+		background: rgba(0, 160, 255, 0.16);
+		box-shadow: inset 0 0 0 2px rgba(57, 194, 255, 0.35), 0 18px 38px rgba(0, 160, 255, 0.14);
+	}
+
+	.timeline-day__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 0.35rem;
+		min-height: 1.55rem;
+	}
+
+	.timeline-day__number {
+		font-size: 1.05rem;
+		font-weight: 950;
+		line-height: 1;
+	}
+
+	.timeline-day__markers {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 0.25rem;
+	}
+
+	.timeline-day__today-marker,
+	.timeline-day__weekend-marker {
+		border: 1px solid rgba(215, 226, 234, 0.28);
+		border-radius: 999px;
+		padding: 0.12rem 0.35rem;
+		font-size: 0.62rem;
+		font-weight: 900;
+		line-height: 1;
+	}
+
+	.timeline-day__today-marker {
+		border-color: rgba(57, 194, 255, 0.58);
+		color: var(--accent-strong);
+	}
+
+	.timeline-day__weekend-marker {
+		color: var(--muted-strong);
+	}
+
+	.timeline-day__range-lanes,
+	.timeline-day__point-area,
+	.timeline-day__overflow {
+		display: block;
+		min-width: 0;
+	}
+
+	.timeline-day__range-lanes {
+		border-top: 1px solid rgba(215, 226, 234, 0.1);
+	}
+
+	.timeline-calendar-help,
+	.timeline-day-panel p {
+		color: var(--muted-strong);
+	}
+
+	.timeline-calendar-help {
+		margin: 1rem 0 0;
+		font-size: 0.9rem;
+	}
+
+	.timeline-day-panel {
+		position: sticky;
+		top: 1rem;
+		display: grid;
+		gap: 0.85rem;
+	}
+
+	.timeline-day-panel h2 {
+		margin: 0;
+		font-size: clamp(1.25rem, 2vw, 1.65rem);
+	}
+
+	.timeline-day-panel .eyebrow,
+	.timeline-day-panel p {
+		margin: 0;
+	}
+
+	.timeline-day-panel__groups {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.timeline-loading-state {
+		grid-template-columns: minmax(0, 2.6fr) minmax(17rem, 1fr);
+		gap: 1rem;
+	}
+
+	.timeline-loading-state:not([hidden]) {
+		display: grid;
+	}
+
+	.timeline-loading-state__calendar {
+		display: grid;
+		grid-template-columns: repeat(7, minmax(0, 1fr));
+		gap: 0.45rem;
+	}
+
+	.timeline-loading-state__calendar span,
+	.timeline-loading-state__panel span {
+		display: block;
+		border-radius: 0.75rem;
+		background: linear-gradient(90deg, rgba(215, 226, 234, 0.08), rgba(215, 226, 234, 0.16), rgba(215, 226, 234, 0.08));
+	}
+
+	.timeline-loading-state__calendar span {
+		min-height: 5.8rem;
+	}
+
+	.timeline-loading-state__panel {
+		display: grid;
+		align-content: start;
+		gap: 0.75rem;
+	}
+
+	.timeline-loading-state__panel span {
+		min-height: 2.2rem;
+	}
+
+	.timeline-error-state .empty-state {
+		display: grid;
+		justify-items: center;
+		gap: 0.8rem;
+	}
+
+	@media (max-width: 980px) {
+		.timeline-layout,
+		.timeline-loading-state:not([hidden]) {
+			grid-template-columns: 1fr;
+		}
+
+		.timeline-day-panel {
+			position: static;
+		}
+	}
+
+	@media (max-width: 720px) {
+		.timeline-month-nav {
+			grid-template-columns: auto auto auto;
+		}
+
+		.timeline-month-nav__heading {
+			grid-column: 1 / -1;
+			grid-row: 1;
+		}
+
+		.timeline-month-nav__today {
+			grid-column: span 1;
+		}
+
+		.timeline-weekdays,
+		.timeline-week {
+			gap: 0.28rem;
+		}
+
+		.timeline-day {
+			min-height: 6.6rem;
+			padding: 0.45rem;
+		}
+
+		.timeline-day__weekend-marker {
+			display: none;
+		}
+	}
+</style>

@@ -1,13 +1,13 @@
 # Timeline Foundation Architecture
 
-**Status:** Foundation slice for `WT-TIMELINE-FOUNDATION-001`
+**Status:** Foundation architecture plus monthly page shell through `WT-TIMELINE-FOUNDATION-002`
 **Date:** 14 July 2026
 
 ## Purpose
 
 The Watchtower Timeline is a visualisation layer for significant delivery and assurance dates within a project. It is designed to show Project Dates, Risks, Issues, Dependencies, Assumptions, Decisions, Actions, future Project Events and future Delivery Periods in one consistent calendar model.
 
-This slice does not create a Timeline page, route, database table, database migration, source modal or live source adapter.
+The first visible route is now available at `/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline`. The page is a read-only monthly shell and does not create a Timeline database table, database migration, source modal or live source adapter.
 
 ## Source Of Truth
 
@@ -100,6 +100,77 @@ Adapters must not broaden permissions. If a viewer cannot see a source record in
 
 The aggregator does not store Timeline data in the database.
 
+## Monthly Page Route
+
+`WT-TIMELINE-FOUNDATION-002` adds the workspace-scoped project route:
+
+```text
+/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline
+```
+
+The route uses the existing authenticated Watchtower shell, resolves the workspace through active membership, binds the project slug to the matched workspace, and uses existing Viewer-safe project dashboard access. It queries only the selected project context needed to render the shell.
+
+The route is reachable from the Project Dashboard Timeline tile through `buildProjectTimelinePath`.
+
+## Month Grid Behaviour
+
+The month grid utility is defined in `src/lib/timeline/timelineCalendarGrid.ts`.
+
+Rules:
+
+- Weeks run Monday to Sunday.
+- Complete weeks are always returned.
+- Previous-month dates are included before the first day of a month where needed.
+- Following-month dates are included after the final day of a month where needed.
+- Adjacent-month dates stay visible, keep normal cell dimensions and remain selectable.
+- Leap years and year-boundary month navigation are handled through UTC month construction for date-only values.
+
+The visible page defaults to the current month based on the current user-visible date calculation and selects today on first render.
+
+## Page Structure
+
+The Timeline page uses:
+
+- `AuthenticatedLayout` for the app shell and Watchtower header.
+- `ProjectPageHero` for workspace and project context.
+- A laptop-first two-column layout with the monthly calendar on the left and a persistent selected-day panel on the right.
+- A stacked layout below the laptop boundary to avoid horizontal overflow.
+
+The calendar day cell has stable internal areas for future range lanes, point-event icons and overflow indicators. This slice intentionally leaves those areas empty.
+
+## Selected-Day Interaction
+
+Each visible date is a semantic button. Pointer, Enter and Space activation use native button behaviour. Selecting a day updates:
+
+- the selected-day visual state;
+- `aria-pressed`;
+- the selected date heading in the right-hand panel;
+- the page-level selected date data attribute used by later enhancements.
+
+Adjacent-month dates are selectable. Only one date is selected at a time.
+
+Month navigation uses one explicit selected-date rule: previous and next month controls select the first day of the newly displayed month, while Today returns to the current month and selects today. The selected-day panel must always show the selected date that is visible in the rendered grid.
+
+## Weekend Today And Selected States
+
+Saturday and Sunday headings and cells use a distinct dashed/striped treatment plus visible Weekend labels in cells where space allows. The distinction is not colour-only.
+
+Today and selected date are separate states:
+
+- Today uses `aria-current="date"` and a visible Today marker.
+- Selected date uses `aria-pressed="true"` and a stronger selected treatment.
+- A day can be both today and selected.
+
+## Loading Empty And Error States
+
+The page includes a skeleton loading state that preserves the calendar and panel shape for future async loading.
+
+An empty Timeline event collection is valid. The calendar still renders and the selected-day panel shows that no project activity is currently shown for the selected date.
+
+Genuine route or context failures render a safe error state with a route back to the project area where possible. Internal errors, stack traces and raw identifiers are not exposed.
+
+This slice calls the Timeline aggregation contract with no adapters. It does not query Project Dates, Risks, Issues, Decisions, Dependencies or Actions.
+
 ## Layer Model
 
 Layer defaults are defined in `src/lib/timeline/timelineLayers.ts`.
@@ -165,3 +236,24 @@ To subscribe a module to the Timeline:
 10. Register the adapter with the Timeline aggregation path for the visible page slice.
 
 Future Timeline UI must provide accessible event labels and must not rely on colour or icons alone.
+
+## Current Page Exclusions
+
+The monthly page shell still excludes:
+
+- live Project Date integration;
+- live Risk, Issue, Decision, Dependency or Action adapters;
+- layer controls;
+- event icons;
+- range bars;
+- overflow indicators;
+- source hover cards;
+- reusable source modals;
+- event creation;
+- recurrence;
+- drag-and-drop;
+- source date editing;
+- external calendar synchronisation;
+- saved user preferences;
+- clash detection;
+- Timeline database persistence.
