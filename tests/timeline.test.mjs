@@ -10,6 +10,7 @@ import {
 	aggregateTimelineEvents,
 	buildTimelineCalendarGrid,
 	createTimelineFixtureAdapter,
+	createProjectDateTimelineAdapter,
 	filterTimelineEventsByLayers,
 	getDefaultVisibleTimelineLayerKeys,
 	getTimelineMonthFromDate,
@@ -20,6 +21,8 @@ import {
 	getTodayDateOnly,
 	groupTimelineEventsByLayer,
 	normaliseTimelineEvent,
+	mapProjectDateToTimelineEvent,
+	projectDateTimelinePresentation,
 	segmentTimelineRangeEventsByWeek,
 	sortTimelineEventsForDisplay,
 	timelineDayAriaLabel,
@@ -65,6 +68,65 @@ function adapter(events, sourceType = 'project-date') {
 		getEvents: async () => events,
 	};
 }
+
+function projectDateRecord(overrides = {}) {
+	return {
+		id: 'date-1',
+		organisation_id: 'workspace-1',
+		project_id: 'project-1',
+		date_type: 'uat',
+		custom_label: null,
+		title: 'Planned UAT',
+		start_date: '2026-07-13',
+		target_date: '2026-07-13',
+		end_date: null,
+		description: 'Business validation window.',
+		status: 'scheduled',
+		show_on_timeline: true,
+		warning_days: 7,
+		is_key_date: true,
+		created_at: '2026-07-01T09:00:00Z',
+		updated_at: '2026-07-01T09:00:00Z',
+		removed_at: null,
+		...overrides,
+	};
+}
+
+function createProjectDateAdapterClient(records) {
+	class Query {
+		constructor() {
+			this.filters = [];
+		}
+
+		select() { return this; }
+		eq(field, value) {
+			this.filters.push({ field, value });
+			return this;
+		}
+		is(field, value) {
+			this.filters.push({ field, value });
+			return this;
+		}
+		lte() { return this; }
+		or() { return this; }
+		order() { return this; }
+
+		then(resolve, reject) {
+			const data = records.filter((record) => this.filters.every((filter) => (
+				filter.value === null ? record[filter.field] === null : record[filter.field] === filter.value
+			)));
+			return Promise.resolve({ data, error: null }).then(resolve, reject);
+		}
+	}
+	return {
+		from: (table) => {
+			assert.equal(table, 'project_dates');
+			return new Query();
+		},
+	};
+}
+
+const fixtureAdapter = () => createTimelineFixtureAdapter({ includeProjectDelivery: true, includeRaid: true });
 
 test('Timeline event normalisation treats missing end date as a point event', () => {
 	const event = normaliseTimelineEvent(timelineEvent({ endDate: undefined, presentationType: 'point' }));
@@ -217,7 +279,7 @@ test('Timeline layer defaults keep Actions hidden', () => {
 test('Timeline fixture adapter uses shared aggregation and default layer visibility', async () => {
 	const events = await aggregateTimelineEvents(
 		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
-		[createTimelineFixtureAdapter()],
+		[fixtureAdapter()],
 	);
 	assert.ok(events.length >= 16);
 	assert.equal(events.every((event) => event.workspaceId === context.workspaceId && event.projectId === context.projectId), true);
@@ -230,10 +292,73 @@ test('Timeline fixture adapter uses shared aggregation and default layer visibil
 	assert.equal(visibleEvents.some((event) => event.sourceReference === 'DEP-WAT-007'), true);
 });
 
+test('Project Date Timeline adapter maps live single dates ranges categories status and permissions', async () => {
+	const adapter = createProjectDateTimelineAdapter({
+		client: createProjectDateAdapterClient([
+			projectDateRecord({ id: 'point-date', date_type: 'milestone', title: 'Prototype sign-off', start_date: '2026-07-20', target_date: '2026-07-20', description: 'Confirm prototype readiness.', status: 'upcoming' }),
+			projectDateRecord({ id: 'range-date', date_type: 'integration', title: 'API integration window', start_date: '2026-07-13', target_date: '2026-07-13', end_date: '2026-07-17', description: 'Supplier and API integration.', status: 'at-risk' }),
+			projectDateRecord({ id: 'same-day', date_type: 'deployment', title: 'Deployment checkpoint', start_date: '2026-07-15', target_date: '2026-07-15', end_date: '2026-07-15' }),
+		]),
+		workspaceRole: 'member',
+		canEditProjectDates: true,
+		now: new Date('2026-07-01T12:00:00Z'),
+	});
+	const events = await aggregateTimelineEvents(context, [adapter]);
+	const point = events.find((event) => event.sourceId === 'point-date');
+	const range = events.find((event) => event.sourceId === 'range-date');
+	const sameDay = events.find((event) => event.sourceId === 'same-day');
+	assert.equal(point?.presentationType, 'point');
+	assert.equal(point?.title, 'Prototype sign-off');
+	assert.equal(point?.category, 'Milestone');
+	assert.equal(point?.iconKey, 'milestone');
+	assert.equal(point?.status, 'Upcoming');
+	assert.equal(point?.canEdit, true);
+	assert.equal(point?.canMove, false);
+	assert.equal(range?.presentationType, 'range');
+	assert.equal(range?.endDate, '2026-07-17');
+	assert.equal(range?.category, 'Integration');
+	assert.equal(range?.attentionTone, 'amber');
+	assert.equal(sameDay?.presentationType, 'point');
+	assert.equal(sameDay?.endDate, undefined);
+	assert.equal(projectDateTimelinePresentation('go-live').shortCode, 'LIVE');
+});
+
+test('Project Date Timeline adapter excludes hidden out-of-scope and out-of-range records', async () => {
+	const records = [
+		projectDateRecord({ id: 'visible-range', title: 'Visible range', start_date: '2026-06-30', target_date: '2026-06-30', end_date: '2026-07-02' }),
+		projectDateRecord({ id: 'hidden-date', show_on_timeline: false }),
+		projectDateRecord({ id: 'other-project', project_id: 'project-2' }),
+		projectDateRecord({ id: 'other-workspace', organisation_id: 'workspace-2' }),
+		projectDateRecord({ id: 'outside-range', start_date: '2026-08-10', target_date: '2026-08-10' }),
+	];
+	const events = await aggregateTimelineEvents(context, [
+		createProjectDateTimelineAdapter({
+			client: createProjectDateAdapterClient(records),
+			workspaceRole: 'viewer',
+			canEditProjectDates: false,
+			now: new Date('2026-07-01T12:00:00Z'),
+		}),
+	]);
+	assert.deepEqual(events.map((event) => event.sourceId), ['visible-range']);
+	assert.equal(events[0]?.canEdit, false);
+	assert.equal(getTimelineEventsActiveOnDate(events, '2026-07-01', DEFAULT_TIMELINE_LAYERS).some((event) => event.sourceId === 'visible-range'), true);
+});
+
+test('Project Date Timeline adapter returns no records without Project Details view permission', async () => {
+	const events = await aggregateTimelineEvents(context, [
+		createProjectDateTimelineAdapter({
+			client: createProjectDateAdapterClient([projectDateRecord()]),
+			workspaceRole: null,
+			canEditProjectDates: true,
+		}),
+	]);
+	assert.deepEqual(events, []);
+});
+
 test('Timeline point events assign to the correct day with overflow', async () => {
 	const events = await aggregateTimelineEvents(
 		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
-		[createTimelineFixtureAdapter()],
+		[fixtureAdapter()],
 	);
 	const weeks = buildTimelineCalendarGrid({ year: 2026, month: 7 }, '2026-07-15');
 	const visibleEvents = filterTimelineEventsByLayers(events, getDefaultVisibleTimelineLayerKeys(DEFAULT_TIMELINE_LAYERS));
@@ -248,7 +373,7 @@ test('Timeline point events assign to the correct day with overflow', async () =
 test('Timeline selected day includes point and inclusive range events', async () => {
 	const events = await aggregateTimelineEvents(
 		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
-		[createTimelineFixtureAdapter()],
+		[fixtureAdapter()],
 	);
 	const visibleEvents = filterTimelineEventsByLayers(events, getDefaultVisibleTimelineLayerKeys(DEFAULT_TIMELINE_LAYERS));
 	const july17Events = getTimelineEventsActiveOnDate(visibleEvents, '2026-07-17', DEFAULT_TIMELINE_LAYERS);
@@ -260,7 +385,7 @@ test('Timeline selected day includes point and inclusive range events', async ()
 test('Timeline range segmentation handles week and month boundaries', async () => {
 	const events = await aggregateTimelineEvents(
 		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
-		[createTimelineFixtureAdapter()],
+		[fixtureAdapter()],
 	);
 	const julyWeeks = buildTimelineCalendarGrid({ year: 2026, month: 7 }, '2026-07-15');
 	const segments = segmentTimelineRangeEventsByWeek(julyWeeks, events, DEFAULT_TIMELINE_LAYERS);
@@ -293,7 +418,7 @@ test('Timeline range segmentation handles week and month boundaries', async () =
 test('Timeline range lane allocation is stable and reports overflow', async () => {
 	const events = await aggregateTimelineEvents(
 		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
-		[createTimelineFixtureAdapter()],
+		[fixtureAdapter()],
 	);
 	const weeks = buildTimelineCalendarGrid({ year: 2026, month: 7 }, '2026-07-15');
 	const visibleEvents = filterTimelineEventsByLayers(events, getDefaultVisibleTimelineLayerKeys(DEFAULT_TIMELINE_LAYERS));
@@ -311,7 +436,7 @@ test('Timeline range lane allocation is stable and reports overflow', async () =
 test('Timeline panel grouping and ordering follow layer and attention rules', async () => {
 	const events = await aggregateTimelineEvents(
 		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
-		[createTimelineFixtureAdapter()],
+		[fixtureAdapter()],
 	);
 	const visibleEvents = filterTimelineEventsByLayers(events, getDefaultVisibleTimelineLayerKeys(DEFAULT_TIMELINE_LAYERS));
 	const selectedEvents = getTimelineEventsActiveOnDate(visibleEvents, '2026-07-16', DEFAULT_TIMELINE_LAYERS);
@@ -325,7 +450,7 @@ test('Timeline panel grouping and ordering follow layer and attention rules', as
 test('Timeline layer filtering updates selected-day totals and can clear selected event state', async () => {
 	const events = await aggregateTimelineEvents(
 		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
-		[createTimelineFixtureAdapter()],
+		[fixtureAdapter()],
 	);
 	const defaultLayers = getDefaultVisibleTimelineLayerKeys(DEFAULT_TIMELINE_LAYERS);
 	const withRisks = getTimelineEventsActiveOnDate(filterTimelineEventsByLayers(events, defaultLayers), '2026-07-16', DEFAULT_TIMELINE_LAYERS);
@@ -450,7 +575,7 @@ test('Timeline day cell class and aria helpers preserve the full state contract'
 	assert.match(timelineDayAriaLabel(day, '2026-08-01'), /Saturday, 1 August 2026, today, selected, adjacent month, weekend/);
 });
 
-test('Timeline page uses the shared shell route and fixture-only adapter path', async () => {
+test('Timeline page uses the shared shell route and live Project Date adapter path', async () => {
 	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
 	assert.match(page, /<AuthenticatedLayout/);
 	assert.match(page, /<ProjectPageHero/);
@@ -461,7 +586,13 @@ test('Timeline page uses the shared shell route and fixture-only adapter path', 
 	assert.match(page, /\.eq\('organisation_id', organisation\.id\)/);
 	assert.match(page, /can\(workspace\.role, 'project\.viewDashboard'\)/);
 	assert.match(page, /aggregateTimelineEvents\(/);
-	assert.match(page, /\[createTimelineFixtureAdapter\(\)\]/);
+	assert.match(page, /createProjectDateTimelineAdapter\(\{[\s\S]*?client: serverSupabase,[\s\S]*?workspaceRole: workspace\.role,[\s\S]*?canEditProjectDates,/);
+	assert.match(page, /initialVisibleStartDate = calendarWeeks\[0\]\?\.days\[0\]\?\.date/);
+	assert.match(page, /initialVisibleEndDate = calendarWeeks\.at\(-1\)\?\.days\.at\(-1\)\?\.date/);
+	assert.match(page, /visibleStartDate: initialVisibleStartDate/);
+	assert.match(page, /visibleEndDate: initialVisibleEndDate/);
+	assert.match(page, /PUBLIC_WATCHTOWER_TIMELINE_FIXTURES === 'true'/);
+	assert.match(page, /createTimelineFixtureAdapter\(\{ includeRaid: true, includeProjectDelivery: false \}\)/);
 	assert.doesNotMatch(page, /from\('project_dates'\)|from\('project_risks'\)|listProjectDates|listProjectRisks|createProjectAction/);
 });
 
@@ -534,7 +665,7 @@ test('Timeline selected-day panel uses calendar-height sync with fixed header an
 test('Timeline panel reference pills carry tone and remove redundant RAID pills', async () => {
 	const events = await aggregateTimelineEvents(
 		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
-		[createTimelineFixtureAdapter()],
+		[fixtureAdapter()],
 	);
 	const visibleEvents = filterTimelineEventsByLayers(events, getDefaultVisibleTimelineLayerKeys(DEFAULT_TIMELINE_LAYERS));
 	const selectedEvents = getTimelineEventsActiveOnDate(visibleEvents, '2026-07-16', DEFAULT_TIMELINE_LAYERS);
@@ -566,7 +697,7 @@ test('Timeline panel reference pills carry tone and remove redundant RAID pills'
 test('Timeline panel keeps project delivery category and distinct status presentation', async () => {
 	const events = await aggregateTimelineEvents(
 		{ ...context, visibleStartDate: '2026-06-01', visibleEndDate: '2026-08-31' },
-		[createTimelineFixtureAdapter()],
+		[fixtureAdapter()],
 	);
 	const plannedUat = events.find((event) => event.title === 'Planned UAT');
 	const integration = events.find((event) => event.title === 'Integration window');
@@ -598,7 +729,8 @@ test('Timeline event summary content includes reference title type date and stat
 	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
 	assert.match(page, /reference: event\.sourceReference \|\| ''/);
 	assert.match(page, /title: event\.title/);
-	assert.match(page, /meta: `\$\{eventTypeLabel\(event\)\} · \$\{event\.status \|\| event\.attentionTone \|\| 'No status'\}`/);
+	assert.match(page, /const typeLabel = event\.category \? `\$\{eventTypeLabel\(event\)\} · \$\{event\.category\}` : eventTypeLabel\(event\)/);
+	assert.match(page, /meta: `\$\{typeLabel\} · \$\{event\.status \|\| event\.attentionTone \|\| 'No status'\}`/);
 	assert.match(page, /date: eventSummaryDateLabel\(event, activeDate\)/);
 	assert.match(page, /summary: event\.summary \|\| ''/);
 	assert.match(page, /setSummaryText\(summaryReference, summary\.reference, true\)/);

@@ -1,20 +1,47 @@
 import { assertCan, can, type WorkspaceRole } from './permissions.ts';
 import { getWorkspaceBySlug } from './projects.ts';
 
-export const PROJECT_DATE_TYPES = ['start_date', 'target_end_date', 'review_date', 'uat', 'stage_gate', 'load_test', 'other'] as const;
+export const PROJECT_DATE_TYPES = [
+	'project-start',
+	'target-end',
+	'review',
+	'gateway',
+	'milestone',
+	'uat',
+	'testing',
+	'load-testing',
+	'integration',
+	'deployment',
+	'cutover',
+	'training',
+	'go-live',
+	'hypercare',
+	'other',
+] as const;
 export type ProjectDateType = (typeof PROJECT_DATE_TYPES)[number];
-export const DEFAULT_PROJECT_DATE_TYPES: ProjectDateType[] = ['start_date', 'target_end_date', 'review_date'];
+export type ProjectDateCategory = ProjectDateType;
+export const DEFAULT_PROJECT_DATE_TYPES: ProjectDateType[] = ['project-start', 'target-end', 'review'];
 export const PROJECT_DATE_WARNING_DAYS = 14;
 export const PROJECT_DATE_TYPE_WARNING_DAYS: Record<ProjectDateType, number> = {
-	start_date: 0,
-	target_end_date: 14,
-	review_date: 2,
+	'project-start': 0,
+	'target-end': 14,
+	review: 2,
+	gateway: 14,
+	milestone: 14,
 	uat: 7,
-	stage_gate: 14,
-	load_test: 7,
+	testing: 7,
+	'load-testing': 7,
+	integration: 7,
+	deployment: 7,
+	cutover: 7,
+	training: 7,
+	'go-live': 7,
+	hypercare: 7,
 	other: 14,
 };
 export const PROJECT_DATE_EDIT_ASSIGNMENT_ROLES = ['project_manager', 'delivery_lead', 'product_owner'] as const;
+export const PROJECT_DATE_STATUSES = ['scheduled', 'upcoming', 'started', 'complete', 'delayed', 'at-risk', 'cancelled'] as const;
+export type ProjectDateLifecycleStatus = (typeof PROJECT_DATE_STATUSES)[number];
 
 export type ProjectDateStatusTone = 'green' | 'amber' | 'red';
 
@@ -24,7 +51,13 @@ export type ProjectDateRecord = {
 	project_id: string;
 	date_type: ProjectDateType | string;
 	custom_label?: string | null;
+	title?: string | null;
+	start_date?: string | null;
 	target_date?: string | null;
+	end_date?: string | null;
+	description?: string | null;
+	status?: ProjectDateLifecycleStatus | string | null;
+	show_on_timeline?: boolean | null;
 	warning_days: number;
 	is_key_date: boolean;
 	created_by?: string | null;
@@ -53,7 +86,13 @@ export type ProjectDateCard = {
 	dateType: ProjectDateType;
 	customLabel?: string | null;
 	label: string;
+	title: string;
+	startDate?: string | null;
 	targetDate?: string | null;
+	endDate?: string | null;
+	description?: string | null;
+	lifecycleStatus: ProjectDateLifecycleStatus;
+	showOnTimeline: boolean;
 	warningDays: number;
 	isDefault: boolean;
 	isKeyDate: boolean;
@@ -68,7 +107,13 @@ const DATE_SELECT = [
 	'project_id',
 	'date_type',
 	'custom_label',
+	'title',
+	'start_date',
 	'target_date',
+	'end_date',
+	'description',
+	'status',
+	'show_on_timeline',
 	'warning_days',
 	'is_key_date',
 	'created_by',
@@ -102,6 +147,12 @@ function cleanOptionalDate(value: unknown, fieldLabel = 'date'): string | null {
 	return value;
 }
 
+function cleanRequiredDate(value: unknown, fieldLabel = 'date'): string {
+	const date = cleanOptionalDate(value, fieldLabel);
+	if (!date) throw new Error(`${fieldLabel.charAt(0).toUpperCase()}${fieldLabel.slice(1)} is required.`);
+	return date;
+}
+
 function cleanOptionalText(value: unknown, fieldLabel: string, maxLength: number): string | null {
 	if (value === null || value === undefined) return null;
 	const text = String(value).trim();
@@ -114,19 +165,50 @@ export function isProjectDateType(value: unknown): value is ProjectDateType {
 	return typeof value === 'string' && PROJECT_DATE_TYPES.includes(value as ProjectDateType);
 }
 
+export function isProjectDateStatus(value: unknown): value is ProjectDateLifecycleStatus {
+	return typeof value === 'string' && PROJECT_DATE_STATUSES.includes(value as ProjectDateLifecycleStatus);
+}
+
+export function normaliseProjectDateType(value: unknown): ProjectDateType | null {
+	if (isProjectDateType(value)) return value;
+	if (value === 'start_date') return 'project-start';
+	if (value === 'target_end_date') return 'target-end';
+	if (value === 'review_date') return 'review';
+	if (value === 'stage_gate') return 'gateway';
+	if (value === 'load_test') return 'load-testing';
+	return null;
+}
+
 export function projectDateWarningDays(dateType: unknown): number {
-	return isProjectDateType(dateType) ? PROJECT_DATE_TYPE_WARNING_DAYS[dateType] : PROJECT_DATE_WARNING_DAYS;
+	const category = normaliseProjectDateType(dateType);
+	return category ? PROJECT_DATE_TYPE_WARNING_DAYS[category] : PROJECT_DATE_WARNING_DAYS;
 }
 
 export function projectDateTypeLabel(value: unknown, customLabel?: string | null): string {
 	if (value === 'other' && customLabel?.trim()) return customLabel.trim();
+	if (value === 'project-start' || value === 'start_date') return 'Project start';
+	if (value === 'target-end' || value === 'target_end_date') return 'Target end';
+	if (value === 'review' || value === 'review_date') return 'Review';
+	if (value === 'gateway' || value === 'stage_gate') return 'Gateway';
+	if (value === 'milestone') return 'Milestone';
 	if (value === 'uat') return 'UAT';
-	if (value === 'target_end_date') return 'Target end date';
-	if (value === 'review_date') return 'Review date';
-	if (value === 'stage_gate') return 'Stage gate';
-	if (value === 'load_test') return 'Load test';
-	if (value === 'start_date') return 'Start date';
+	if (value === 'testing') return 'Testing';
+	if (value === 'load-testing' || value === 'load_test') return 'Load testing';
+	if (value === 'integration') return 'Integration';
+	if (value === 'deployment') return 'Deployment';
+	if (value === 'cutover') return 'Cutover';
+	if (value === 'training') return 'Training';
+	if (value === 'go-live') return 'Go-live';
+	if (value === 'hypercare') return 'Hypercare';
+	if (value === 'other') return 'Other';
 	return 'Project date';
+}
+
+export function projectDateStatusLabel(value: unknown): string {
+	if (value === 'at-risk') return 'At risk';
+	if (value === 'go-live') return 'Go-live';
+	if (isProjectDateStatus(value)) return value.charAt(0).toUpperCase() + value.slice(1);
+	return 'Scheduled';
 }
 
 export function deriveProjectDateStatus(
@@ -146,14 +228,15 @@ export function deriveProjectDateStatus(
 	}
 
 	const daysUntil = Math.floor((target - today) / 86400000);
-	if (dateType === 'start_date') {
+	const category = normaliseProjectDateType(dateType) ?? 'other';
+	if (category === 'project-start') {
 		if (daysUntil < 0) return { tone: 'green' as const, label: 'Green', text: 'Green - started' };
 		if (daysUntil === 0) return { tone: 'green' as const, label: 'Green', text: 'Green - starting today' };
 		if (daysUntil <= warningDays) return { tone: 'amber' as const, label: 'Amber', text: 'Amber - start approaching' };
 		return { tone: 'green' as const, label: 'Green', text: 'Green - scheduled' };
 	}
 	if (daysUntil < 0) {
-		const overdueText = dateType === 'review_date' ? 'Red - review overdue' : 'Red - overdue';
+		const overdueText = category === 'review' ? 'Red - review overdue' : 'Red - overdue';
 		return { tone: 'red' as const, label: 'Red', text: overdueText };
 	}
 	if (daysUntil <= warningDays) return { tone: 'amber' as const, label: 'Amber', text: `Amber - within ${warningDays} days` };
@@ -164,10 +247,18 @@ function legacyProjectDateForType(
 	dateType: ProjectDateType,
 	legacyProject?: { start_date?: string | null; target_end_date?: string | null; next_review_date?: string | null } | null,
 ): string | null {
-	if (dateType === 'start_date') return legacyProject?.start_date ?? null;
-	if (dateType === 'target_end_date') return legacyProject?.target_end_date ?? null;
-	if (dateType === 'review_date') return legacyProject?.next_review_date ?? null;
+	if (dateType === 'project-start') return legacyProject?.start_date ?? null;
+	if (dateType === 'target-end') return legacyProject?.target_end_date ?? null;
+	if (dateType === 'review') return legacyProject?.next_review_date ?? null;
 	return null;
+}
+
+function projectDateStartDate(record?: Pick<ProjectDateRecord, 'start_date' | 'target_date'> | null): string | null {
+	return record?.start_date ?? record?.target_date ?? null;
+}
+
+function projectDateTitle(record: Pick<ProjectDateRecord, 'title' | 'date_type' | 'custom_label'> | undefined, dateType: ProjectDateType): string {
+	return record?.title?.trim() || projectDateTypeLabel(dateType, record?.custom_label);
 }
 
 function defaultProjectDateRecord(
@@ -175,13 +266,13 @@ function defaultProjectDateRecord(
 	dateType: ProjectDateType,
 	legacyDate: string | null,
 ): ProjectDateRecord | undefined {
-	const candidates = activeRecords.filter((date) => date.date_type === dateType);
+	const candidates = activeRecords.filter((date) => normaliseProjectDateType(date.date_type) === dateType);
 	if (legacyDate) {
-		return candidates.find((date) => date.target_date === legacyDate)
-			?? candidates.find((date) => !date.target_date)
+		return candidates.find((date) => projectDateStartDate(date) === legacyDate)
+			?? candidates.find((date) => !projectDateStartDate(date))
 			?? candidates[0];
 	}
-	return candidates.find((date) => Boolean(date.target_date)) ?? candidates[0];
+	return candidates.find((date) => Boolean(projectDateStartDate(date))) ?? candidates[0];
 }
 
 export function buildProjectDateCards(
@@ -200,19 +291,26 @@ export function buildProjectDateCards(
 	const defaultCards = DEFAULT_PROJECT_DATE_TYPES.map((dateType) => {
 		const record = firstByDefaultType.get(dateType);
 		const legacyDate = legacyProjectDateForType(dateType, legacyProject);
-		const targetDate = legacyDate ?? record?.target_date ?? null;
+		const startDate = legacyDate ?? projectDateStartDate(record) ?? null;
 		const warningDays = projectDateWarningDays(dateType);
 		const comments = record?.comments ?? [];
+		const title = projectDateTitle(record, dateType);
 		return {
 			id: record?.id ?? null,
 			dateType,
 			customLabel: null,
 			label: projectDateTypeLabel(dateType),
-			targetDate,
+			title,
+			startDate,
+			targetDate: startDate,
+			endDate: record?.end_date ?? null,
+			description: record?.description ?? null,
+			lifecycleStatus: isProjectDateStatus(record?.status) ? record.status : 'scheduled',
+			showOnTimeline: record?.show_on_timeline ?? true,
 			warningDays,
 			isDefault: true,
 			isKeyDate: record?.is_key_date ?? true,
-			status: deriveProjectDateStatus(targetDate, warningDays, now, dateType),
+			status: deriveProjectDateStatus(startDate, warningDays, now, dateType),
 			comments,
 			commentCount: comments.length,
 		};
@@ -220,20 +318,28 @@ export function buildProjectDateCards(
 
 	const usedDefaultIds = new Set([...firstByDefaultType.values()].map((date) => date.id));
 	const additionalCards = activeRecords
-		.filter((date) => isProjectDateType(date.date_type) && !usedDefaultIds.has(date.id))
+		.filter((date) => normaliseProjectDateType(date.date_type) && !usedDefaultIds.has(date.id))
 		.map((date) => {
-			const dateType = date.date_type as ProjectDateType;
+			const dateType = normaliseProjectDateType(date.date_type) ?? 'other';
 			const comments = date.comments ?? [];
+			const startDate = projectDateStartDate(date);
+			const title = projectDateTitle(date, dateType);
 			return {
 				id: date.id,
 				dateType,
 				customLabel: date.custom_label ?? null,
-				label: projectDateTypeLabel(dateType, date.custom_label),
-				targetDate: date.target_date ?? null,
+				label: title,
+				title,
+				startDate,
+				targetDate: startDate,
+				endDate: date.end_date ?? null,
+				description: date.description ?? null,
+				lifecycleStatus: isProjectDateStatus(date.status) ? date.status : 'scheduled',
+				showOnTimeline: date.show_on_timeline ?? true,
 				warningDays: projectDateWarningDays(dateType),
 				isDefault: false,
 				isKeyDate: date.is_key_date,
-				status: deriveProjectDateStatus(date.target_date, projectDateWarningDays(dateType), now, dateType),
+				status: deriveProjectDateStatus(startDate, projectDateWarningDays(dateType), now, dateType),
 				comments,
 				commentCount: comments.length,
 			};
@@ -396,16 +502,46 @@ export async function canCommentOnProjectDates(
 	return hasActiveProjectPersonAssignment(organisationId, projectId, client, userId, demoPersonId);
 }
 
-function cleanProjectDatePayload(input: { dateType?: string | null; customLabel?: string | null; targetDate?: string | null }) {
-	if (!isProjectDateType(input.dateType)) throw new Error('Select a valid date type.');
-	const customLabel = input.dateType === 'other'
-		? cleanOptionalText(input.customLabel, 'Custom date label', 120)
+function cleanBoolean(value: unknown, defaultValue = true): boolean {
+	if (value === null || value === undefined || value === '') return defaultValue;
+	if (value === true || value === 'true' || value === 'on' || value === '1') return true;
+	if (value === false || value === 'false' || value === '0') return false;
+	return defaultValue;
+}
+
+function cleanProjectDatePayload(input: {
+	dateType?: string | null;
+	customLabel?: string | null;
+	title?: string | null;
+	startDate?: string | null;
+	targetDate?: string | null;
+	endDate?: string | null;
+	description?: string | null;
+	status?: string | null;
+	showOnTimeline?: unknown;
+}) {
+	const dateType = normaliseProjectDateType(input.dateType);
+	if (!dateType) throw new Error('Select a valid project date category.');
+	const customLabel = dateType === 'other'
+		? cleanOptionalText(input.customLabel, 'Custom category label', 120)
 		: null;
-	if (input.dateType === 'other' && !customLabel) throw new Error('Custom date label is required when Other is selected.');
+	const fallbackTitle = projectDateTypeLabel(dateType, customLabel);
+	const title = cleanOptionalText(input.title, 'Title', 160) ?? fallbackTitle;
+	if (!title) throw new Error('Title is required.');
+	const startDate = cleanRequiredDate(input.startDate ?? input.targetDate, 'start date');
+	const endDate = cleanOptionalDate(input.endDate, 'end date');
+	if (endDate && endDate < startDate) throw new Error('End date cannot be before start date.');
+	const status = isProjectDateStatus(input.status) ? input.status : 'scheduled';
 	return {
-		dateType: input.dateType,
+		dateType,
 		customLabel,
-		targetDate: cleanOptionalDate(input.targetDate, 'project date'),
+		title,
+		startDate,
+		targetDate: startDate,
+		endDate,
+		description: cleanOptionalText(input.description, 'Description', 500),
+		status,
+		showOnTimeline: cleanBoolean(input.showOnTimeline, true),
 	};
 }
 
@@ -424,11 +560,12 @@ async function getScopedProjectDate(organisationId: string, projectId: string, p
 }
 
 async function mirrorLegacyProjectDate(projectSlug: string, organisationId: string, dateType: string | null | undefined, targetDate: string | null, client) {
-	const column = dateType === 'start_date'
+	const category = normaliseProjectDateType(dateType);
+	const column = category === 'project-start'
 		? 'start_date'
-		: dateType === 'target_end_date'
+		: category === 'target-end'
 			? 'target_end_date'
-			: dateType === 'review_date'
+			: category === 'review'
 				? 'next_review_date'
 				: null;
 	if (!column) return;
@@ -449,7 +586,13 @@ export async function saveProjectDate(
 		projectDateId?: string | null;
 		dateType?: string | null;
 		customLabel?: string | null;
+		title?: string | null;
+		startDate?: string | null;
 		targetDate?: string | null;
+		endDate?: string | null;
+		description?: string | null;
+		status?: string | null;
+		showOnTimeline?: unknown;
 		comment?: string | null;
 		remove?: boolean;
 	},
@@ -489,7 +632,13 @@ export async function saveProjectDate(
 			.update({
 				date_type: cleaned.dateType,
 				custom_label: cleaned.customLabel,
+				title: cleaned.title,
+				start_date: cleaned.startDate,
 				target_date: cleaned.targetDate,
+				end_date: cleaned.endDate,
+				description: cleaned.description,
+				status: cleaned.status,
+				show_on_timeline: cleaned.showOnTimeline,
 				warning_days: projectDateWarningDays(cleaned.dateType),
 				is_key_date: existing.is_key_date ?? true,
 			})
@@ -509,7 +658,13 @@ export async function saveProjectDate(
 				project_id: project.id,
 				date_type: cleaned.dateType,
 				custom_label: cleaned.customLabel,
+				title: cleaned.title,
+				start_date: cleaned.startDate,
 				target_date: cleaned.targetDate,
+				end_date: cleaned.endDate,
+				description: cleaned.description,
+				status: cleaned.status,
+				show_on_timeline: cleaned.showOnTimeline,
 				warning_days: projectDateWarningDays(cleaned.dateType),
 				is_key_date: true,
 			})
@@ -522,7 +677,7 @@ export async function saveProjectDate(
 	if (previousDateType && previousDateType !== savedDate.date_type) {
 		await mirrorLegacyProjectDate(projectSlug, organisation.id, previousDateType, null, client);
 	}
-	await mirrorLegacyProjectDate(projectSlug, organisation.id, savedDate.date_type, savedDate.target_date ?? null, client);
+	await mirrorLegacyProjectDate(projectSlug, organisation.id, savedDate.date_type, projectDateStartDate(savedDate), client);
 
 	if (comment) {
 		await createProjectDateComment(workspaceSlug, projectSlug, savedDate.id, comment, client, accessToken);

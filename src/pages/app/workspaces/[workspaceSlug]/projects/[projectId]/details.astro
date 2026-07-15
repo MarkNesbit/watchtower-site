@@ -7,12 +7,14 @@ import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.as
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
 import { deriveProjectDetailsAreaSignal, deriveProjectDetailsSectionSignals } from '../../../../../../lib/dashboardTileSignals';
 import {
+	PROJECT_DATE_STATUSES,
 	PROJECT_DATE_TYPES,
 	buildProjectDateCards,
 	canChangeProjectDates,
 	canCommentOnProjectDates,
 	createProjectDateComment,
 	listProjectDates,
+	projectDateStatusLabel,
 	projectDateTypeLabel,
 	saveProjectDate,
 } from '../../../../../../lib/projectDates';
@@ -64,6 +66,11 @@ const formatDateTime = (value, fallback = 'Not available') => value
 const formatDate = (value, fallback = 'Not set') => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`))
 	: fallback;
+const formatDateRange = (startDate, endDate) => {
+	if (!startDate) return 'Not set';
+	if (!endDate || endDate === startDate) return formatDate(startDate);
+	return `${formatDate(startDate)} to ${formatDate(endDate)}`;
+};
 const projectHealthLabel = 'Unknown';
 const assignmentName = (assignment) => {
 	if (assignment.demo_person_id) return assignment.demoPerson?.display_name || 'Demo persona';
@@ -146,7 +153,12 @@ try {
 						projectDateId: String(formData.get('project_date_id') ?? ''),
 						dateType: String(formData.get('date_type') ?? ''),
 						customLabel: String(formData.get('custom_label') ?? ''),
-						targetDate: String(formData.get('target_date') ?? ''),
+						title: String(formData.get('title') ?? ''),
+						startDate: String(formData.get('start_date') ?? formData.get('target_date') ?? ''),
+						endDate: String(formData.get('end_date') ?? ''),
+						description: String(formData.get('description') ?? ''),
+						status: String(formData.get('status') ?? 'scheduled'),
+						showOnTimeline: formData.get('show_on_timeline') ?? 'false',
 						comment: String(formData.get('comment') ?? ''),
 					}, serverSupabase, accessToken);
 					saveMessage = 'Project date saved.';
@@ -491,10 +503,10 @@ const governanceFields = [
 										aria-label={`Open ${card.label} project date details, ${card.status.text}`}
 									>
 										<span class="project-date-card__label">{card.label}</span>
-										<span class="project-date-card__value">{formatDate(card.targetDate)}</span>
+										<span class="project-date-card__value">{formatDateRange(card.startDate, card.endDate)}</span>
 										<RagReferencePill tone={card.status.tone} label={card.status.text} />
 										<span class="project-date-card__meta">
-											{card.commentCount > 0 ? `${card.commentCount} comment${card.commentCount === 1 ? '' : 's'}` : 'No comments'}
+											{card.showOnTimeline ? 'Visible on Timeline' : 'Hidden from Timeline'} · {card.commentCount > 0 ? `${card.commentCount} comment${card.commentCount === 1 ? '' : 's'}` : 'No comments'}
 										</span>
 									</button>
 									<dialog class="project-details-dialog" id={dialogId} aria-labelledby={`${dialogId}-title`} data-project-details-dialog>
@@ -514,20 +526,27 @@ const governanceFields = [
 												{card.isDefault ? (
 													<>
 														<input type="hidden" name="date_type" value={card.dateType} />
+														<input type="hidden" name="title" value={card.title} />
 														<dl class="project-details-modal-readonly">
-															<div><dt>Date type</dt><dd>{projectDateTypeLabel(card.dateType)}</dd></div>
+															<div><dt>Category</dt><dd>{projectDateTypeLabel(card.dateType)}</dd></div>
 															<div><dt>Warning period</dt><dd>{card.warningDays} days</dd></div>
 														</dl>
 													</>
 												) : (
-													<label>
-														<span>Date type</span>
-														<select name="date_type" required data-project-date-type-select>
-															{PROJECT_DATE_TYPES.map((type) => (
-																<option value={type} selected={type === card.dateType}>{projectDateTypeLabel(type)}</option>
-															))}
-														</select>
-													</label>
+													<>
+														<label>
+															<span>Title</span>
+															<input name="title" value={card.title} maxlength="160" required />
+														</label>
+														<label>
+															<span>Category</span>
+															<select name="date_type" required data-project-date-type-select>
+																{PROJECT_DATE_TYPES.map((type) => (
+																	<option value={type} selected={type === card.dateType}>{projectDateTypeLabel(type)}</option>
+																))}
+															</select>
+														</label>
+													</>
 												)}
 												{!card.isDefault && (
 													<label class="project-date-custom-label">
@@ -536,11 +555,35 @@ const governanceFields = [
 													</label>
 												)}
 												<label>
-													<span>Target date</span>
+													<span>Start date</span>
 													<span class="project-date-input-row">
-														<input name="target_date" type="date" value={card.targetDate ?? ''} data-project-date-input />
+														<input name="start_date" type="date" value={card.startDate ?? ''} required data-project-date-input />
 														<button class="button button--secondary project-date-picker-button" type="button" data-project-date-picker>Open calendar</button>
 													</span>
+												</label>
+												<label>
+													<span>End date</span>
+													<span class="project-date-input-row">
+														<input name="end_date" type="date" value={card.endDate ?? ''} data-project-date-input data-project-date-optional-end />
+														<button class="button button--secondary project-date-picker-button" type="button" data-project-date-picker>Open calendar</button>
+														<button class="button button--secondary project-date-clear-button" type="button" data-project-date-clear>Clear</button>
+													</span>
+												</label>
+												<label>
+													<span>Status</span>
+													<select name="status" required>
+														{PROJECT_DATE_STATUSES.map((status) => (
+															<option value={status} selected={status === card.lifecycleStatus}>{projectDateStatusLabel(status)}</option>
+														))}
+													</select>
+												</label>
+												<label>
+													<span>Description</span>
+													<textarea name="description" rows="3" maxlength="500" placeholder="Explain what this date represents and why it matters">{card.description ?? ''}</textarea>
+												</label>
+												<label class="project-date-visibility-toggle">
+													<input type="checkbox" name="show_on_timeline" value="true" checked={card.showOnTimeline} />
+													<span>Show on Timeline</span>
 												</label>
 												<label>
 													<span>Add comment</span>
@@ -567,11 +610,15 @@ const governanceFields = [
 										) : (
 											<div class="project-details-modal-form" data-project-date-readonly-modal>
 												<dl class="project-details-modal-readonly">
-													<div><dt>Date value</dt><dd>{formatDate(card.targetDate)}</dd></div>
+													<div><dt>Date value</dt><dd>{formatDateRange(card.startDate, card.endDate)}</dd></div>
+													<div><dt>Category</dt><dd>{projectDateTypeLabel(card.dateType)}</dd></div>
 													<div><dt>Status</dt><dd>{card.status.text}</dd></div>
+													<div><dt>Delivery status</dt><dd>{projectDateStatusLabel(card.lifecycleStatus)}</dd></div>
+													<div><dt>Timeline visibility</dt><dd>{card.showOnTimeline ? 'Visible' : 'Hidden'}</dd></div>
 													<div><dt>Warning period</dt><dd>{card.warningDays} days</dd></div>
 													<div><dt>Comments</dt><dd>{card.commentCount}</dd></div>
 												</dl>
+												{card.description && <p class="project-date-description">{card.description}</p>}
 												{card.comments.length > 0 && (
 													<div class="project-date-comments" aria-label={`${card.label} comments`}>
 														{card.comments.map((comment) => (
@@ -768,7 +815,11 @@ const governanceFields = [
 						<form class="project-details-modal-form" method="post" data-project-date-add-modal>
 							<input type="hidden" name="intent" value="save-project-date" />
 							<label>
-								<span>Date type</span>
+								<span>Title</span>
+								<input name="title" maxlength="160" required placeholder="Planned UAT" />
+							</label>
+							<label>
+								<span>Category</span>
 								<select name="date_type" required data-project-date-type-select>
 									{PROJECT_DATE_TYPES.map((type) => (
 										<option value={type}>{projectDateTypeLabel(type)}</option>
@@ -780,11 +831,35 @@ const governanceFields = [
 								<input name="custom_label" maxlength="120" data-project-date-custom-label />
 							</label>
 							<label>
-								<span>Target date</span>
+								<span>Start date</span>
 								<span class="project-date-input-row">
-									<input name="target_date" type="date" data-project-date-input />
+									<input name="start_date" type="date" required data-project-date-input />
 									<button class="button button--secondary project-date-picker-button" type="button" data-project-date-picker>Open calendar</button>
 								</span>
+							</label>
+							<label>
+								<span>End date</span>
+								<span class="project-date-input-row">
+									<input name="end_date" type="date" data-project-date-input data-project-date-optional-end />
+									<button class="button button--secondary project-date-picker-button" type="button" data-project-date-picker>Open calendar</button>
+									<button class="button button--secondary project-date-clear-button" type="button" data-project-date-clear>Clear</button>
+								</span>
+							</label>
+							<label>
+								<span>Status</span>
+								<select name="status" required>
+									{PROJECT_DATE_STATUSES.map((status) => (
+										<option value={status} selected={status === 'scheduled'}>{projectDateStatusLabel(status)}</option>
+									))}
+								</select>
+							</label>
+							<label>
+								<span>Description</span>
+								<textarea name="description" rows="3" maxlength="500" placeholder="Explain what this date represents and why it matters"></textarea>
+							</label>
+							<label class="project-date-visibility-toggle">
+								<input type="checkbox" name="show_on_timeline" value="true" checked />
+								<span>Show on Timeline</span>
 							</label>
 							<label>
 								<span>Comment</span>
@@ -1025,6 +1100,14 @@ const governanceFields = [
 		});
 	});
 
+	document.querySelectorAll('[data-project-date-clear]').forEach((button) => {
+		button.addEventListener('click', () => {
+			const row = button.closest('.project-date-input-row');
+			const input = row?.querySelector('[data-project-date-optional-end]');
+			if (input instanceof HTMLInputElement) input.value = '';
+		});
+	});
+
 	const syncCustomLabel = (select) => {
 		if (!(select instanceof HTMLSelectElement)) return;
 		const form = select.closest('form');
@@ -1229,7 +1312,7 @@ const governanceFields = [
 
 	.project-date-input-row {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr) auto auto;
 		gap: 0.55rem;
 		align-items: center;
 	}
@@ -1238,6 +1321,23 @@ const governanceFields = [
 		min-height: 2.75rem;
 		padding: 0.55rem 0.75rem;
 		white-space: nowrap;
+	}
+
+	.project-date-clear-button {
+		min-height: 2.75rem;
+		padding: 0.55rem 0.75rem;
+		white-space: nowrap;
+	}
+
+	.project-date-visibility-toggle {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+	}
+
+	.project-date-description {
+		margin: 0;
+		color: var(--muted-strong);
 	}
 
 	.project-date-comments {

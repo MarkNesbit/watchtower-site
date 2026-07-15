@@ -245,6 +245,12 @@ Date edit authority is deliberately narrower than broad project detail editing. 
 
 Project dates do not replace Risks, Issues, Dependencies, Assumptions, Actions, Decisions or Project Narrative. They are setup and timeline records only.
 
+WT-TIMELINE-FOUNDATION-004 expands Project Dates into the first live Timeline source. `project_dates` now carries a user-facing `title`, controlled category values in `date_type`, `start_date`, optional inclusive `end_date`, optional `description`, lifecycle `status` and `show_on_timeline` defaulting true. Existing `target_date` values are preserved and copied to `start_date`; the app continues to mirror default Start, Target end and Review dates back to legacy project columns for compatibility. Existing comments, soft-removal and audit fields remain unchanged.
+
+The controlled Project Date category values are `project-start`, `target-end`, `review`, `gateway`, `milestone`, `uat`, `testing`, `load-testing`, `integration`, `deployment`, `cutover`, `training`, `go-live`, `hypercare` and `other`. Legacy stored values are mapped during migration: `start_date` to `project-start`, `target_end_date` to `target-end`, `review_date` to `review`, `stage_gate` to `gateway` and `load_test` to `load-testing`.
+
+Project Details remains the source of truth. The Timeline adapter reads visible Project Dates, maps them to transient `TimelineEvent` objects and does not persist duplicate Timeline rows. `show_on_timeline = false` hides a Project Date from Timeline while leaving it available in Project Details. Ranges are inclusive; missing or same-day `end_date` values render as point events.
+
 ## WT-US-0202B system-generated fixed project references
 
 Projects now have a dedicated `projects.project_ref` field for the user-facing project reference code. This is separate from `projects.slug`: the slug remains a URL-safe routing identifier only and must not be used as a delivery record reference.
