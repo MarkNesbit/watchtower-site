@@ -283,7 +283,6 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 							<button class="timeline-range-segment" type="button" data-timeline-event-control data-timeline-range-segment>
 								<span class="timeline-range-segment__status" aria-hidden="true"></span>
 								<span class="timeline-range-segment__label" data-timeline-event-label></span>
-								<span class="timeline-event-tooltip" data-timeline-event-tooltip></span>
 							</button>
 						</template>
 						<template data-timeline-range-overflow-template>
@@ -294,7 +293,6 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 								<span class="timeline-point-event__icon" data-timeline-event-icon aria-hidden="true"></span>
 								<span class="timeline-point-event__status" aria-hidden="true"></span>
 								<span class="visually-hidden" data-timeline-event-label></span>
-								<span class="timeline-event-tooltip" data-timeline-event-tooltip></span>
 							</button>
 						</template>
 						<template data-timeline-point-overflow-template>
@@ -351,6 +349,13 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 				<script type="application/json" data-timeline-events set:html={timelineEventsJson}></script>
 				<script type="application/json" data-timeline-layers set:html={timelineLayersJson}></script>
 				<script type="application/json" data-timeline-default-layers set:html={defaultVisibleLayerKeysJson}></script>
+				<div class="timeline-event-summary-overlay" id="timeline-event-summary-overlay" role="tooltip" data-timeline-event-summary-overlay hidden>
+					<p class="timeline-event-summary-overlay__reference" data-timeline-summary-reference></p>
+					<p class="timeline-event-summary-overlay__title" data-timeline-summary-title></p>
+					<p class="timeline-event-summary-overlay__meta" data-timeline-summary-meta></p>
+					<p class="timeline-event-summary-overlay__date" data-timeline-summary-date></p>
+					<p class="timeline-event-summary-overlay__summary" data-timeline-summary-copy></p>
+				</div>
 			</>
 		) : (
 			<section class="content-card timeline-error-state" data-timeline-error-state>
@@ -407,6 +412,12 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	const panelRowTemplate = document.querySelector('[data-timeline-panel-row-template]');
 	const layerControl = document.querySelector('[data-timeline-layer-control]');
 	const layerToggles = [...document.querySelectorAll('[data-timeline-layer-toggle]')];
+	const eventSummaryOverlay = document.querySelector('[data-timeline-event-summary-overlay]');
+	const summaryReference = eventSummaryOverlay?.querySelector('[data-timeline-summary-reference]');
+	const summaryTitle = eventSummaryOverlay?.querySelector('[data-timeline-summary-title]');
+	const summaryMeta = eventSummaryOverlay?.querySelector('[data-timeline-summary-meta]');
+	const summaryDate = eventSummaryOverlay?.querySelector('[data-timeline-summary-date]');
+	const summaryCopy = eventSummaryOverlay?.querySelector('[data-timeline-summary-copy]');
 	const sourcePresentation = {
 		'project-date': { label: 'Project delivery', icon: '◆' },
 		risk: { label: 'Risk', icon: '!' },
@@ -436,6 +447,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	let activeMonth = getTimelineMonthFromDate(page?.getAttribute('data-timeline-month') ? `${page.getAttribute('data-timeline-month')}-01` : todayDate);
 	let selectedDate = page?.getAttribute('data-timeline-selected-date') || todayDate;
 	let selectedEventId = '';
+	let activeSummaryTrigger = /** @type {HTMLElement | null} */ (null);
 	const visibleLayerKeys = new Set(defaultLayerKeys);
 
 	function eventTypeLabel(event) {
@@ -469,6 +481,11 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		return `${formatShortDate(event.startDate)}–${formatShortDate(eventEndDate(event))}`;
 	}
 
+	function eventSummaryDateLabel(event, activeDate) {
+		if (event.presentationType !== 'range') return formatTimelineDateLong(activeDate);
+		return `${formatTimelineDateLong(event.startDate)} to ${formatTimelineDateLong(eventEndDate(event))}`;
+	}
+
 	function rangeContextLabel(event, activeDate) {
 		if (event.presentationType !== 'range') return eventDateLabel(event);
 		const totalDays = dayDifference(event.startDate, eventEndDate(event)) + 1;
@@ -483,6 +500,16 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		const shape = event.presentationType === 'range' ? 'range event' : 'point event';
 		const date = event.presentationType === 'range' ? rangeContextLabel(event, activeDate) : eventDateLabel(event);
 		return `${reference}${event.title}, ${type}, ${shape}, ${date}, ${state}. ${event.summary || ''}`.trim();
+	}
+
+	function eventSummaryText(event, activeDate = selectedDate) {
+		return {
+			reference: event.sourceReference || '',
+			title: event.title,
+			meta: `${eventTypeLabel(event)} · ${event.status || event.attentionTone || 'No status'}`,
+			date: eventSummaryDateLabel(event, activeDate),
+			summary: event.summary || '',
+		};
 	}
 
 	function eventClassName(baseClass, event) {
@@ -523,6 +550,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	function clearEventChrome(scope = document) {
 		scope.querySelectorAll('[data-timeline-range-segment], [data-timeline-range-overflow]').forEach((element) => element.remove());
 		scope.querySelectorAll('[data-timeline-point-event], [data-timeline-point-overflow]').forEach((element) => element.remove());
+		hideEventSummary();
 	}
 
 	function updateRenderedDayStates() {
@@ -588,17 +616,17 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		control.setAttribute('data-timeline-event-layer', event.layer);
 		control.setAttribute('data-timeline-event-tone', eventTone(event));
 		control.setAttribute('aria-label', eventAccessibleLabel(event, activeDate));
-		control.setAttribute('title', eventAccessibleLabel(event, activeDate));
+		control.removeAttribute('title');
 		control.setAttribute('aria-pressed', selectedEventId === event.id ? 'true' : 'false');
 		control.classList.toggle('timeline-event--selected', selectedEventId === event.id);
 		const icon = control.querySelector('[data-timeline-event-icon]');
 		if (icon) icon.textContent = eventIcon(event);
 		const label = control.querySelector('[data-timeline-event-label]');
 		if (label) label.textContent = event.sourceReference || event.title;
-		const tooltip = control.querySelector('[data-timeline-event-tooltip]');
-		if (tooltip) {
-			tooltip.textContent = `${event.sourceReference ? `${event.sourceReference} · ` : ''}${event.title} · ${eventTypeLabel(event)} · ${eventDateLabel(event)} · ${event.status || event.attentionTone || 'No status'}${event.summary ? ` · ${event.summary}` : ''}`;
-		}
+		control.addEventListener('pointerenter', () => showEventSummary(control, event, activeDate));
+		control.addEventListener('pointerleave', () => hideEventSummary(control));
+		control.addEventListener('focus', () => showEventSummary(control, event, activeDate));
+		control.addEventListener('blur', () => hideEventSummary(control));
 		control.addEventListener('click', (eventClick) => {
 			eventClick.stopPropagation();
 			selectEvent(event.id, activeDate);
@@ -609,6 +637,55 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 			keyboardEvent.stopPropagation();
 			selectEvent(event.id, activeDate);
 		});
+	}
+
+	function setSummaryText(target, value, hiddenWhenEmpty = false) {
+		if (!target) return;
+		target.textContent = value;
+		target.toggleAttribute('hidden', hiddenWhenEmpty && !value);
+	}
+
+	function positionEventSummary(trigger) {
+		if (!(eventSummaryOverlay instanceof HTMLElement) || !(trigger instanceof HTMLElement)) return;
+		const triggerRect = trigger.getBoundingClientRect();
+		const overlayRect = eventSummaryOverlay.getBoundingClientRect();
+		const margin = 12;
+		const viewportWidth = window.innerWidth;
+		const viewportHeight = window.innerHeight;
+		const preferredLeft = triggerRect.left + (triggerRect.width / 2) - (overlayRect.width / 2);
+		const left = Math.min(Math.max(margin, preferredLeft), Math.max(margin, viewportWidth - overlayRect.width - margin));
+		const aboveTop = triggerRect.top - overlayRect.height - margin;
+		const belowTop = triggerRect.bottom + margin;
+		const top = aboveTop >= margin
+			? aboveTop
+			: Math.min(Math.max(margin, belowTop), Math.max(margin, viewportHeight - overlayRect.height - margin));
+		eventSummaryOverlay.style.left = `${left}px`;
+		eventSummaryOverlay.style.top = `${top}px`;
+	}
+
+	function showEventSummary(trigger, event, activeDate) {
+		if (!(eventSummaryOverlay instanceof HTMLElement) || !(trigger instanceof HTMLElement)) return;
+		const summary = eventSummaryText(event, activeDate);
+		activeSummaryTrigger?.removeAttribute('aria-describedby');
+		activeSummaryTrigger = trigger;
+		setSummaryText(summaryReference, summary.reference, true);
+		setSummaryText(summaryTitle, summary.title);
+		setSummaryText(summaryMeta, summary.meta);
+		setSummaryText(summaryDate, summary.date);
+		setSummaryText(summaryCopy, summary.summary, true);
+		trigger.setAttribute('aria-describedby', eventSummaryOverlay.id);
+		eventSummaryOverlay.hidden = false;
+		eventSummaryOverlay.setAttribute('data-placement', 'open');
+		positionEventSummary(trigger);
+	}
+
+	function hideEventSummary(trigger = activeSummaryTrigger) {
+		if (!(eventSummaryOverlay instanceof HTMLElement)) return;
+		if (trigger && activeSummaryTrigger && trigger !== activeSummaryTrigger) return;
+		activeSummaryTrigger?.removeAttribute('aria-describedby');
+		activeSummaryTrigger = null;
+		eventSummaryOverlay.hidden = true;
+		eventSummaryOverlay.removeAttribute('data-placement');
 	}
 
 	function createPointEventButton(event) {
@@ -797,7 +874,16 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		});
 	});
 	document.addEventListener('keydown', (event) => {
-		if (event.key === 'Escape' && layerControl instanceof HTMLDetailsElement) layerControl.open = false;
+		if (event.key === 'Escape') {
+			hideEventSummary();
+			if (layerControl instanceof HTMLDetailsElement) layerControl.open = false;
+		}
+	});
+	window.addEventListener('scroll', () => {
+		if (activeSummaryTrigger) positionEventSummary(activeSummaryTrigger);
+	}, true);
+	window.addEventListener('resize', () => {
+		if (activeSummaryTrigger) positionEventSummary(activeSummaryTrigger);
 	});
 	renderMonth(activeMonth);
 </script>
@@ -1271,30 +1357,54 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		box-shadow: 0 0 0 3px rgba(57, 194, 255, 0.32), 0 8px 18px rgba(0, 160, 255, 0.22);
 	}
 
-	.timeline-event-tooltip {
-		position: absolute;
-		z-index: 30;
-		left: 0;
-		bottom: calc(100% + 0.4rem);
-		display: none;
-		width: min(18rem, 58vw);
-		border: 1px solid var(--border);
-		border-radius: 0.55rem;
-		padding: 0.48rem 0.55rem;
+	.timeline-event-summary-overlay {
+		position: fixed;
+		z-index: 1000;
+		display: grid;
+		gap: 0.18rem;
+		width: min(18rem, calc(100vw - 1.5rem));
+		border: 1px solid rgba(124, 199, 244, 0.42);
+		border-radius: 0.65rem;
+		padding: 0.65rem 0.72rem;
 		background: rgba(5, 13, 24, 0.98);
 		color: var(--text);
-		font-size: 0.74rem;
-		font-weight: 650;
-		line-height: 1.35;
-		box-shadow: 0 14px 30px rgba(0, 0, 0, 0.32);
-		white-space: normal;
+		box-shadow: 0 18px 42px rgba(0, 0, 0, 0.44), 0 0 0 1px rgba(255, 255, 255, 0.04);
+		pointer-events: none;
 	}
 
-	.timeline-range-segment:hover .timeline-event-tooltip,
-	.timeline-range-segment:focus-visible .timeline-event-tooltip,
-	.timeline-point-event:hover .timeline-event-tooltip,
-	.timeline-point-event:focus-visible .timeline-event-tooltip {
-		display: block;
+	.timeline-event-summary-overlay[hidden] {
+		display: none;
+	}
+
+	.timeline-event-summary-overlay p {
+		margin: 0;
+	}
+
+	.timeline-event-summary-overlay__reference {
+		color: var(--accent-strong);
+		font-size: 0.72rem;
+		font-weight: 950;
+		letter-spacing: 0;
+		text-transform: uppercase;
+	}
+
+	.timeline-event-summary-overlay__title {
+		font-weight: 950;
+		line-height: 1.25;
+	}
+
+	.timeline-event-summary-overlay__meta,
+	.timeline-event-summary-overlay__date {
+		color: var(--muted-strong);
+		font-size: 0.78rem;
+		font-weight: 800;
+	}
+
+	.timeline-event-summary-overlay__summary {
+		margin-top: 0.18rem;
+		color: var(--muted-strong);
+		font-size: 0.8rem;
+		line-height: 1.35;
 	}
 
 	.timeline-legend {
