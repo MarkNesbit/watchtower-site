@@ -156,7 +156,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 				</div>
 
 				<div class="timeline-layout" data-timeline-ready>
-					<section class="content-card timeline-calendar-card" aria-labelledby="timeline-month-heading">
+					<section class="content-card timeline-calendar-card" aria-labelledby="timeline-month-heading" data-timeline-calendar-card>
 						<div class="timeline-month-nav">
 							<button class="button button--secondary timeline-month-nav__button" type="button" data-timeline-previous aria-label="Show previous month">‹</button>
 							<div class="timeline-month-nav__heading">
@@ -396,6 +396,8 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	} from '../../../../../../lib/timeline';
 
 	const page = document.querySelector('[data-project-timeline-route]');
+	const calendarCard = document.querySelector('[data-timeline-calendar-card]');
+	const dayPanel = document.querySelector('[data-timeline-day-panel]');
 	const heading = document.querySelector('[data-timeline-month-heading]');
 	const weekRows = document.querySelector('[data-timeline-week-rows]');
 	const previousButton = document.querySelector('[data-timeline-previous]');
@@ -450,7 +452,36 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	let selectedDate = page?.getAttribute('data-timeline-selected-date') || todayDate;
 	let selectedEventId = '';
 	let activeSummaryTrigger = /** @type {HTMLElement | null} */ (null);
+	let panelHeightSyncFrame = 0;
 	const visibleLayerKeys = new Set(defaultLayerKeys);
+	const desktopPanelHeightQuery = window.matchMedia('(min-width: 981px)');
+
+	function clearPanelHeightSync() {
+		if (!(dayPanel instanceof HTMLElement)) return;
+		dayPanel.style.removeProperty('--timeline-calendar-card-height');
+		dayPanel.removeAttribute('data-timeline-height-synced');
+	}
+
+	function syncPanelHeightToCalendar() {
+		if (!(calendarCard instanceof HTMLElement) || !(dayPanel instanceof HTMLElement)) return;
+		if (!desktopPanelHeightQuery.matches) {
+			clearPanelHeightSync();
+			return;
+		}
+		const calendarHeight = Math.ceil(calendarCard.getBoundingClientRect().height);
+		if (calendarHeight <= 0) return;
+		dayPanel.style.setProperty('--timeline-calendar-card-height', `${calendarHeight}px`);
+		dayPanel.setAttribute('data-timeline-height-synced', 'true');
+	}
+
+	function schedulePanelHeightSync() {
+		if (panelHeightSyncFrame) window.cancelAnimationFrame(panelHeightSyncFrame);
+		panelHeightSyncFrame = window.requestAnimationFrame(() => {
+			panelHeightSyncFrame = 0;
+			syncPanelHeightToCalendar();
+			if (activeSummaryTrigger) positionEventSummary(activeSummaryTrigger);
+		});
+	}
 
 	function eventTypeLabel(event) {
 		return sourcePresentation[event.sourceType]?.label || event.sourceType;
@@ -864,6 +895,17 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		}));
 		renderEventsForWeeks(weeks);
 		updateSelectedPanel();
+		schedulePanelHeightSync();
+	}
+
+	const calendarResizeObserver = typeof ResizeObserver === 'function' && calendarCard instanceof HTMLElement
+		? new ResizeObserver(() => schedulePanelHeightSync())
+		: null;
+	calendarResizeObserver?.observe(calendarCard);
+	if (typeof desktopPanelHeightQuery.addEventListener === 'function') {
+		desktopPanelHeightQuery.addEventListener('change', () => schedulePanelHeightSync());
+	} else {
+		desktopPanelHeightQuery.addListener?.(() => schedulePanelHeightSync());
 	}
 
 	document.querySelectorAll('[data-timeline-day]').forEach((button) => {
@@ -919,6 +961,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		if (activeSummaryTrigger) positionEventSummary(activeSummaryTrigger);
 	}, true);
 	window.addEventListener('resize', () => {
+		schedulePanelHeightSync();
 		if (activeSummaryTrigger) positionEventSummary(activeSummaryTrigger);
 	});
 	renderMonth(activeMonth);
@@ -939,7 +982,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	.timeline-layout {
 		display: grid;
 		grid-template-columns: minmax(0, 2.6fr) minmax(17rem, 1fr);
-		align-items: stretch;
+		align-items: start;
 		gap: 1rem;
 	}
 
@@ -950,8 +993,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	}
 
 	.timeline-calendar-card {
-		display: grid;
-		align-content: start;
+		align-self: start;
 	}
 
 	.timeline-month-nav {
@@ -1491,9 +1533,12 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	.timeline-day-panel {
 		position: sticky;
 		top: 1rem;
+		align-self: start;
 		display: grid;
 		grid-template-rows: auto minmax(0, 1fr);
 		gap: 0.85rem;
+		height: var(--timeline-calendar-card-height, auto);
+		max-height: var(--timeline-calendar-card-height, none);
 		overflow: hidden;
 	}
 
@@ -1517,8 +1562,8 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		align-content: start;
 		gap: 0.75rem;
 		min-height: 0;
-		margin: -0.15rem;
-		padding: 0.15rem 0.25rem 0.15rem 0.15rem;
+		margin: -0.35rem;
+		padding: 0.35rem 0.45rem 0.35rem 0.35rem;
 		outline: none;
 		overflow-y: auto;
 		overscroll-behavior: contain;
@@ -1697,6 +1742,8 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 
 		.timeline-day-panel {
 			position: static;
+			height: auto;
+			max-height: none;
 		}
 
 		.timeline-day-panel__groups {
