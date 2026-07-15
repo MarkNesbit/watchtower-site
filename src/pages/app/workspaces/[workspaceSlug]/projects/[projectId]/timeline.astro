@@ -13,6 +13,9 @@ import {
 	formatTimelineMonthHeading,
 	getTimelineMonthFromDate,
 	getTodayDateOnly,
+	timelineDayAriaLabel,
+	timelineDayClassName,
+	timelineMonthStartDate,
 	timelineMonthValue,
 } from '../../../../../../lib/timeline';
 
@@ -169,31 +172,24 @@ try {
 								{calendarWeeks.map((week) => (
 									<div class="timeline-week" role="row">
 										{week.days.map((day) => {
-											const fullDateLabel = formatTimelineDateLong(day.date);
-											const dayAria = [
-												fullDateLabel,
-												day.isToday ? 'today' : '',
-												day.date === initialSelectedDate ? 'selected' : '',
-												day.isCurrentMonth ? '' : 'adjacent month',
-												day.isWeekend ? 'weekend' : '',
-											].filter(Boolean).join(', ');
 											return (
 												<button
-													class={`timeline-day${day.isCurrentMonth ? '' : ' timeline-day--adjacent'}${day.isWeekend ? ' timeline-day--weekend' : ''}${day.isToday ? ' timeline-day--today' : ''}${day.date === initialSelectedDate ? ' timeline-day--selected' : ''}`}
+													class={timelineDayClassName(day, initialSelectedDate)}
 													type="button"
 													role="gridcell"
+													data-timeline-day-contract="timeline-day-v1"
 													data-timeline-day={day.date}
 													data-current-month={day.isCurrentMonth ? 'true' : 'false'}
 													data-weekend={day.isWeekend ? 'true' : 'false'}
-													aria-label={dayAria}
+													aria-label={timelineDayAriaLabel(day, initialSelectedDate)}
 													aria-pressed={day.date === initialSelectedDate ? 'true' : 'false'}
 													aria-current={day.isToday ? 'date' : undefined}
 												>
 													<span class="timeline-day__header">
-														<span class="timeline-day__number">{day.dayNumber}</span>
+														<span class="timeline-day__number" data-timeline-day-number>{day.dayNumber}</span>
 														<span class="timeline-day__markers">
-															{day.isToday && <span class="timeline-day__today-marker">Today</span>}
-															{day.isWeekend && <span class="timeline-day__weekend-marker">Weekend</span>}
+															<span class="timeline-day__today-marker" data-timeline-today-marker hidden={!day.isToday}>Today</span>
+															<span class="timeline-day__weekend-marker" data-timeline-weekend-marker hidden={!day.isWeekend}>Weekend</span>
 														</span>
 													</span>
 													<span class="timeline-day__range-lanes" aria-hidden="true"></span>
@@ -206,6 +202,33 @@ try {
 								))}
 							</div>
 						</div>
+						<template data-timeline-week-template>
+							<div class="timeline-week" role="row"></div>
+						</template>
+						<template data-timeline-day-template>
+							<button
+								class="timeline-day"
+								type="button"
+								role="gridcell"
+								data-timeline-day-contract="timeline-day-v1"
+								data-timeline-day=""
+								data-current-month="false"
+								data-weekend="false"
+								aria-label=""
+								aria-pressed="false"
+							>
+								<span class="timeline-day__header">
+									<span class="timeline-day__number" data-timeline-day-number></span>
+									<span class="timeline-day__markers">
+										<span class="timeline-day__today-marker" data-timeline-today-marker hidden>Today</span>
+										<span class="timeline-day__weekend-marker" data-timeline-weekend-marker hidden>Weekend</span>
+									</span>
+								</span>
+								<span class="timeline-day__range-lanes" aria-hidden="true"></span>
+								<span class="timeline-day__point-area" aria-hidden="true"></span>
+								<span class="timeline-day__overflow" aria-hidden="true"></span>
+							</button>
+						</template>
 						<p id="timeline-calendar-help" class="timeline-calendar-help">
 							Use the month controls to move between months. Select any visible day to update the activity panel.
 						</p>
@@ -242,8 +265,10 @@ try {
 		formatTimelineMonthHeading,
 		getTimelineMonthFromDate,
 		getTodayDateOnly,
+		timelineDayAriaLabel,
+		timelineDayClassName,
+		timelineMonthStartDate,
 		timelineMonthValue,
-		TIMELINE_WEEKDAYS,
 	} from '../../../../../../lib/timeline';
 
 	const page = document.querySelector('[data-project-timeline-route]');
@@ -254,19 +279,11 @@ try {
 	const todayButton = document.querySelector('[data-timeline-today-control]');
 	const selectedHeading = document.querySelector('[data-timeline-selected-heading]');
 	const selectedCopy = document.querySelector('[data-timeline-selected-copy]');
+	const weekTemplate = document.querySelector('[data-timeline-week-template]');
+	const dayTemplate = document.querySelector('[data-timeline-day-template]');
 	const todayDate = page?.getAttribute('data-timeline-today') || getTodayDateOnly();
 	let activeMonth = getTimelineMonthFromDate(page?.getAttribute('data-timeline-month') ? `${page.getAttribute('data-timeline-month')}-01` : todayDate);
 	let selectedDate = page?.getAttribute('data-timeline-selected-date') || todayDate;
-
-	function dayLabel(day) {
-		return [
-			formatTimelineDateLong(day.date),
-			day.isToday ? 'today' : '',
-			day.date === selectedDate ? 'selected' : '',
-			day.isCurrentMonth ? '' : 'adjacent month',
-			day.isWeekend ? 'weekend' : '',
-		].filter(Boolean).join(', ');
-	}
 
 	function updateSelectedPanel() {
 		if (selectedHeading) selectedHeading.textContent = formatTimelineDateLong(selectedDate);
@@ -274,25 +291,59 @@ try {
 		page?.setAttribute('data-timeline-selected-date', selectedDate);
 	}
 
+	function applyDayState(button, day) {
+		button.className = timelineDayClassName(day, selectedDate);
+		button.setAttribute('data-timeline-day', day.date);
+		button.setAttribute('data-current-month', day.isCurrentMonth ? 'true' : 'false');
+		button.setAttribute('data-weekend', day.isWeekend ? 'true' : 'false');
+		button.setAttribute('aria-label', timelineDayAriaLabel(day, selectedDate));
+		button.setAttribute('aria-pressed', day.date === selectedDate ? 'true' : 'false');
+		if (day.isToday) button.setAttribute('aria-current', 'date');
+		else button.removeAttribute('aria-current');
+		const dayNumber = button.querySelector('[data-timeline-day-number]');
+		if (dayNumber) dayNumber.textContent = String(day.dayNumber);
+		const todayMarker = button.querySelector('[data-timeline-today-marker]');
+		todayMarker?.toggleAttribute('hidden', !day.isToday);
+		const weekendMarker = button.querySelector('[data-timeline-weekend-marker]');
+		weekendMarker?.toggleAttribute('hidden', !day.isWeekend);
+	}
+
+	function updateRenderedDayStates() {
+		const weeks = buildTimelineCalendarGrid(activeMonth, todayDate);
+		const dayByDate = new Map(weeks.flatMap((week) => week.days.map((day) => [day.date, day])));
+		document.querySelectorAll('[data-timeline-day]').forEach((button) => {
+			const date = button.getAttribute('data-timeline-day') || '';
+			const day = dayByDate.get(date);
+			if (day) applyDayState(button, day);
+		});
+	}
+
 	function selectDate(date) {
 		selectedDate = date;
-		document.querySelectorAll('[data-timeline-day]').forEach((button) => {
-			const isSelected = button.getAttribute('data-timeline-day') === selectedDate;
-			button.classList.toggle('timeline-day--selected', isSelected);
-			button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
-			const isToday = button.getAttribute('aria-current') === 'date';
-			const isCurrentMonth = button.getAttribute('data-current-month') === 'true';
-			const isWeekend = button.getAttribute('data-weekend') === 'true';
-			const dateValue = button.getAttribute('data-timeline-day') || '';
-			button.setAttribute('aria-label', [
-				formatTimelineDateLong(dateValue),
-				isToday ? 'today' : '',
-				isSelected ? 'selected' : '',
-				isCurrentMonth ? '' : 'adjacent month',
-				isWeekend ? 'weekend' : '',
-			].filter(Boolean).join(', '));
-		});
+		updateRenderedDayStates();
 		updateSelectedPanel();
+	}
+
+	function createWeekRow() {
+		const templateContent = weekTemplate instanceof HTMLTemplateElement ? weekTemplate.content.firstElementChild : null;
+		const row = templateContent?.cloneNode(true);
+		if (row instanceof HTMLElement) return row;
+		const fallbackRow = document.createElement('div');
+		fallbackRow.className = 'timeline-week';
+		fallbackRow.setAttribute('role', 'row');
+		return fallbackRow;
+	}
+
+	function createDayButton(day) {
+		const templateContent = dayTemplate instanceof HTMLTemplateElement ? dayTemplate.content.firstElementChild : null;
+		const button = templateContent?.cloneNode(true);
+		const resolvedButton = button instanceof HTMLButtonElement ? button : document.createElement('button');
+		resolvedButton.type = 'button';
+		resolvedButton.setAttribute('role', 'gridcell');
+		resolvedButton.setAttribute('data-timeline-day-contract', 'timeline-day-v1');
+		applyDayState(resolvedButton, day);
+		resolvedButton.addEventListener('click', () => selectDate(day.date));
+		return resolvedButton;
 	}
 
 	function renderMonth(month) {
@@ -302,41 +353,8 @@ try {
 		heading.textContent = formatTimelineMonthHeading(activeMonth);
 		page?.setAttribute('data-timeline-month', timelineMonthValue(activeMonth));
 		weekRows.replaceChildren(...weeks.map((week) => {
-			const row = document.createElement('div');
-			row.className = 'timeline-week';
-			row.setAttribute('role', 'row');
-			for (const day of week.days) {
-				const button = document.createElement('button');
-				button.className = [
-					'timeline-day',
-					day.isCurrentMonth ? '' : 'timeline-day--adjacent',
-					day.isWeekend ? 'timeline-day--weekend' : '',
-					day.isToday ? 'timeline-day--today' : '',
-					day.date === selectedDate ? 'timeline-day--selected' : '',
-				].filter(Boolean).join(' ');
-				button.type = 'button';
-				button.setAttribute('role', 'gridcell');
-				button.setAttribute('data-timeline-day', day.date);
-				button.setAttribute('data-current-month', day.isCurrentMonth ? 'true' : 'false');
-				button.setAttribute('data-weekend', day.isWeekend ? 'true' : 'false');
-				button.setAttribute('aria-label', dayLabel(day));
-				button.setAttribute('aria-pressed', day.date === selectedDate ? 'true' : 'false');
-				if (day.isToday) button.setAttribute('aria-current', 'date');
-				button.innerHTML = `
-					<span class="timeline-day__header">
-						<span class="timeline-day__number">${day.dayNumber}</span>
-						<span class="timeline-day__markers">
-							${day.isToday ? '<span class="timeline-day__today-marker">Today</span>' : ''}
-							${day.isWeekend ? '<span class="timeline-day__weekend-marker">Weekend</span>' : ''}
-						</span>
-					</span>
-					<span class="timeline-day__range-lanes" aria-hidden="true"></span>
-					<span class="timeline-day__point-area" aria-hidden="true"></span>
-					<span class="timeline-day__overflow" aria-hidden="true"></span>
-				`;
-				button.addEventListener('click', () => selectDate(day.date));
-				row.append(button);
-			}
+			const row = createWeekRow();
+			for (const day of week.days) row.append(createDayButton(day));
 			return row;
 		}));
 		updateSelectedPanel();
@@ -349,8 +367,16 @@ try {
 		});
 	});
 
-	previousButton?.addEventListener('click', () => renderMonth(addTimelineMonths(activeMonth, -1)));
-	nextButton?.addEventListener('click', () => renderMonth(addTimelineMonths(activeMonth, 1)));
+	function navigateMonth(offset) {
+		const nextMonth = addTimelineMonths(activeMonth, offset);
+		selectedDate = timelineMonthStartDate(nextMonth);
+		renderMonth(nextMonth);
+		const selectedCell = document.querySelector(`[data-timeline-day="${CSS.escape(selectedDate)}"]`);
+		if (selectedCell instanceof HTMLElement) selectedCell.focus();
+	}
+
+	previousButton?.addEventListener('click', () => navigateMonth(-1));
+	nextButton?.addEventListener('click', () => navigateMonth(1));
 	todayButton?.addEventListener('click', () => {
 		selectedDate = todayDate;
 		renderMonth(getTimelineMonthFromDate(todayDate));

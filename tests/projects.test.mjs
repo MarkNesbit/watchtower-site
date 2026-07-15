@@ -527,14 +527,17 @@ test('Project dashboard capability tiles link to the read-only Timeline route', 
 	const narrativeIndex = detailSource.indexOf("title: 'Project Narrative'");
 	const timelineIndex = detailSource.indexOf("title: 'Timeline'");
 	const risksIndex = detailSource.indexOf("title: 'Risks'");
+	const timelineTileConfig = detailSource.slice(timelineIndex, risksIndex);
 
 	assert.notEqual(narrativeIndex, -1);
 	assert.match(detailSource, /title: 'Project Details'[\s\S]*?destination: 'details'/);
 	assert.match(detailSource, /title: 'Project Narrative'[\s\S]*?destination: 'narrative',[\s\S]*?featureKey: 'projectDiary'/);
-	assert.match(detailSource, /title: 'Timeline'[\s\S]*?destination: 'timeline'/);
+	assert.match(detailSource, /title: 'Timeline'[\s\S]*?attentionTone: 'green'[\s\S]*?statusLabel: 'Available'[\s\S]*?ariaLabel: 'Open Timeline, Available'[\s\S]*?destination: 'timeline'/);
 	assert.ok(narrativeIndex < timelineIndex);
 	assert.ok(timelineIndex < risksIndex);
 	assert.match(detailSource, /buildProjectTimelinePath\(workspaceSlug \?\? '', project\.slug\)/);
+	assert.match(detailSource, /tile\.destination === 'timeline'[\s\S]*?\? 'green'/);
+	assert.doesNotMatch(timelineTileConfig, /dashboard-tile--unavailable|aria-disabled="true"|featureKey/);
 	assert.match(detailSource, /buildProjectNarrativePath\(workspaceSlug \?\? '', project\.slug\)/);
 	assert.match(detailSource, /\.from\('project_people'\)[\s\S]*\.select\('project_role, user_id, demo_person_id, status'\)/);
 	assert.match(detailSource, /projectDetailsTileSignal = deriveProjectDetailsTileSignal\(project, projectDateCards, projectDetailAssignments\)/);

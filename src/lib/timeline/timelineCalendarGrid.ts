@@ -66,6 +66,10 @@ export function addTimelineMonths(month: TimelineMonth, offset: number): Timelin
 	return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
 }
 
+export function timelineMonthStartDate(month: TimelineMonth): string {
+	return `${month.year}-${padDatePart(month.month)}-01`;
+}
+
 export function timelineMonthValue(month: TimelineMonth): string {
 	return `${month.year}-${padDatePart(month.month)}`;
 }
@@ -76,6 +80,26 @@ export function formatTimelineMonthHeading(month: TimelineMonth): string {
 
 export function formatTimelineDateLong(dateOnly: string): string {
 	return dateFormatter.format(utcDateFromDateOnly(dateOnly));
+}
+
+export function timelineDayClassName(day: TimelineCalendarDay, selectedDate: string): string {
+	return [
+		'timeline-day',
+		day.isCurrentMonth ? '' : 'timeline-day--adjacent',
+		day.isWeekend ? 'timeline-day--weekend' : '',
+		day.isToday ? 'timeline-day--today' : '',
+		day.date === selectedDate ? 'timeline-day--selected' : '',
+	].filter(Boolean).join(' ');
+}
+
+export function timelineDayAriaLabel(day: TimelineCalendarDay, selectedDate: string): string {
+	return [
+		formatTimelineDateLong(day.date),
+		day.isToday ? 'today' : '',
+		day.date === selectedDate ? 'selected' : '',
+		day.isCurrentMonth ? '' : 'adjacent month',
+		day.isWeekend ? 'weekend' : '',
+	].filter(Boolean).join(', ');
 }
 
 export function buildTimelineCalendarGrid(month: TimelineMonth, todayDate = getTodayDateOnly()): TimelineCalendarWeek[] {
