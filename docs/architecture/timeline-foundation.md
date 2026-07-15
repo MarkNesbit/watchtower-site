@@ -1,13 +1,13 @@
 # Timeline Foundation Architecture
 
-**Status:** Foundation architecture plus monthly page shell through `WT-TIMELINE-FOUNDATION-002`
-**Date:** 14 July 2026
+**Status:** Foundation architecture plus fixture event rendering through `WT-TIMELINE-FOUNDATION-003`
+**Date:** 15 July 2026
 
 ## Purpose
 
 The Watchtower Timeline is a visualisation layer for significant delivery and assurance dates within a project. It is designed to show Project Dates, Risks, Issues, Dependencies, Assumptions, Decisions, Actions, future Project Events and future Delivery Periods in one consistent calendar model.
 
-The first visible route is now available at `/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline`. The page is a read-only monthly shell and does not create a Timeline database table, database migration, source modal or live source adapter.
+The first visible route is now available at `/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline`. The page is read-only and currently uses bounded development fixtures to prove visual rendering. It does not create a Timeline database table, database migration, source modal or live source adapter.
 
 ## Source Of Truth
 
@@ -136,7 +136,7 @@ The Timeline page uses:
 - A laptop-first two-column layout with the monthly calendar on the left and a persistent selected-day panel on the right.
 - A stacked layout below the laptop boundary to avoid horizontal overflow.
 
-The calendar day cell has stable internal areas for future range lanes, point-event icons and overflow indicators. This slice intentionally leaves those areas empty.
+The calendar day cell has stable internal areas for range lanes, point-event icons and overflow indicators. Day cells are keyboard-operable grid cells rather than nested buttons so event controls can be independently focusable.
 
 ## Selected-Day Interaction
 
@@ -169,7 +169,93 @@ An empty Timeline event collection is valid. The calendar still renders and the 
 
 Genuine route or context failures render a safe error state with a route back to the project area where possible. Internal errors, stack traces and raw identifiers are not exposed.
 
-This slice calls the Timeline aggregation contract with no adapters. It does not query Project Dates, Risks, Issues, Decisions, Dependencies or Actions.
+`WT-TIMELINE-FOUNDATION-003` calls the Timeline aggregation contract with one explicit fixture adapter. It does not query Project Dates, Risks, Issues, Decisions, Dependencies or Actions.
+
+## Fixture Strategy
+
+Fixture events live in `src/lib/timeline/timelineFixtures.ts`. They are created as `TimelineEvent` objects, scoped to the currently resolved workspace and project context, and passed through `aggregateTimelineEvents`.
+
+The fixture set includes July 2026 UAT, integration, cutover, training and hypercare ranges, Risk, Issue, Dependency and Decision point events, adjacent-month events and a hidden-by-default Action. The fixtures are non-persistent and must not be described as live production records.
+
+## Event Rendering Rules
+
+Point events render as compact focusable icon controls inside the day cell point-event area. The source type is represented by an icon and accessible label. Attention or status is represented separately with a small dot, border and status text in the selected-day panel.
+
+Range events render as horizontal bars over the week row. A same-day range is normalised to a point event before rendering. Ranges use their source/category presentation for shape and label while Red, Amber, Green and neutral status remains a separate tone treatment.
+
+Completed fixtures remain visible with a subdued presentation. Neutral fixtures are not presented as Green unless their source state explicitly says Green.
+
+## Range Segmentation And Lanes
+
+Range segmentation is implemented in `src/lib/timeline/timelineEventLayout.ts`.
+
+Rules:
+
+- Ranges are inclusive of start and end date.
+- A range crossing a week boundary is split into one segment per visible week row.
+- A segment records its logical event ID, week index, start column, end column, visible segment dates, true start, true end, continuation from a previous row and continuation into a following row.
+- A range that starts before or ends after the visible month still renders on adjacent-month dates where it overlaps the grid and uses continuation state rather than implying a false month-boundary start or end.
+
+Lane allocation is deterministic. Segments in the same week row that overlap dates cannot share a lane. The allocator tries to keep the same logical event in the same lane across adjacent rows where practical, then uses the first non-overlapping lane. Visible range lanes are limited to three per week row. Hidden range segments contribute to per-day overflow indicators while remaining available in selected-day panel data when their layer is visible.
+
+## Overflow Limits
+
+Initial visual limits:
+
+- Range lanes: three visible lanes per week row.
+- Point icons: four visible point icons per day.
+
+Point overflow renders as `+N`. Range overflow renders as `+N ranges`. Overflow controls are focusable, accessible and select the affected day so the full visible event set can be reviewed in the selected-day panel.
+
+## Selected-Day And Selected-Event Behaviour
+
+Selecting a day updates the selected date, the calendar selected state and the right-hand panel. The panel heading shows the full selected date plus the visible event count.
+
+The selected-day panel includes every visible event active on the date:
+
+- point events whose start date equals the selected date;
+- range events whose inclusive range contains the selected date.
+
+Events are grouped by configured Timeline layer order. Empty groups are hidden. Rows show source icon, reference, title, source-type pill, status/attention pill, summary, date or range context and a future-open affordance. For ranges, the panel shows the full range plus day number within the range.
+
+Selecting a point icon, range segment or panel row sets one selected event, keeps the selected-day context and highlights the matching row/control. If a layer toggle hides the selected event, selected-event state is cleared while selected-day state remains.
+
+## Layer Controls
+
+The Layers control is sourced from `DEFAULT_TIMELINE_LAYERS`.
+
+Default visibility:
+
+- Project delivery: on
+- Risks: on
+- Issues: on
+- Dependencies: on for fixture validation
+- Decisions: on
+- Actions: off
+- Assumptions: off and disabled until connected
+- Project events: off and disabled until connected
+- Delivery periods: off and disabled until connected
+
+Layer state is client-side only in this slice. It filters calendar icons, range bars, overflow counts, selected-day totals and selected-day groups. It is not persisted as a user preference.
+
+## Ordering
+
+Calendar and panel ordering is deterministic:
+
+1. Range events before point events.
+2. Red, then Amber, then Green, then neutral.
+3. Start date.
+4. Configured layer order.
+5. Source reference or title.
+6. Event ID as final tie-breaker.
+
+This ordering is also used for visible point icons and range lane allocation.
+
+## Legend And Accessibility
+
+The legend shows only source types represented by fixture events and uses icon plus text. It does not imply that colour alone communicates status.
+
+Event controls expose title, source type, point/range shape, date or range, status and summary through accessible labels. Hover and focus show a compact summary. Layer controls are keyboard-operable through native controls, and Escape closes the layer details panel.
 
 ## Layer Model
 
@@ -187,7 +273,7 @@ Initial layers:
 - Project events
 - Delivery periods
 
-Layer configuration supports label, source types, default visibility, enabled state, order and icon metadata. Actions are supported by the architecture but default to hidden. Assumptions, Dependencies, Project Events and Delivery Periods are configured for future use without requiring live adapters now.
+Layer configuration supports label, source types, default visibility, enabled state, order and icon metadata. Actions are supported by the architecture but default to hidden. Assumptions, Project Events and Delivery Periods are configured for future use without requiring live adapters now.
 
 No user preference persistence is implemented in this slice.
 
@@ -243,11 +329,6 @@ The monthly page shell still excludes:
 
 - live Project Date integration;
 - live Risk, Issue, Decision, Dependency or Action adapters;
-- layer controls;
-- event icons;
-- range bars;
-- overflow indicators;
-- source hover cards;
 - reusable source modals;
 - event creation;
 - recurrence;

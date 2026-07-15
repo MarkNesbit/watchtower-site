@@ -6,18 +6,24 @@ import { can } from '../../../../../../lib/permissions';
 import { buildProjectPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
 import {
+	DEFAULT_TIMELINE_LAYERS,
+	TIMELINE_POINT_EVENT_LIMIT,
+	TIMELINE_RANGE_LANE_LIMIT,
 	TIMELINE_WEEKDAYS,
 	aggregateTimelineEvents,
 	buildTimelineCalendarGrid,
+	createTimelineFixtureAdapter,
 	formatTimelineDateLong,
 	formatTimelineMonthHeading,
 	getTimelineMonthFromDate,
 	getTodayDateOnly,
+	getDefaultVisibleTimelineLayerKeys,
 	timelineDayAriaLabel,
 	timelineDayClassName,
 	timelineMonthStartDate,
 	timelineMonthValue,
 } from '../../../../../../lib/timeline';
+import type { TimelineEvent, TimelineSourceType } from '../../../../../../lib/timeline';
 
 const projectSlug = Astro.params.projectId;
 const workspaceSlug = Astro.params.workspaceSlug;
@@ -25,8 +31,6 @@ const accessToken = getServerAccessToken(Astro.cookies);
 const todayDate = getTodayDateOnly();
 const currentMonth = getTimelineMonthFromDate(todayDate);
 const calendarWeeks = buildTimelineCalendarGrid(currentMonth, todayDate);
-const visibleStartDate = calendarWeeks[0]?.days[0]?.date ?? todayDate;
-const visibleEndDate = calendarWeeks.at(-1)?.days.at(-1)?.date ?? todayDate;
 const initialSelectedDate = todayDate;
 const initialSelectedDateLabel = formatTimelineDateLong(initialSelectedDate);
 const initialMonthHeading = formatTimelineMonthHeading(currentMonth);
@@ -36,6 +40,19 @@ let workspaceName = '';
 let message = '';
 let timelineLoadError = '';
 let timelineEventCount = 0;
+let timelineEvents: TimelineEvent[] = [];
+
+const timelineSourcePresentation: Record<TimelineSourceType, { label: string; icon: string }> = {
+	'project-date': { label: 'Project delivery', icon: '◆' },
+	risk: { label: 'Risk', icon: '!' },
+	issue: { label: 'Issue', icon: '!' },
+	dependency: { label: 'Dependency', icon: '↔' },
+	assumption: { label: 'Assumption', icon: '?' },
+	decision: { label: 'Decision', icon: '✓' },
+	action: { label: 'Action', icon: '☑' },
+	'project-event': { label: 'Project event', icon: '○' },
+	'delivery-period': { label: 'Delivery period', icon: '▬' },
+};
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -69,21 +86,22 @@ try {
 				const { data: userData } = accessToken
 					? await serverSupabase.auth.getUser(accessToken)
 					: await serverSupabase.auth.getUser();
-				const timelineEvents = await aggregateTimelineEvents(
+				const aggregatedTimelineEvents = await aggregateTimelineEvents(
 					{
 						workspaceId: organisation.id,
 						projectId: data.id,
-						visibleStartDate,
-						visibleEndDate,
+						visibleStartDate: '2026-06-01',
+						visibleEndDate: '2026-08-31',
 						viewerId: userData.user?.id ?? '',
 						permissionContext: {
 							viewerId: userData.user?.id ?? '',
 							workspaceRole: workspace.role,
 						},
 					},
-					[],
+					[createTimelineFixtureAdapter()],
 				);
-				timelineEventCount = timelineEvents.length;
+				timelineEventCount = aggregatedTimelineEvents.length;
+				timelineEvents = aggregatedTimelineEvents;
 			} catch {
 				timelineLoadError = 'Timeline entries could not be loaded. The calendar shell is still available.';
 			}
@@ -93,6 +111,11 @@ try {
 	message = 'Unable to load project Timeline.';
 	Astro.response.status = 500;
 }
+
+const timelineEventsJson = JSON.stringify(timelineEvents);
+const timelineLayersJson = JSON.stringify(DEFAULT_TIMELINE_LAYERS);
+const defaultVisibleLayerKeysJson = JSON.stringify(getDefaultVisibleTimelineLayerKeys(DEFAULT_TIMELINE_LAYERS));
+const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event.sourceType)));
 ---
 <AuthenticatedLayout title={project ? `Timeline — ${project.name} | WatchTower` : 'Timeline | WatchTower'}>
 	<section
@@ -102,6 +125,8 @@ try {
 		data-timeline-today={todayDate}
 		data-timeline-selected-date={initialSelectedDate}
 		data-timeline-event-count={timelineEventCount}
+		data-timeline-range-lane-limit={TIMELINE_RANGE_LANE_LIMIT}
+		data-timeline-point-limit={TIMELINE_POINT_EVENT_LIMIT}
 	>
 		{project ? (
 			<>
@@ -140,6 +165,29 @@ try {
 							</div>
 							<button class="button button--secondary timeline-month-nav__button" type="button" data-timeline-next aria-label="Show next month">›</button>
 							<button class="button button--secondary timeline-month-nav__today" type="button" data-timeline-today-control>Today</button>
+							<details class="timeline-layer-control" data-timeline-layer-control>
+								<summary class="button button--secondary" aria-controls="timeline-layer-options">Layers</summary>
+								<fieldset id="timeline-layer-options" class="timeline-layer-control__panel" data-timeline-layer-options>
+									<legend>Timeline layers</legend>
+									{DEFAULT_TIMELINE_LAYERS.map((layer) => (
+										<label class={`timeline-layer-toggle${layer.enabled ? '' : ' timeline-layer-toggle--disabled'}`}>
+											<input
+												type="checkbox"
+												value={layer.key}
+												checked={layer.enabled && layer.defaultVisible}
+												disabled={!layer.enabled}
+												data-timeline-layer-toggle={layer.key}
+											/>
+											<span class="timeline-layer-toggle__body">
+												<span class="timeline-layer-toggle__label">{layer.label}</span>
+												<span class="timeline-layer-toggle__status">
+													{layer.enabled ? (layer.defaultVisible ? 'Shown by default' : 'Hidden by default') : 'Source not connected yet'}
+												</span>
+											</span>
+										</label>
+									))}
+								</fieldset>
+							</details>
 						</div>
 
 						{timelineLoadError && (
@@ -173,16 +221,17 @@ try {
 									<div class="timeline-week" role="row">
 										{week.days.map((day) => {
 											return (
-												<button
+												<div
 													class={timelineDayClassName(day, initialSelectedDate)}
-													type="button"
 													role="gridcell"
+													tabindex="0"
 													data-timeline-day-contract="timeline-day-v1"
 													data-timeline-day={day.date}
 													data-current-month={day.isCurrentMonth ? 'true' : 'false'}
 													data-weekend={day.isWeekend ? 'true' : 'false'}
 													aria-label={timelineDayAriaLabel(day, initialSelectedDate)}
 													aria-pressed={day.date === initialSelectedDate ? 'true' : 'false'}
+													aria-selected={day.date === initialSelectedDate ? 'true' : 'false'}
 													aria-current={day.isToday ? 'date' : undefined}
 												>
 													<span class="timeline-day__header">
@@ -193,9 +242,9 @@ try {
 														</span>
 													</span>
 													<span class="timeline-day__range-lanes" aria-hidden="true"></span>
-													<span class="timeline-day__point-area" aria-hidden="true"></span>
-													<span class="timeline-day__overflow" aria-hidden="true"></span>
-												</button>
+													<span class="timeline-day__point-area"></span>
+													<span class="timeline-day__overflow"></span>
+												</div>
 											);
 										})}
 									</div>
@@ -206,16 +255,17 @@ try {
 							<div class="timeline-week" role="row"></div>
 						</template>
 						<template data-timeline-day-template>
-							<button
+							<div
 								class="timeline-day"
-								type="button"
 								role="gridcell"
+								tabindex="0"
 								data-timeline-day-contract="timeline-day-v1"
 								data-timeline-day=""
 								data-current-month="false"
 								data-weekend="false"
 								aria-label=""
 								aria-pressed="false"
+								aria-selected="false"
 							>
 								<span class="timeline-day__header">
 									<span class="timeline-day__number" data-timeline-day-number></span>
@@ -225,26 +275,82 @@ try {
 									</span>
 								</span>
 								<span class="timeline-day__range-lanes" aria-hidden="true"></span>
-								<span class="timeline-day__point-area" aria-hidden="true"></span>
-								<span class="timeline-day__overflow" aria-hidden="true"></span>
+								<span class="timeline-day__point-area"></span>
+								<span class="timeline-day__overflow"></span>
+							</div>
+						</template>
+						<template data-timeline-range-template>
+							<button class="timeline-range-segment" type="button" data-timeline-event-control data-timeline-range-segment>
+								<span class="timeline-range-segment__status" aria-hidden="true"></span>
+								<span class="timeline-range-segment__label" data-timeline-event-label></span>
+								<span class="timeline-event-tooltip" data-timeline-event-tooltip></span>
 							</button>
+						</template>
+						<template data-timeline-range-overflow-template>
+							<button class="timeline-overflow timeline-overflow--range" type="button" data-timeline-range-overflow></button>
+						</template>
+						<template data-timeline-point-template>
+							<button class="timeline-point-event" type="button" data-timeline-event-control data-timeline-point-event>
+								<span class="timeline-point-event__icon" data-timeline-event-icon aria-hidden="true"></span>
+								<span class="timeline-point-event__status" aria-hidden="true"></span>
+								<span class="visually-hidden" data-timeline-event-label></span>
+								<span class="timeline-event-tooltip" data-timeline-event-tooltip></span>
+							</button>
+						</template>
+						<template data-timeline-point-overflow-template>
+							<button class="timeline-overflow timeline-overflow--point" type="button" data-timeline-point-overflow></button>
 						</template>
 						<p id="timeline-calendar-help" class="timeline-calendar-help">
 							Use the month controls to move between months. Select any visible day to update the activity panel.
 						</p>
+						<div class="timeline-legend" aria-label="Timeline event legend" data-timeline-legend>
+							{legendSourceTypes.map((sourceType) => (
+								<span class="timeline-legend__item">
+									<span class="timeline-legend__icon" aria-hidden="true">{timelineSourcePresentation[sourceType].icon}</span>
+									<span>{timelineSourcePresentation[sourceType].label}</span>
+								</span>
+							))}
+						</div>
 					</section>
 
 					<aside class="content-card timeline-day-panel" aria-labelledby="timeline-selected-date-heading" data-timeline-day-panel>
 						<p class="eyebrow">Selected day</p>
 						<h2 id="timeline-selected-date-heading" data-timeline-selected-heading>{initialSelectedDateLabel}</h2>
-						<p data-timeline-selected-copy>Significant Timeline entries for this date will appear here as source layers are connected.</p>
+						<p data-timeline-selected-copy>Fixture Timeline entries for this date will appear here when visible layers overlap the selected day.</p>
 						<div class="timeline-day-panel__groups" data-timeline-day-groups>
 							<EmptyState title="No project activity is currently shown for this date.">
-								<p>Timeline entries will appear here in a later slice.</p>
+								<p>No visible fixture entries overlap this date.</p>
 							</EmptyState>
 						</div>
+						<template data-timeline-panel-group-template>
+							<section class="timeline-panel-group">
+								<h3 data-timeline-panel-group-heading></h3>
+								<ul data-timeline-panel-group-list></ul>
+							</section>
+						</template>
+						<template data-timeline-panel-row-template>
+							<li>
+								<button class="timeline-panel-event" type="button" data-timeline-panel-event>
+									<span class="timeline-panel-event__icon" data-timeline-event-icon aria-hidden="true"></span>
+									<span class="timeline-panel-event__body">
+										<span class="timeline-panel-event__meta">
+											<span class="timeline-panel-event__reference" data-timeline-event-reference></span>
+											<span class="timeline-pill timeline-pill--type" data-timeline-event-type></span>
+											<span class="timeline-pill timeline-pill--status" data-timeline-event-status></span>
+										</span>
+										<span class="timeline-panel-event__title" data-timeline-event-title></span>
+										<span class="timeline-panel-event__summary" data-timeline-event-summary></span>
+										<span class="timeline-panel-event__date" data-timeline-event-date></span>
+									</span>
+									<span class="timeline-panel-event__chevron" aria-hidden="true">›</span>
+								</button>
+							</li>
+						</template>
 					</aside>
 				</div>
+				<script type="application/json" data-timeline-events set:html={timelineEventsJson}></script>
+				<script type="application/json" data-timeline-layers set:html={timelineLayersJson}></script>
+				<script type="application/json" data-timeline-default-layers set:html={defaultVisibleLayerKeysJson}></script>
 			</>
 		) : (
 			<section class="content-card timeline-error-state" data-timeline-error-state>
@@ -259,12 +365,23 @@ try {
 
 <script>
 	import {
+		TIMELINE_POINT_EVENT_LIMIT,
+		TIMELINE_RANGE_LANE_LIMIT,
 		addTimelineMonths,
+		allocateTimelineRangeLanes,
 		buildTimelineCalendarGrid,
+		filterTimelineEventsByLayers,
 		formatTimelineDateLong,
 		formatTimelineMonthHeading,
+		getTimelineEventsActiveOnDate,
+		getTimelinePointEventsByDate,
+		getTimelinePointOverflowCount,
+		getTimelineRangeOverflowCountsByDate,
 		getTimelineMonthFromDate,
 		getTodayDateOnly,
+		groupTimelineEventsByLayer,
+		segmentTimelineRangeEventsByWeek,
+		sortTimelineEventsForDisplay,
 		timelineDayAriaLabel,
 		timelineDayClassName,
 		timelineMonthStartDate,
@@ -281,14 +398,107 @@ try {
 	const selectedCopy = document.querySelector('[data-timeline-selected-copy]');
 	const weekTemplate = document.querySelector('[data-timeline-week-template]');
 	const dayTemplate = document.querySelector('[data-timeline-day-template]');
+	const rangeTemplate = document.querySelector('[data-timeline-range-template]');
+	const rangeOverflowTemplate = document.querySelector('[data-timeline-range-overflow-template]');
+	const pointTemplate = document.querySelector('[data-timeline-point-template]');
+	const pointOverflowTemplate = document.querySelector('[data-timeline-point-overflow-template]');
+	const panelGroups = document.querySelector('[data-timeline-day-groups]');
+	const panelGroupTemplate = document.querySelector('[data-timeline-panel-group-template]');
+	const panelRowTemplate = document.querySelector('[data-timeline-panel-row-template]');
+	const layerControl = document.querySelector('[data-timeline-layer-control]');
+	const layerToggles = [...document.querySelectorAll('[data-timeline-layer-toggle]')];
+	const sourcePresentation = {
+		'project-date': { label: 'Project delivery', icon: '◆' },
+		risk: { label: 'Risk', icon: '!' },
+		issue: { label: 'Issue', icon: '!' },
+		dependency: { label: 'Dependency', icon: '↔' },
+		assumption: { label: 'Assumption', icon: '?' },
+		decision: { label: 'Decision', icon: '✓' },
+		action: { label: 'Action', icon: '☑' },
+		'project-event': { label: 'Project event', icon: '○' },
+		'delivery-period': { label: 'Delivery period', icon: '▬' },
+	};
+	const parseJson = (selector, fallback) => {
+		const element = document.querySelector(selector);
+		if (!element?.textContent) return fallback;
+		try {
+			return JSON.parse(element.textContent);
+		} catch {
+			return fallback;
+		}
+	};
+	const timelineEvents = parseJson('[data-timeline-events]', []);
+	const timelineLayers = parseJson('[data-timeline-layers]', []);
+	const defaultLayerKeys = parseJson('[data-timeline-default-layers]', []);
 	const todayDate = page?.getAttribute('data-timeline-today') || getTodayDateOnly();
+	const rangeLaneLimit = Number(page?.getAttribute('data-timeline-range-lane-limit') || TIMELINE_RANGE_LANE_LIMIT);
+	const pointEventLimit = Number(page?.getAttribute('data-timeline-point-limit') || TIMELINE_POINT_EVENT_LIMIT);
 	let activeMonth = getTimelineMonthFromDate(page?.getAttribute('data-timeline-month') ? `${page.getAttribute('data-timeline-month')}-01` : todayDate);
 	let selectedDate = page?.getAttribute('data-timeline-selected-date') || todayDate;
+	let selectedEventId = '';
+	const visibleLayerKeys = new Set(defaultLayerKeys);
+
+	function eventTypeLabel(event) {
+		return sourcePresentation[event.sourceType]?.label || event.sourceType;
+	}
+
+	function eventIcon(event) {
+		return sourcePresentation[event.sourceType]?.icon || '•';
+	}
+
+	function eventTone(event) {
+		return event.attentionTone || 'neutral';
+	}
+
+	function formatShortDate(date) {
+		return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`));
+	}
+
+	function dayDifference(startDate, endDate) {
+		const start = new Date(`${startDate}T00:00:00Z`);
+		const end = new Date(`${endDate}T00:00:00Z`);
+		return Math.round((end.getTime() - start.getTime()) / 86400000);
+	}
+
+	function eventEndDate(event) {
+		return event.endDate || event.startDate;
+	}
+
+	function eventDateLabel(event) {
+		if (event.presentationType !== 'range') return formatTimelineDateLong(event.startDate);
+		return `${formatShortDate(event.startDate)}–${formatShortDate(eventEndDate(event))}`;
+	}
+
+	function rangeContextLabel(event, activeDate) {
+		if (event.presentationType !== 'range') return eventDateLabel(event);
+		const totalDays = dayDifference(event.startDate, eventEndDate(event)) + 1;
+		const currentDay = dayDifference(event.startDate, activeDate) + 1;
+		return `${eventDateLabel(event)} · Day ${currentDay} of ${totalDays}`;
+	}
+
+	function eventAccessibleLabel(event, activeDate = selectedDate) {
+		const type = eventTypeLabel(event);
+		const state = event.status || event.attentionTone || 'No status';
+		const reference = event.sourceReference ? `${event.sourceReference}, ` : '';
+		const shape = event.presentationType === 'range' ? 'range event' : 'point event';
+		const date = event.presentationType === 'range' ? rangeContextLabel(event, activeDate) : eventDateLabel(event);
+		return `${reference}${event.title}, ${type}, ${shape}, ${date}, ${state}. ${event.summary || ''}`.trim();
+	}
+
+	function eventClassName(baseClass, event) {
+		return `${baseClass} ${baseClass}--${event.sourceType} ${baseClass}--${eventTone(event)}${event.status === 'Completed' ? ` ${baseClass}--completed` : ''}`;
+	}
 
 	function updateSelectedPanel() {
-		if (selectedHeading) selectedHeading.textContent = formatTimelineDateLong(selectedDate);
-		if (selectedCopy) selectedCopy.textContent = 'Significant Timeline entries for this date will appear here as source layers are connected.';
+		const visibleEvents = filterTimelineEventsByLayers(timelineEvents, [...visibleLayerKeys]);
+		const selectedEvents = getTimelineEventsActiveOnDate(visibleEvents, selectedDate, timelineLayers);
+		if (selectedHeading) selectedHeading.textContent = `${formatTimelineDateLong(selectedDate)} · ${selectedEvents.length} ${selectedEvents.length === 1 ? 'entry' : 'entries'}`;
+		if (selectedCopy) selectedCopy.textContent = selectedEvents.length
+			? 'Fixture entries only. Source opening and editing arrive in later Timeline slices.'
+			: 'No visible fixture entries overlap this date.';
 		page?.setAttribute('data-timeline-selected-date', selectedDate);
+		page?.setAttribute('data-timeline-selected-event', selectedEventId);
+		renderSelectedPanel(selectedEvents);
 	}
 
 	function applyDayState(button, day) {
@@ -298,6 +508,8 @@ try {
 		button.setAttribute('data-weekend', day.isWeekend ? 'true' : 'false');
 		button.setAttribute('aria-label', timelineDayAriaLabel(day, selectedDate));
 		button.setAttribute('aria-pressed', day.date === selectedDate ? 'true' : 'false');
+		button.setAttribute('aria-selected', day.date === selectedDate ? 'true' : 'false');
+		button.setAttribute('tabindex', '0');
 		if (day.isToday) button.setAttribute('aria-current', 'date');
 		else button.removeAttribute('aria-current');
 		const dayNumber = button.querySelector('[data-timeline-day-number]');
@@ -308,6 +520,11 @@ try {
 		weekendMarker?.toggleAttribute('hidden', !day.isWeekend);
 	}
 
+	function clearEventChrome(scope = document) {
+		scope.querySelectorAll('[data-timeline-range-segment], [data-timeline-range-overflow]').forEach((element) => element.remove());
+		scope.querySelectorAll('[data-timeline-point-event], [data-timeline-point-overflow]').forEach((element) => element.remove());
+	}
+
 	function updateRenderedDayStates() {
 		const weeks = buildTimelineCalendarGrid(activeMonth, todayDate);
 		const dayByDate = new Map(weeks.flatMap((week) => week.days.map((day) => [day.date, day])));
@@ -316,12 +533,18 @@ try {
 			const day = dayByDate.get(date);
 			if (day) applyDayState(button, day);
 		});
+		renderEventsForWeeks(weeks);
 	}
 
-	function selectDate(date) {
+	function selectDate(date, eventId = '') {
 		selectedDate = date;
+		selectedEventId = eventId;
 		updateRenderedDayStates();
 		updateSelectedPanel();
+	}
+
+	function selectEvent(eventId, date) {
+		selectDate(date, eventId);
 	}
 
 	function createWeekRow() {
@@ -337,13 +560,177 @@ try {
 	function createDayButton(day) {
 		const templateContent = dayTemplate instanceof HTMLTemplateElement ? dayTemplate.content.firstElementChild : null;
 		const button = templateContent?.cloneNode(true);
-		const resolvedButton = button instanceof HTMLButtonElement ? button : document.createElement('button');
-		resolvedButton.type = 'button';
+		const resolvedButton = button instanceof HTMLElement ? button : document.createElement('div');
 		resolvedButton.setAttribute('role', 'gridcell');
 		resolvedButton.setAttribute('data-timeline-day-contract', 'timeline-day-v1');
 		applyDayState(resolvedButton, day);
 		resolvedButton.addEventListener('click', () => selectDate(day.date));
+		resolvedButton.addEventListener('keydown', (keyboardEvent) => {
+			if (keyboardEvent.key !== 'Enter' && keyboardEvent.key !== ' ') return;
+			keyboardEvent.preventDefault();
+			selectDate(day.date);
+		});
 		return resolvedButton;
+	}
+
+	function createTemplateElement(template, fallbackTagName, fallbackClassName) {
+		const templateContent = template instanceof HTMLTemplateElement ? template.content.firstElementChild : null;
+		const element = templateContent?.cloneNode(true);
+		if (element instanceof HTMLElement) return element;
+		const fallback = document.createElement(fallbackTagName);
+		fallback.className = fallbackClassName;
+		return fallback;
+	}
+
+	function populateEventControl(control, event, activeDate) {
+		control.setAttribute('data-timeline-event-id', event.id);
+		control.setAttribute('data-timeline-event-date', activeDate);
+		control.setAttribute('data-timeline-event-layer', event.layer);
+		control.setAttribute('data-timeline-event-tone', eventTone(event));
+		control.setAttribute('aria-label', eventAccessibleLabel(event, activeDate));
+		control.setAttribute('title', eventAccessibleLabel(event, activeDate));
+		control.setAttribute('aria-pressed', selectedEventId === event.id ? 'true' : 'false');
+		control.classList.toggle('timeline-event--selected', selectedEventId === event.id);
+		const icon = control.querySelector('[data-timeline-event-icon]');
+		if (icon) icon.textContent = eventIcon(event);
+		const label = control.querySelector('[data-timeline-event-label]');
+		if (label) label.textContent = event.sourceReference || event.title;
+		const tooltip = control.querySelector('[data-timeline-event-tooltip]');
+		if (tooltip) {
+			tooltip.textContent = `${event.sourceReference ? `${event.sourceReference} · ` : ''}${event.title} · ${eventTypeLabel(event)} · ${eventDateLabel(event)} · ${event.status || event.attentionTone || 'No status'}${event.summary ? ` · ${event.summary}` : ''}`;
+		}
+		control.addEventListener('click', (eventClick) => {
+			eventClick.stopPropagation();
+			selectEvent(event.id, activeDate);
+		});
+		control.addEventListener('keydown', (keyboardEvent) => {
+			if (keyboardEvent.key !== 'Enter' && keyboardEvent.key !== ' ') return;
+			keyboardEvent.preventDefault();
+			keyboardEvent.stopPropagation();
+			selectEvent(event.id, activeDate);
+		});
+	}
+
+	function createPointEventButton(event) {
+		const button = createTemplateElement(pointTemplate, 'button', 'timeline-point-event');
+		button.className = eventClassName('timeline-point-event', event);
+		button.type = 'button';
+		populateEventControl(button, event, event.startDate);
+		return button;
+	}
+
+	function createRangeSegmentButton(segment) {
+		const button = createTemplateElement(rangeTemplate, 'button', 'timeline-range-segment');
+		button.className = eventClassName('timeline-range-segment', segment.event);
+		button.type = 'button';
+		button.style.gridColumn = `${segment.startColumn + 1} / ${segment.endColumn + 2}`;
+		button.style.setProperty('--timeline-range-lane', String(segment.lane || 0));
+		button.classList.toggle('timeline-range-segment--start', segment.isTrueStart);
+		button.classList.toggle('timeline-range-segment--end', segment.isTrueEnd);
+		button.classList.toggle('timeline-range-segment--continues-before', segment.continuesFromPreviousRow);
+		button.classList.toggle('timeline-range-segment--continues-after', segment.continuesToNextRow);
+		populateEventControl(button, segment.event, segment.visibleStartDate);
+		return button;
+	}
+
+	function createOverflowButton(template, className, label, date) {
+		const button = createTemplateElement(template, 'button', className);
+		button.className = className;
+		button.type = 'button';
+		button.textContent = label;
+		button.setAttribute('aria-label', `${label} hidden Timeline entries on ${formatTimelineDateLong(date)}`);
+		button.addEventListener('click', (eventClick) => {
+			eventClick.stopPropagation();
+			selectDate(date);
+			panelGroups?.focus?.();
+		});
+		return button;
+	}
+
+	function renderEventsForWeeks(weeks) {
+		if (!weekRows) return;
+		clearEventChrome(weekRows);
+		const visibleEvents = filterTimelineEventsByLayers(timelineEvents, [...visibleLayerKeys]);
+		const pointEventsByDate = getTimelinePointEventsByDate(weeks, visibleEvents, timelineLayers);
+		const rangeSegments = allocateTimelineRangeLanes(
+			segmentTimelineRangeEventsByWeek(weeks, visibleEvents, timelineLayers),
+			rangeLaneLimit,
+		);
+		const rangeOverflowByDate = getTimelineRangeOverflowCountsByDate(rangeSegments);
+		const weekElements = [...weekRows.querySelectorAll('.timeline-week')];
+
+		for (const segment of rangeSegments) {
+			if (!segment.isVisible) continue;
+			const week = weekElements[segment.weekIndex];
+			week?.append(createRangeSegmentButton(segment));
+		}
+
+		document.querySelectorAll('[data-timeline-day]').forEach((dayElement) => {
+			const date = dayElement.getAttribute('data-timeline-day') || '';
+			const pointArea = dayElement.querySelector('.timeline-day__point-area');
+			const overflowArea = dayElement.querySelector('.timeline-day__overflow');
+			const pointEvents = pointEventsByDate.get(date) || [];
+			const pointOverflowCount = getTimelinePointOverflowCount(pointEvents, pointEventLimit);
+			pointEvents.slice(0, pointEventLimit).forEach((event) => pointArea?.append(createPointEventButton(event)));
+			if (pointOverflowCount > 0) overflowArea?.append(createOverflowButton(pointOverflowTemplate, 'timeline-overflow timeline-overflow--point', `+${pointOverflowCount}`, date));
+			const rangeOverflowCount = rangeOverflowByDate.get(date) || 0;
+			if (rangeOverflowCount > 0) overflowArea?.append(createOverflowButton(rangeOverflowTemplate, 'timeline-overflow timeline-overflow--range', `+${rangeOverflowCount} ranges`, date));
+		});
+	}
+
+	function createPanelGroup() {
+		return createTemplateElement(panelGroupTemplate, 'section', 'timeline-panel-group');
+	}
+
+	function createPanelRow(event) {
+		const item = createTemplateElement(panelRowTemplate, 'li', '');
+		const button = item.querySelector('[data-timeline-panel-event]');
+		if (!(button instanceof HTMLButtonElement)) return item;
+		button.className = eventClassName('timeline-panel-event', event);
+		button.setAttribute('data-timeline-event-id', event.id);
+		button.setAttribute('aria-selected', selectedEventId === event.id ? 'true' : 'false');
+		button.classList.toggle('timeline-event--selected', selectedEventId === event.id);
+		button.setAttribute('aria-label', eventAccessibleLabel(event, selectedDate));
+		const icon = button.querySelector('[data-timeline-event-icon]');
+		if (icon) icon.textContent = eventIcon(event);
+		const reference = button.querySelector('[data-timeline-event-reference]');
+		if (reference) reference.textContent = event.sourceReference || 'Fixture';
+		const type = button.querySelector('[data-timeline-event-type]');
+		if (type) type.textContent = eventTypeLabel(event);
+		const status = button.querySelector('[data-timeline-event-status]');
+		if (status) {
+			status.textContent = event.status || event.attentionTone || 'Neutral';
+			status.className = `timeline-pill timeline-pill--status timeline-pill--${eventTone(event)}`;
+		}
+		const title = button.querySelector('[data-timeline-event-title]');
+		if (title) title.textContent = event.title;
+		const summary = button.querySelector('[data-timeline-event-summary]');
+		if (summary) summary.textContent = event.summary || 'Fixture event for Timeline visual testing.';
+		const date = button.querySelector('[data-timeline-event-date]');
+		if (date) date.textContent = event.presentationType === 'range' ? rangeContextLabel(event, selectedDate) : eventDateLabel(event);
+		button.addEventListener('click', () => selectEvent(event.id, selectedDate));
+		return item;
+	}
+
+	function renderSelectedPanel(selectedEvents) {
+		if (!panelGroups) return;
+		if (!selectedEvents.length) {
+			const empty = document.createElement('div');
+			empty.className = 'empty-state empty-state--neutral';
+			empty.innerHTML = '<h3>No project activity is currently shown for this date.</h3><p>No visible fixture entries overlap this date.</p>';
+			panelGroups.replaceChildren(empty);
+			return;
+		}
+		const groups = groupTimelineEventsByLayer(selectedEvents, timelineLayers);
+		const groupElements = groups.map((group) => {
+			const groupElement = createPanelGroup();
+			const heading = groupElement.querySelector('[data-timeline-panel-group-heading]');
+			if (heading) heading.textContent = group.layer.label;
+			const list = groupElement.querySelector('[data-timeline-panel-group-list]');
+			for (const event of group.events) list?.append(createPanelRow(event));
+			return groupElement;
+		});
+		panelGroups.replaceChildren(...groupElements);
 	}
 
 	function renderMonth(month) {
@@ -354,9 +741,15 @@ try {
 		page?.setAttribute('data-timeline-month', timelineMonthValue(activeMonth));
 		weekRows.replaceChildren(...weeks.map((week) => {
 			const row = createWeekRow();
-			for (const day of week.days) row.append(createDayButton(day));
+			week.days.forEach((day, index) => {
+				const button = createDayButton(day);
+				button.style.gridColumn = String(index + 1);
+				button.style.gridRow = '1';
+				row.append(button);
+			});
 			return row;
 		}));
+		renderEventsForWeeks(weeks);
 		updateSelectedPanel();
 	}
 
@@ -365,11 +758,19 @@ try {
 			const date = button.getAttribute('data-timeline-day');
 			if (date) selectDate(date);
 		});
+		button.addEventListener('keydown', (keyboardEvent) => {
+			if (keyboardEvent.key !== 'Enter' && keyboardEvent.key !== ' ') return;
+			const date = button.getAttribute('data-timeline-day');
+			if (!date) return;
+			keyboardEvent.preventDefault();
+			selectDate(date);
+		});
 	});
 
 	function navigateMonth(offset) {
 		const nextMonth = addTimelineMonths(activeMonth, offset);
 		selectedDate = timelineMonthStartDate(nextMonth);
+		selectedEventId = '';
 		renderMonth(nextMonth);
 		const selectedCell = document.querySelector(`[data-timeline-day="${CSS.escape(selectedDate)}"]`);
 		if (selectedCell instanceof HTMLElement) selectedCell.focus();
@@ -379,10 +780,26 @@ try {
 	nextButton?.addEventListener('click', () => navigateMonth(1));
 	todayButton?.addEventListener('click', () => {
 		selectedDate = todayDate;
+		selectedEventId = '';
 		renderMonth(getTimelineMonthFromDate(todayDate));
 		const todayCell = document.querySelector(`[data-timeline-day="${CSS.escape(todayDate)}"]`);
 		if (todayCell instanceof HTMLElement) todayCell.focus();
 	});
+	layerToggles.forEach((toggle) => {
+		toggle.addEventListener('change', () => {
+			const layerKey = toggle.getAttribute('data-timeline-layer-toggle');
+			if (!layerKey) return;
+			if (toggle.checked) visibleLayerKeys.add(layerKey);
+			else visibleLayerKeys.delete(layerKey);
+			const selectedEvent = timelineEvents.find((event) => event.id === selectedEventId);
+			if (selectedEvent && !visibleLayerKeys.has(selectedEvent.layer)) selectedEventId = '';
+			renderMonth(activeMonth);
+		});
+	});
+	document.addEventListener('keydown', (event) => {
+		if (event.key === 'Escape' && layerControl instanceof HTMLDetailsElement) layerControl.open = false;
+	});
+	renderMonth(activeMonth);
 </script>
 
 <style>
@@ -411,7 +828,7 @@ try {
 
 	.timeline-month-nav {
 		display: grid;
-		grid-template-columns: auto minmax(0, 1fr) auto auto;
+		grid-template-columns: auto minmax(0, 1fr) auto auto auto;
 		align-items: center;
 		gap: 0.7rem;
 		margin-bottom: 1rem;
@@ -442,6 +859,76 @@ try {
 		margin: 0;
 	}
 
+	.timeline-layer-control {
+		position: relative;
+		justify-self: end;
+	}
+
+	.timeline-layer-control summary {
+		list-style: none;
+		cursor: pointer;
+	}
+
+	.timeline-layer-control summary::-webkit-details-marker {
+		display: none;
+	}
+
+	.timeline-layer-control__panel {
+		position: absolute;
+		z-index: 20;
+		right: 0;
+		display: grid;
+		gap: 0.55rem;
+		width: min(21rem, calc(100vw - 2rem));
+		margin: 0.45rem 0 0;
+		border: 1px solid var(--border);
+		border-radius: 0.8rem;
+		padding: 0.8rem;
+		background: rgba(5, 13, 24, 0.98);
+		box-shadow: 0 18px 40px rgba(0, 0, 0, 0.36);
+	}
+
+	.timeline-layer-control__panel legend {
+		padding-inline: 0.35rem;
+		color: var(--muted-strong);
+		font-size: 0.78rem;
+		font-weight: 900;
+		text-transform: uppercase;
+	}
+
+	.timeline-layer-toggle {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr);
+		align-items: start;
+		gap: 0.55rem;
+		border: 1px solid rgba(215, 226, 234, 0.14);
+		border-radius: 0.65rem;
+		padding: 0.55rem;
+		color: var(--text);
+	}
+
+	.timeline-layer-toggle input {
+		margin-top: 0.22rem;
+	}
+
+	.timeline-layer-toggle__body {
+		display: grid;
+		gap: 0.12rem;
+	}
+
+	.timeline-layer-toggle__label {
+		font-weight: 850;
+	}
+
+	.timeline-layer-toggle__status {
+		color: var(--muted-strong);
+		font-size: 0.78rem;
+	}
+
+	.timeline-layer-toggle--disabled {
+		opacity: 0.62;
+	}
+
 	.timeline-inline-error {
 		margin-bottom: 0.9rem;
 		border: 1px solid rgba(255, 129, 122, 0.52);
@@ -465,6 +952,10 @@ try {
 		display: grid;
 		grid-template-columns: repeat(7, minmax(0, 1fr));
 		gap: 0.45rem;
+	}
+
+	.timeline-week {
+		position: relative;
 	}
 
 	.timeline-week-rows {
@@ -491,8 +982,10 @@ try {
 
 	.timeline-day {
 		appearance: none;
+		position: relative;
+		z-index: 1;
 		display: grid;
-		grid-template-rows: auto minmax(1.8rem, 1fr) 1rem 0.8rem;
+		grid-template-rows: auto minmax(4.6rem, 1fr) minmax(1.35rem, auto) minmax(1rem, auto);
 		gap: 0.35rem;
 		min-height: 7.9rem;
 		border: 1px solid var(--border);
@@ -593,6 +1086,246 @@ try {
 		border-top: 1px solid rgba(215, 226, 234, 0.1);
 	}
 
+	.timeline-day__point-area,
+	.timeline-day__overflow {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.timeline-range-segment,
+	.timeline-point-event,
+	.timeline-overflow,
+	.timeline-panel-event {
+		font: inherit;
+	}
+
+	.timeline-range-segment,
+	.timeline-point-event,
+	.timeline-overflow {
+		border: 1px solid rgba(215, 226, 234, 0.18);
+		color: var(--text);
+		cursor: pointer;
+	}
+
+	.timeline-range-segment {
+		--range-accent: var(--rag-reference);
+		--range-background: rgba(0, 160, 255, 0.18);
+		z-index: 3;
+		grid-row: 1;
+		align-self: start;
+		display: flex;
+		align-items: center;
+		gap: 0.32rem;
+		min-width: 0;
+		height: 1.4rem;
+		margin: calc(2.85rem + (var(--timeline-range-lane, 0) * 1.55rem)) 0.16rem 0;
+		border-color: color-mix(in srgb, var(--range-accent) 58%, transparent);
+		border-radius: 0.25rem;
+		padding: 0 0.48rem;
+		background: linear-gradient(90deg, color-mix(in srgb, var(--range-background) 90%, rgba(5, 13, 24, 0.58)), rgba(5, 13, 24, 0.28));
+		box-shadow: 0 5px 12px rgba(0, 0, 0, 0.22);
+		font-size: 0.72rem;
+		font-weight: 850;
+		line-height: 1;
+		overflow: visible;
+	}
+
+	.timeline-range-segment--start {
+		border-top-left-radius: 999px;
+		border-bottom-left-radius: 999px;
+	}
+
+	.timeline-range-segment--end {
+		border-top-right-radius: 999px;
+		border-bottom-right-radius: 999px;
+	}
+
+	.timeline-range-segment--continues-before {
+		border-left-style: dashed;
+	}
+
+	.timeline-range-segment--continues-after {
+		border-right-style: dashed;
+	}
+
+	.timeline-range-segment--red,
+	.timeline-point-event--red,
+	.timeline-panel-event--red {
+		--range-accent: var(--rag-red-accent);
+		--range-background: var(--rag-red-background);
+		--event-accent: var(--rag-red-accent);
+		--event-border: var(--rag-red-border);
+		--event-background: var(--rag-red-background);
+	}
+
+	.timeline-range-segment--amber,
+	.timeline-point-event--amber,
+	.timeline-panel-event--amber {
+		--range-accent: var(--rag-amber-accent);
+		--range-background: var(--rag-amber-background);
+		--event-accent: var(--rag-amber-accent);
+		--event-border: var(--rag-amber-border);
+		--event-background: var(--rag-amber-background);
+	}
+
+	.timeline-range-segment--green,
+	.timeline-point-event--green,
+	.timeline-panel-event--green {
+		--range-accent: var(--rag-green-accent);
+		--range-background: var(--rag-green-background);
+		--event-accent: var(--rag-green-accent);
+		--event-border: var(--rag-green-border);
+		--event-background: var(--rag-green-background);
+	}
+
+	.timeline-range-segment--neutral,
+	.timeline-point-event--neutral,
+	.timeline-panel-event--neutral {
+		--range-accent: var(--rag-neutral-accent);
+		--range-background: var(--rag-neutral-background);
+		--event-accent: var(--rag-neutral-accent);
+		--event-border: var(--rag-neutral-border);
+		--event-background: var(--rag-neutral-background);
+	}
+
+	.timeline-range-segment--completed,
+	.timeline-point-event--completed,
+	.timeline-panel-event--completed {
+		opacity: 0.72;
+		filter: saturate(0.65);
+	}
+
+	.timeline-range-segment__status,
+	.timeline-point-event__status {
+		flex: 0 0 auto;
+		width: 0.46rem;
+		height: 0.46rem;
+		border-radius: 999px;
+		background: var(--range-accent, var(--event-accent, var(--rag-neutral-accent)));
+		box-shadow: 0 0 0 2px rgba(5, 13, 24, 0.74);
+	}
+
+	.timeline-range-segment__label {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.timeline-point-event {
+		--event-accent: var(--rag-neutral-accent);
+		--event-border: var(--rag-neutral-border);
+		--event-background: var(--rag-neutral-background);
+		position: relative;
+		display: inline-grid;
+		grid-template-columns: 1fr;
+		place-items: center;
+		width: 1.45rem;
+		height: 1.45rem;
+		border-color: var(--event-border);
+		border-radius: 999px;
+		padding: 0;
+		background: color-mix(in srgb, var(--event-background) 82%, rgba(5, 13, 24, 0.7));
+	}
+
+	.timeline-point-event__icon {
+		font-size: 0.78rem;
+		font-weight: 950;
+		line-height: 1;
+	}
+
+	.timeline-point-event__status {
+		position: absolute;
+		right: -0.08rem;
+		bottom: -0.08rem;
+		width: 0.44rem;
+		height: 0.44rem;
+		background: var(--event-accent);
+	}
+
+	.timeline-overflow {
+		border-radius: 999px;
+		padding: 0.1rem 0.38rem;
+		background: rgba(215, 226, 234, 0.1);
+		color: var(--muted-strong);
+		font-size: 0.68rem;
+		font-weight: 900;
+		line-height: 1.2;
+	}
+
+	.timeline-range-segment:hover,
+	.timeline-range-segment:focus-visible,
+	.timeline-point-event:hover,
+	.timeline-point-event:focus-visible,
+	.timeline-overflow:hover,
+	.timeline-overflow:focus-visible,
+	.timeline-panel-event:hover,
+	.timeline-panel-event:focus-visible {
+		outline: 2px solid var(--accent-strong);
+		outline-offset: 2px;
+	}
+
+	.timeline-event--selected {
+		box-shadow: 0 0 0 3px rgba(57, 194, 255, 0.32), 0 8px 18px rgba(0, 160, 255, 0.22);
+	}
+
+	.timeline-event-tooltip {
+		position: absolute;
+		z-index: 30;
+		left: 0;
+		bottom: calc(100% + 0.4rem);
+		display: none;
+		width: min(18rem, 58vw);
+		border: 1px solid var(--border);
+		border-radius: 0.55rem;
+		padding: 0.48rem 0.55rem;
+		background: rgba(5, 13, 24, 0.98);
+		color: var(--text);
+		font-size: 0.74rem;
+		font-weight: 650;
+		line-height: 1.35;
+		box-shadow: 0 14px 30px rgba(0, 0, 0, 0.32);
+		white-space: normal;
+	}
+
+	.timeline-range-segment:hover .timeline-event-tooltip,
+	.timeline-range-segment:focus-visible .timeline-event-tooltip,
+	.timeline-point-event:hover .timeline-event-tooltip,
+	.timeline-point-event:focus-visible .timeline-event-tooltip {
+		display: block;
+	}
+
+	.timeline-legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.45rem;
+		margin-top: 0.9rem;
+	}
+
+	.timeline-legend__item {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		border: 1px solid rgba(215, 226, 234, 0.18);
+		border-radius: 999px;
+		padding: 0.28rem 0.52rem;
+		background: rgba(255, 255, 255, 0.04);
+		color: var(--muted-strong);
+		font-size: 0.78rem;
+		font-weight: 800;
+	}
+
+	.timeline-legend__icon {
+		display: grid;
+		place-items: center;
+		width: 1rem;
+		height: 1rem;
+		color: var(--accent-strong);
+		font-weight: 950;
+	}
+
 	.timeline-calendar-help,
 	.timeline-day-panel p {
 		color: var(--muted-strong);
@@ -623,6 +1356,117 @@ try {
 	.timeline-day-panel__groups {
 		display: grid;
 		gap: 0.75rem;
+		outline: none;
+	}
+
+	.timeline-panel-group {
+		display: grid;
+		gap: 0.5rem;
+	}
+
+	.timeline-panel-group h3 {
+		margin: 0;
+		color: var(--muted-strong);
+		font-size: 0.82rem;
+		font-weight: 950;
+		text-transform: uppercase;
+	}
+
+	.timeline-panel-group ul {
+		display: grid;
+		gap: 0.5rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.timeline-panel-event {
+		--event-accent: var(--rag-neutral-accent);
+		--event-border: var(--rag-neutral-border);
+		--event-background: var(--rag-neutral-background);
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: start;
+		gap: 0.65rem;
+		width: 100%;
+		border: 1px solid var(--event-border);
+		border-left: 0.28rem solid var(--event-accent);
+		border-radius: 0.65rem;
+		padding: 0.7rem;
+		background: color-mix(in srgb, var(--event-background) 72%, rgba(5, 13, 24, 0.72));
+		color: var(--text);
+		text-align: left;
+		cursor: pointer;
+	}
+
+	.timeline-panel-event__icon {
+		display: grid;
+		place-items: center;
+		width: 1.8rem;
+		height: 1.8rem;
+		border: 1px solid var(--event-border);
+		border-radius: 999px;
+		color: var(--event-accent);
+		font-weight: 950;
+	}
+
+	.timeline-panel-event__body {
+		display: grid;
+		gap: 0.28rem;
+		min-width: 0;
+	}
+
+	.timeline-panel-event__meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.28rem;
+	}
+
+	.timeline-panel-event__reference,
+	.timeline-pill {
+		border: 1px solid rgba(215, 226, 234, 0.18);
+		border-radius: 999px;
+		padding: 0.12rem 0.4rem;
+		font-size: 0.66rem;
+		font-weight: 900;
+		line-height: 1.2;
+	}
+
+	.timeline-panel-event__reference {
+		color: var(--accent-strong);
+	}
+
+	.timeline-pill--type {
+		color: var(--muted-strong);
+	}
+
+	.timeline-pill--status {
+		color: var(--event-accent);
+		border-color: var(--event-border);
+		background: var(--event-background);
+	}
+
+	.timeline-pill--red { color: var(--rag-red-accent); border-color: var(--rag-red-border); background: var(--rag-red-background); }
+	.timeline-pill--amber { color: var(--rag-amber-accent); border-color: var(--rag-amber-border); background: var(--rag-amber-background); }
+	.timeline-pill--green { color: var(--rag-green-accent); border-color: var(--rag-green-border); background: var(--rag-green-background); }
+	.timeline-pill--neutral { color: var(--rag-neutral-accent); border-color: var(--rag-neutral-border); background: var(--rag-neutral-background); }
+
+	.timeline-panel-event__title {
+		font-weight: 900;
+		overflow-wrap: anywhere;
+	}
+
+	.timeline-panel-event__summary,
+	.timeline-panel-event__date {
+		color: var(--muted-strong);
+		font-size: 0.86rem;
+		line-height: 1.35;
+	}
+
+	.timeline-panel-event__chevron {
+		color: var(--muted-strong);
+		font-size: 1.25rem;
+		line-height: 1;
 	}
 
 	.timeline-loading-state {
@@ -680,7 +1524,7 @@ try {
 
 	@media (max-width: 720px) {
 		.timeline-month-nav {
-			grid-template-columns: auto auto auto;
+			grid-template-columns: auto auto auto auto;
 		}
 
 		.timeline-month-nav__heading {
@@ -689,6 +1533,10 @@ try {
 		}
 
 		.timeline-month-nav__today {
+			grid-column: span 1;
+		}
+
+		.timeline-layer-control {
 			grid-column: span 1;
 		}
 
