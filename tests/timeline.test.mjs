@@ -511,6 +511,36 @@ test('Timeline page exposes fixture event rendering layer controls and panel tem
 	assert.match(page, /if \(selectedEvent && !visibleLayerKeys\.has\(selectedEvent\.layer\)\) selectedEventId = ''/);
 });
 
+test('Timeline event summaries use one shared overlay without native duplicate tooltips', async () => {
+	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
+	assert.equal((page.match(/data-timeline-event-summary-overlay/g) ?? []).length, 2);
+	assert.match(page, /<div class="timeline-event-summary-overlay" id="timeline-event-summary-overlay" role="tooltip" data-timeline-event-summary-overlay hidden>/);
+	assert.match(page, /position: fixed;[\s\S]*?z-index: 1000;/);
+	assert.match(page, /control\.removeAttribute\('title'\)/);
+	assert.doesNotMatch(page, /setAttribute\('title'/);
+	assert.doesNotMatch(page, /data-timeline-event-tooltip|timeline-event-tooltip/);
+	assert.match(page, /control\.addEventListener\('pointerenter', \(\) => showEventSummary\(control, event, activeDate\)\)/);
+	assert.match(page, /control\.addEventListener\('focus', \(\) => showEventSummary\(control, event, activeDate\)\)/);
+	assert.match(page, /control\.addEventListener\('pointerleave', \(\) => hideEventSummary\(control\)\)/);
+	assert.match(page, /control\.addEventListener\('blur', \(\) => hideEventSummary\(control\)\)/);
+	assert.match(page, /trigger\.setAttribute\('aria-describedby', eventSummaryOverlay\.id\)/);
+	assert.match(page, /hideEventSummary\(\);[\s\S]*?if \(layerControl instanceof HTMLDetailsElement\) layerControl\.open = false;/);
+});
+
+test('Timeline event summary content includes reference title type date and status once', async () => {
+	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
+	assert.match(page, /reference: event\.sourceReference \|\| ''/);
+	assert.match(page, /title: event\.title/);
+	assert.match(page, /meta: `\$\{eventTypeLabel\(event\)\} · \$\{event\.status \|\| event\.attentionTone \|\| 'No status'\}`/);
+	assert.match(page, /date: eventSummaryDateLabel\(event, activeDate\)/);
+	assert.match(page, /summary: event\.summary \|\| ''/);
+	assert.match(page, /setSummaryText\(summaryReference, summary\.reference, true\)/);
+	assert.match(page, /setSummaryText\(summaryTitle, summary\.title\)/);
+	assert.match(page, /setSummaryText\(summaryMeta, summary\.meta\)/);
+	assert.match(page, /setSummaryText\(summaryDate, summary\.date\)/);
+	assert.match(page, /setSummaryText\(summaryCopy, summary\.summary, true\)/);
+});
+
 test('Timeline client navigation keeps selected date and panel consistent with the displayed month', async () => {
 	const page = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/timeline.astro', import.meta.url), 'utf8');
 	assert.match(page, /function navigateMonth\(offset\) \{[\s\S]*?const nextMonth = addTimelineMonths\(activeMonth, offset\);[\s\S]*?selectedDate = timelineMonthStartDate\(nextMonth\);[\s\S]*?renderMonth\(nextMonth\);/);

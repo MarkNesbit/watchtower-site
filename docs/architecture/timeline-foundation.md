@@ -255,7 +255,20 @@ This ordering is also used for visible point icons and range lane allocation.
 
 The legend shows only source types represented by fixture events and uses icon plus text. It does not imply that colour alone communicates status.
 
-Event controls expose title, source type, point/range shape, date or range, status and summary through accessible labels. Hover and focus show a compact summary. Layer controls are keyboard-operable through native controls, and Escape closes the layer details panel.
+Event controls expose title, source type, point/range shape, date or range, status and summary through accessible labels. Hover and focus show one shared compact summary overlay. The summary is rendered as a fixed-position overlay outside day-cell content, is associated with the active trigger through `aria-describedby`, and does not use native `title` attributes for event triggers. Escape closes the active summary and the layer details panel.
+
+Manual validation checklist for event summaries:
+
+- point event in a central weekday cell;
+- point event near the right-hand calendar edge;
+- point event on the bottom visible calendar row;
+- event in a weekend cell;
+- range event spanning multiple cells;
+- keyboard focus summary;
+- pointer hover summary;
+- Escape close;
+- no duplicate native browser tooltip;
+- no clipping behind bars, cells, neighbouring rows or overflow controls.
 
 ## Layer Model
 
