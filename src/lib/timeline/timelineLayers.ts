@@ -95,7 +95,7 @@ export const DEFAULT_TIMELINE_LAYERS: TimelineLayerDefinition[] = [
 		defaultVisible: false,
 		enabled: false,
 		order: 80,
-		iconKey: 'calendar',
+		iconKey: 'system-event',
 	},
 	{
 		key: 'delivery-periods',
@@ -104,7 +104,7 @@ export const DEFAULT_TIMELINE_LAYERS: TimelineLayerDefinition[] = [
 		defaultVisible: false,
 		enabled: false,
 		order: 90,
-		iconKey: 'period',
+		iconKey: 'system-event',
 	},
 ];
 

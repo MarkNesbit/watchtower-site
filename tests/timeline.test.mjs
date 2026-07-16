@@ -321,6 +321,9 @@ test('Project Date Timeline adapter maps live single dates ranges categories sta
 	assert.equal(sameDay?.presentationType, 'point');
 	assert.equal(sameDay?.endDate, undefined);
 	assert.equal(projectDateTimelinePresentation('go-live').shortCode, 'LIVE');
+	assert.equal(projectDateTimelinePresentation('target-end').iconKey, 'project-end');
+	assert.equal(projectDateTimelinePresentation('review').iconKey, 'governance-review');
+	assert.equal(projectDateTimelinePresentation('other').iconKey, 'system-event');
 });
 
 test('Project Date Timeline adapter excludes hidden out-of-scope and out-of-range records', async () => {

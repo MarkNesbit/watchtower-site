@@ -4,6 +4,7 @@ import DisabledActionHint from '../../../../../../components/app/DisabledActionH
 import EmptyState from '../../../../../../components/app/EmptyState.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
+import WatchtowerIcon from '../../../../../../components/app/WatchtowerIcon.astro';
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import { can } from '../../../../../../lib/permissions';
 import {
@@ -299,14 +300,16 @@ const summaryCards = [
 		value: String(registerSummary.openRisks),
 		helper: 'Active project risks',
 		tone: 'blue',
-		icon: '!',
+		icon: '',
+		semanticIcon: 'risk',
 	},
 	{
 		label: 'Need action',
 		value: String(registerSummary.needAction),
 		helper: 'Red or Amber action state',
 		tone: registerSummary.needAction > 0 ? 'attention' : 'neutral',
-		icon: '!',
+		icon: '',
+		semanticIcon: 'risk',
 	},
 	{
 		label: 'Highest exposure',
@@ -403,7 +406,9 @@ const riskPromptAreaTabLabel = (area: RiskPromptLibraryForSelection['areas'][num
 								<section class="risk-register-summary" aria-label="Risk Register summary" data-risk-register-summary>
 									{summaryCards.map((card) => (
 										<article class={`risk-register-summary-card risk-register-summary-card--${card.tone}`}>
-											<span class="risk-register-summary-card__icon" aria-hidden="true">{card.icon}</span>
+											<span class="risk-register-summary-card__icon" aria-hidden="true">
+												{card.semanticIcon ? <WatchtowerIcon icon={card.semanticIcon} size="medium" decorative /> : card.icon}
+											</span>
 											<span class="risk-register-summary-card__body">
 												<span class="risk-register-summary-card__label">{card.label}</span>
 												<strong class="risk-register-summary-card__value">{card.value}</strong>

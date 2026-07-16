@@ -1,7 +1,17 @@
 import { assertCan, type WorkspaceRole } from './permissions.ts';
+import type { WatchtowerIconKey } from './watchtowerIcons.ts';
 
 export const NARRATIVE_SOURCE_TYPES = ['manual', 'risk', 'issue', 'dependency', 'assumption', 'system'] as const;
 export type NarrativeSourceType = (typeof NARRATIVE_SOURCE_TYPES)[number];
+
+export const NARRATIVE_SOURCE_ICON_KEYS: Record<NarrativeSourceType, WatchtowerIconKey> = {
+	manual: 'manual-diary-entry',
+	risk: 'risk',
+	issue: 'issue',
+	dependency: 'dependency',
+	assumption: 'assumption',
+	system: 'system-event',
+};
 
 export const NARRATIVE_ATTENTION_LEVELS = ['neutral', 'green', 'amber', 'red'] as const;
 export type NarrativeAttentionLevel = (typeof NARRATIVE_ATTENTION_LEVELS)[number];
@@ -62,6 +72,10 @@ async function getAuthenticatedUserId(client, accessToken?: string): Promise<str
 
 export function isNarrativeSourceType(value: unknown): value is NarrativeSourceType {
 	return typeof value === 'string' && NARRATIVE_SOURCE_TYPES.includes(value as NarrativeSourceType);
+}
+
+export function narrativeSourceIconKey(value: unknown): WatchtowerIconKey {
+	return isNarrativeSourceType(value) ? NARRATIVE_SOURCE_ICON_KEYS[value] : 'system-event';
 }
 
 export function isNarrativeAttentionLevel(value: unknown): value is NarrativeAttentionLevel {

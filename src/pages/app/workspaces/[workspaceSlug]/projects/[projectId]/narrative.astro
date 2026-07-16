@@ -5,6 +5,7 @@ import ProjectContentPanel from '../../../../../../components/app/ProjectContent
 import ProjectControlPanel from '../../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
+import WatchtowerIcon from '../../../../../../components/app/WatchtowerIcon.astro';
 import { getFeatureAccess, loadFeatureAccess } from '../../../../../../lib/featureFlags';
 import {
 	createProjectNarrativeEntry,
@@ -12,6 +13,7 @@ import {
 	isNarrativeAttentionLevel,
 	listProjectNarrativeEntries,
 	markProjectNarrativeViewed,
+	narrativeSourceIconKey,
 	normaliseProjectNarrativeLinkUrl,
 } from '../../../../../../lib/projectNarrative';
 import {
@@ -244,6 +246,7 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	displayRef: getNarrativeDisplayRef(entry),
 	narrativeRef: entry.narrative_ref,
 	sourceType: formatSourceType(entry.source_type),
+	sourceIcon: narrativeSourceIconKey(entry.source_type),
 	sourceRef: entry.source_ref,
 	sourceRecordId: entry.source_record_id,
 	attentionLevel: entry.attention_level,
@@ -327,6 +330,12 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 															data-risk-detail-trigger={referencePill.riskDetailAvailable ? '' : undefined}
 															aria-label={referencePill.riskDetailAvailable ? `View current risk detail for ${referencePill.label}` : referencePill.ariaLabel}
 														>
+															<WatchtowerIcon
+																icon={narrativeSourceIconKey(entry.source_type)}
+																size="small"
+																decorative
+																class="narrative-ref__icon"
+															/>
 															<RagReferencePill
 																tone={referencePill.tone}
 																label={referencePill.label}
@@ -757,7 +766,8 @@ const narrativeEntriesJson = JSON.stringify(entries.map((entry) => ({
 	.narrative-table th:nth-child(3) { width: 11rem; }
 	.narrative-table th:last-child { width: 12rem; }
 	.narrative-table td { vertical-align: top; }
-	.narrative-ref { display: inline-flex; border: 0; border-radius: 999px; padding: 0; background: transparent; font: inherit; cursor: pointer; }
+	.narrative-ref { display: inline-flex; align-items: center; gap: 0.35rem; border: 0; border-radius: 999px; padding: 0; background: transparent; font: inherit; cursor: pointer; }
+	.narrative-ref :global(.narrative-ref__icon) { width: 0.95rem; height: 0.95rem; }
 	.narrative-ref:hover :global(.rag-reference-pill) { transform: translateY(-1px); background: color-mix(in srgb, var(--rag-pill-tone) 22%, transparent); }
 	.narrative-ref:focus-visible { outline: 3px solid var(--accent-strong); outline-offset: 3px; }
 	.narrative-details { max-width: 36rem; overflow-wrap: anywhere; }

@@ -1,0 +1,68 @@
+---
+import {
+	WATCHTOWER_ICON_SIZES,
+	getWatchtowerIconDefinition,
+	resolveWatchtowerIconKey,
+	type WatchtowerIconKey,
+	type WatchtowerIconSize,
+} from '../../lib/watchtowerIcons';
+
+interface Props {
+	icon: WatchtowerIconKey | string;
+	size?: WatchtowerIconSize;
+	decorative?: boolean;
+	label?: string;
+	class?: string;
+}
+
+const {
+	icon,
+	size = 'medium',
+	decorative = false,
+	label,
+	class: className,
+} = Astro.props;
+const resolvedIcon = resolveWatchtowerIconKey(icon, { warnUnknown: true, context: 'WatchtowerIcon component' });
+const definition = getWatchtowerIconDefinition(resolvedIcon);
+const [width, height, , , rawPathData] = definition.icon.icon;
+const pathData = Array.isArray(rawPathData) ? rawPathData : [rawPathData];
+const titleId = `watchtower-icon-${resolvedIcon}-${Math.random().toString(36).slice(2)}`;
+const accessibleLabel = label || definition.label;
+const classes = ['watchtower-icon', `watchtower-icon--${size}`, className].filter(Boolean).join(' ');
+---
+
+<svg
+	class={classes}
+	viewBox={`0 0 ${width} ${height}`}
+	width={WATCHTOWER_ICON_SIZES[size]}
+	height={WATCHTOWER_ICON_SIZES[size]}
+	fill="currentColor"
+	color={definition.colour}
+	style={`--watchtower-icon-colour: ${definition.colour}; --watchtower-icon-size: ${WATCHTOWER_ICON_SIZES[size]};`}
+	aria-hidden={decorative ? 'true' : undefined}
+	role={decorative ? undefined : 'img'}
+	aria-labelledby={decorative ? undefined : titleId}
+	focusable="false"
+	data-watchtower-icon={resolvedIcon}
+	data-watchtower-icon-size={size}
+	data-watchtower-icon-colour={definition.colour}
+>
+	{!decorative && <title id={titleId}>{accessibleLabel}</title>}
+	{pathData.map((path) => <path d={path}></path>)}
+</svg>
+
+<style>
+	.watchtower-icon {
+		display: inline-block;
+		width: var(--watchtower-icon-size);
+		height: var(--watchtower-icon-size);
+		color: var(--watchtower-icon-colour);
+		line-height: 1;
+		vertical-align: -0.125em;
+		flex: 0 0 auto;
+	}
+
+	.watchtower-icon--full { --watchtower-icon-size: 2rem; }
+	.watchtower-icon--medium { --watchtower-icon-size: 1.4rem; }
+	.watchtower-icon--small { --watchtower-icon-size: 0.95rem; }
+</style>

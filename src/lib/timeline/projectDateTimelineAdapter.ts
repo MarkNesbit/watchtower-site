@@ -11,17 +11,18 @@ import {
 import type { TimelineAdapterContext, TimelineSourceAdapter } from './timelineAdapter.ts';
 import type { TimelineAttentionTone, TimelineEvent } from './timelineTypes.ts';
 import { getTimelineEventEndDate, normaliseTimelineEvent } from './timelineValidation.ts';
+import type { WatchtowerIconKey } from '../watchtowerIcons.ts';
 
 export type ProjectDateTimelinePresentation = {
 	label: string;
 	shortCode: string;
-	iconKey: string;
+	iconKey: WatchtowerIconKey;
 };
 
 export const PROJECT_DATE_TIMELINE_PRESENTATION: Record<ProjectDateType, ProjectDateTimelinePresentation> = {
 	'project-start': { label: 'Project start', shortCode: 'START', iconKey: 'project-start' },
-	'target-end': { label: 'Target end', shortCode: 'END', iconKey: 'target-end' },
-	review: { label: 'Review', shortCode: 'REV', iconKey: 'review' },
+	'target-end': { label: 'Target end', shortCode: 'END', iconKey: 'project-end' },
+	review: { label: 'Review', shortCode: 'REV', iconKey: 'governance-review' },
 	gateway: { label: 'Gateway', shortCode: 'GATE', iconKey: 'gateway' },
 	milestone: { label: 'Milestone', shortCode: 'MILE', iconKey: 'milestone' },
 	uat: { label: 'UAT', shortCode: 'UAT', iconKey: 'uat' },
@@ -33,7 +34,7 @@ export const PROJECT_DATE_TIMELINE_PRESENTATION: Record<ProjectDateType, Project
 	training: { label: 'Training', shortCode: 'TRN', iconKey: 'training' },
 	'go-live': { label: 'Go-live', shortCode: 'LIVE', iconKey: 'go-live' },
 	hypercare: { label: 'Hypercare', shortCode: 'HYP', iconKey: 'hypercare' },
-	other: { label: 'Other', shortCode: 'DATE', iconKey: 'project-date' },
+	other: { label: 'Other', shortCode: 'DATE', iconKey: 'system-event' },
 };
 
 const PROJECT_DATE_TIMELINE_SELECT = [

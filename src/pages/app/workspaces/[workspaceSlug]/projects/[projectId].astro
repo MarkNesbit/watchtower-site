@@ -4,6 +4,7 @@ import ProjectContentPanel from '../../../../../components/app/ProjectContentPan
 import ProjectControlPanel from '../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../components/app/RagReferencePill.astro';
+import WatchtowerIcon from '../../../../../components/app/WatchtowerIcon.astro';
 import {
 	dashboardTileSignalStatusLabel,
 	deriveProjectDetailsTileSignal,
@@ -20,6 +21,7 @@ import { getUnseenProjectNarrativeCount } from '../../../../../lib/projectNarrat
 import { buildProjectActionsPath, buildProjectDetailsPath, buildProjectNarrativePath, buildProjectRisksPath, buildProjectTimelinePath, getWorkspaceBySlug } from '../../../../../lib/projects';
 import { buildRiskRegisterViewPath, deriveProjectRiskSignal, listProjectRisks, riskRegisterViewForProjectRiskSignal, type ProjectRisk, type RiskRegisterViewTab } from '../../../../../lib/projectRisks';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../lib/supabaseServer';
+import type { WatchtowerIconKey } from '../../../../../lib/watchtowerIcons';
 
 const projectSlug = Astro.params.projectId;
 const workspaceSlug = Astro.params.workspaceSlug;
@@ -54,6 +56,7 @@ const projectNarrativeStatusLabel = (state: DashboardTileSignalState, unseenEntr
 type ProjectTile = {
 	title: string;
 	icon: string;
+	semanticIcon?: WatchtowerIconKey;
 	tone: string;
 	iconTone?: DashboardTileSignalState;
 	attentionTone?: DashboardTileSignalState;
@@ -96,12 +99,12 @@ const projectTiles: ProjectTile[] = [
 		href: null,
 		destination: 'timeline',
 	},
-	{ title: 'Risks', icon: '⚠', tone: 'blue', attentionTone: 'neutral', statusLabel: 'No active risks recorded', href: null, destination: 'risks', featureKey: 'riskManagement' },
-	{ title: 'Issues', icon: '!', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Issues, Unknown state', href: '#issues' },
-	{ title: 'Dependencies', icon: '↔', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Dependencies, Unknown state', href: '#dependencies' },
-	{ title: 'Assumptions', icon: '?', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Assumptions, Unknown state', href: '#assumptions' },
-	{ title: 'Decisions', icon: '⚖', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Decisions, Unknown state', href: '#decisions' },
-	{ title: 'Actions', icon: '☑', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Actions, Unknown state', href: null, destination: 'actions' },
+	{ title: 'Risks', icon: '', semanticIcon: 'risk', tone: 'blue', attentionTone: 'neutral', statusLabel: 'No active risks recorded', href: null, destination: 'risks', featureKey: 'riskManagement' },
+	{ title: 'Issues', icon: '', semanticIcon: 'issue', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Issues, Unknown state', href: '#issues' },
+	{ title: 'Dependencies', icon: '', semanticIcon: 'dependency', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Dependencies, Unknown state', href: '#dependencies' },
+	{ title: 'Assumptions', icon: '', semanticIcon: 'assumption', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Assumptions, Unknown state', href: '#assumptions' },
+	{ title: 'Decisions', icon: '', semanticIcon: 'decision', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Decisions, Unknown state', href: '#decisions' },
+	{ title: 'Actions', icon: '', semanticIcon: 'action', tone: 'blue', attentionTone: 'unknown', statusLabel: 'Unknown', ariaLabel: 'Open Actions, Unknown state', href: null, destination: 'actions' },
 ];
 
 const gatedFeatureKeys = [...new Set(projectTiles.flatMap((tile) => tile.featureKey ? [tile.featureKey] : []))];
@@ -326,7 +329,9 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => {
 								data-dashboard-tile-signal={tile.attentionTone ?? 'unknown'}
 								data-feature-unavailable={tile.featureAccess?.state ?? 'route-unavailable'}
 							>
-								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
+								<span class="dashboard-tile__icon" aria-hidden="true">
+									{tile.semanticIcon ? <WatchtowerIcon icon={tile.semanticIcon} size="full" decorative /> : tile.icon}
+								</span>
 								<strong>{tile.title}</strong>
 							</article>
 						) : (
@@ -339,7 +344,9 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => {
 								data-rag-tile-state={tile.attentionTone ?? 'neutral'}
 								data-dashboard-tile-signal={tile.attentionTone ?? 'neutral'}
 							>
-								<span class="dashboard-tile__icon" aria-hidden="true">{tile.icon}</span>
+								<span class="dashboard-tile__icon" aria-hidden="true">
+									{tile.semanticIcon ? <WatchtowerIcon icon={tile.semanticIcon} size="full" decorative /> : tile.icon}
+								</span>
 								<strong>{tile.title}</strong>
 							</a>
 						))}
@@ -446,6 +453,10 @@ const resolvedProjectTiles = visibleProjectTiles.map((tile) => {
 	}
 
 	.dashboard-tile__icon {
+		display: grid;
+		place-items: center;
+		width: 2.8rem;
+		height: 2.8rem;
 		font-size: 2.8rem;
 		font-weight: 900;
 		line-height: 1;
