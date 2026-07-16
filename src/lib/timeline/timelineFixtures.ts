@@ -103,7 +103,7 @@ const TIMELINE_FIXTURE_EVENT_SEEDS: FixtureEventSeed[] = [
 		status: 'Completed',
 		attentionTone: 'neutral',
 		layer: 'project-delivery',
-		iconKey: 'review',
+		iconKey: 'governance-review',
 	},
 	{
 		id: 'fixture-prototype-sign-off',

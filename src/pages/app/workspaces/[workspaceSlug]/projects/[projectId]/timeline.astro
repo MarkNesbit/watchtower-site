@@ -2,10 +2,12 @@
 import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
 import EmptyState from '../../../../../../components/app/EmptyState.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
+import WatchtowerIcon from '../../../../../../components/app/WatchtowerIcon.astro';
 import { can } from '../../../../../../lib/permissions';
 import { canChangeProjectDates } from '../../../../../../lib/projectDates';
 import { buildProjectPath, getWorkspaceBySlug } from '../../../../../../lib/projects';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
+import { WATCHTOWER_ICON_KEYS, getWatchtowerIconSvgData, type WatchtowerIconKey } from '../../../../../../lib/watchtowerIcons';
 import {
 	DEFAULT_TIMELINE_LAYERS,
 	TIMELINE_POINT_EVENT_LIMIT,
@@ -46,16 +48,16 @@ let timelineLoadError = '';
 let timelineEventCount = 0;
 let timelineEvents: TimelineEvent[] = [];
 
-const timelineSourcePresentation: Record<TimelineSourceType, { label: string; icon: string }> = {
-	'project-date': { label: 'Project delivery', icon: '◆' },
-	risk: { label: 'Risk', icon: '!' },
-	issue: { label: 'Issue', icon: '!' },
-	dependency: { label: 'Dependency', icon: '↔' },
-	assumption: { label: 'Assumption', icon: '?' },
-	decision: { label: 'Decision', icon: '✓' },
-	action: { label: 'Action', icon: '☑' },
-	'project-event': { label: 'Project event', icon: '○' },
-	'delivery-period': { label: 'Delivery period', icon: '▬' },
+const timelineSourcePresentation: Record<TimelineSourceType, { label: string; iconKey: WatchtowerIconKey }> = {
+	'project-date': { label: 'Project delivery', iconKey: 'milestone' },
+	risk: { label: 'Risk', iconKey: 'risk' },
+	issue: { label: 'Issue', iconKey: 'issue' },
+	dependency: { label: 'Dependency', iconKey: 'dependency' },
+	assumption: { label: 'Assumption', iconKey: 'assumption' },
+	decision: { label: 'Decision', iconKey: 'decision' },
+	action: { label: 'Action', iconKey: 'action' },
+	'project-event': { label: 'Project event', iconKey: 'system-event' },
+	'delivery-period': { label: 'Delivery period', iconKey: 'system-event' },
 };
 
 try {
@@ -135,6 +137,10 @@ try {
 const timelineEventsJson = JSON.stringify(timelineEvents);
 const timelineLayersJson = JSON.stringify(DEFAULT_TIMELINE_LAYERS);
 const defaultVisibleLayerKeysJson = JSON.stringify(getDefaultVisibleTimelineLayerKeys(DEFAULT_TIMELINE_LAYERS));
+const timelineIconPresentationJson = JSON.stringify(Object.fromEntries(WATCHTOWER_ICON_KEYS.map((iconKey) => [
+	iconKey,
+	getWatchtowerIconSvgData(iconKey),
+])));
 const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event.sourceType)));
 ---
 <AuthenticatedLayout title={project ? `Timeline — ${project.name} | WatchTower` : 'Timeline | WatchTower'}>
@@ -324,7 +330,9 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 						<div class="timeline-legend" aria-label="Timeline event legend" data-timeline-legend>
 							{legendSourceTypes.map((sourceType) => (
 								<span class="timeline-legend__item">
-									<span class="timeline-legend__icon" aria-hidden="true">{timelineSourcePresentation[sourceType].icon}</span>
+									<span class="timeline-legend__icon" aria-hidden="true">
+										<WatchtowerIcon icon={timelineSourcePresentation[sourceType].iconKey} size="small" decorative />
+									</span>
 									<span>{timelineSourcePresentation[sourceType].label}</span>
 								</span>
 							))}
@@ -371,6 +379,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 				<script type="application/json" data-timeline-events set:html={timelineEventsJson}></script>
 				<script type="application/json" data-timeline-layers set:html={timelineLayersJson}></script>
 				<script type="application/json" data-timeline-default-layers set:html={defaultVisibleLayerKeysJson}></script>
+				<script type="application/json" data-timeline-icons set:html={timelineIconPresentationJson}></script>
 				<div class="timeline-event-summary-overlay" id="timeline-event-summary-overlay" role="tooltip" data-timeline-event-summary-overlay hidden>
 					<p class="timeline-event-summary-overlay__reference" data-timeline-summary-reference></p>
 					<p class="timeline-event-summary-overlay__title" data-timeline-summary-title></p>
@@ -443,38 +452,22 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	const summaryDate = eventSummaryOverlay?.querySelector('[data-timeline-summary-date]');
 	const summaryCopy = eventSummaryOverlay?.querySelector('[data-timeline-summary-copy]');
 	const sourcePresentation = {
-		'project-date': { label: 'Project delivery', icon: '◆' },
-		risk: { label: 'Risk', icon: '!' },
-		issue: { label: 'Issue', icon: '!' },
-		dependency: { label: 'Dependency', icon: '↔' },
-		assumption: { label: 'Assumption', icon: '?' },
-		decision: { label: 'Decision', icon: '✓' },
-		action: { label: 'Action', icon: '☑' },
-		'project-event': { label: 'Project event', icon: '○' },
-		'delivery-period': { label: 'Delivery period', icon: '▬' },
+		'project-date': { label: 'Project delivery', iconKey: 'milestone' },
+		risk: { label: 'Risk', iconKey: 'risk' },
+		issue: { label: 'Issue', iconKey: 'issue' },
+		dependency: { label: 'Dependency', iconKey: 'dependency' },
+		assumption: { label: 'Assumption', iconKey: 'assumption' },
+		decision: { label: 'Decision', iconKey: 'decision' },
+		action: { label: 'Action', iconKey: 'action' },
+		'project-event': { label: 'Project event', iconKey: 'system-event' },
+		'delivery-period': { label: 'Delivery period', iconKey: 'system-event' },
 	};
-	const iconPresentation = {
-		'project-start': '▶',
-		'target-end': '■',
-		review: '◌',
-		gateway: '◇',
-		milestone: '◆',
-		uat: '✓',
-		testing: '✓',
-		'load-testing': '▣',
-		integration: '↔',
-		deployment: '⬆',
-		cutover: '⇄',
-		training: '◉',
-		'go-live': '✦',
-		hypercare: '+',
-		'project-date': '◆',
-		risk: '!',
-		issue: '!',
-		dependency: '↔',
-		assumption: '?',
-		decision: '✓',
-		action: '☑',
+	const iconAliases = {
+		'target-end': 'project-end',
+		review: 'governance-review',
+		manual: 'manual-diary-entry',
+		system: 'system-event',
+		'project-event': 'system-event',
 	};
 	const parseJson = (selector, fallback) => {
 		const element = document.querySelector(selector);
@@ -488,6 +481,8 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	const timelineEvents = parseJson('[data-timeline-events]', []);
 	const timelineLayers = parseJson('[data-timeline-layers]', []);
 	const defaultLayerKeys = parseJson('[data-timeline-default-layers]', []);
+	const iconPresentation = parseJson('[data-timeline-icons]', {});
+	const warnedUnknownIconKeys = new Set();
 	const todayDate = page?.getAttribute('data-timeline-today') || getTodayDateOnly();
 	const rangeLaneLimit = Number(page?.getAttribute('data-timeline-range-lane-limit') || TIMELINE_RANGE_LANE_LIMIT);
 	const pointEventLimit = Number(page?.getAttribute('data-timeline-point-limit') || TIMELINE_POINT_EVENT_LIMIT);
@@ -530,8 +525,36 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		return sourcePresentation[event.sourceType]?.label || event.sourceType;
 	}
 
-	function eventIcon(event) {
-		return iconPresentation[event.iconKey] || sourcePresentation[event.sourceType]?.icon || '•';
+	function resolveIconKey(value, context = 'Timeline event') {
+		if (iconPresentation[value]) return value;
+		if (iconAliases[value] && iconPresentation[iconAliases[value]]) return iconAliases[value];
+		if (import.meta.env.DEV) {
+			const warningKey = `${context}:${String(value)}`;
+			if (!warnedUnknownIconKeys.has(warningKey)) {
+				warnedUnknownIconKeys.add(warningKey);
+				console.warn(`Unknown Watchtower icon "${String(value)}" in ${context}; using system-event.`);
+			}
+		}
+		return 'system-event';
+	}
+
+	function iconMarkup(iconData) {
+		const paths = (iconData?.pathData || []).map((path) => `<path d="${path}"></path>`).join('');
+		return `<svg class="watchtower-inline-icon" viewBox="${iconData.viewBox}" fill="currentColor" aria-hidden="true" focusable="false" data-watchtower-icon="${iconData.key}" data-watchtower-icon-colour="${iconData.colour}">${paths}</svg>`;
+	}
+
+	function setSemanticIcon(target, iconKey, context) {
+		if (!(target instanceof HTMLElement)) return;
+		const resolvedIconKey = resolveIconKey(iconKey, context);
+		const iconData = iconPresentation[resolvedIconKey] || iconPresentation['system-event'];
+		target.style.setProperty('--watchtower-icon-colour', iconData.colour);
+		target.setAttribute('data-watchtower-icon', iconData.key);
+		target.innerHTML = iconMarkup(iconData);
+	}
+
+	function eventIconKey(event) {
+		if (event.iconKey) return event.iconKey;
+		return sourcePresentation[event.sourceType]?.iconKey || 'system-event';
 	}
 
 	function eventTone(event) {
@@ -722,8 +745,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		control.removeAttribute('title');
 		control.setAttribute('aria-pressed', selectedEventId === event.id ? 'true' : 'false');
 		control.classList.toggle('timeline-event--selected', selectedEventId === event.id);
-		const icon = control.querySelector('[data-timeline-event-icon]');
-		if (icon) icon.textContent = eventIcon(event);
+		setSemanticIcon(control.querySelector('[data-timeline-event-icon]'), eventIconKey(event), 'Timeline event');
 		const label = control.querySelector('[data-timeline-event-label]');
 		if (label) label.textContent = event.sourceReference || event.title;
 		control.addEventListener('pointerenter', () => showEventSummary(control, event, activeDate));
@@ -872,8 +894,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		button.setAttribute('aria-selected', selectedEventId === event.id ? 'true' : 'false');
 		button.classList.toggle('timeline-event--selected', selectedEventId === event.id);
 		button.setAttribute('aria-label', eventAccessibleLabel(event, selectedDate));
-		const icon = button.querySelector('[data-timeline-event-icon]');
-		if (icon) icon.textContent = eventIcon(event);
+		setSemanticIcon(button.querySelector('[data-timeline-event-icon]'), eventIconKey(event), 'Timeline panel event');
 		const reference = button.querySelector('[data-timeline-event-reference]');
 		if (reference) {
 			reference.textContent = presentation.referenceLabel;
@@ -1445,9 +1466,23 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 	}
 
 	.timeline-point-event__icon {
+		display: grid;
+		place-items: center;
+		width: 0.95rem;
+		height: 0.95rem;
+		color: var(--watchtower-icon-colour, var(--muted-strong));
 		font-size: 0.78rem;
 		font-weight: 950;
 		line-height: 1;
+	}
+
+	.timeline-point-event__icon :global(.watchtower-inline-icon),
+	.timeline-panel-event__icon :global(.watchtower-inline-icon),
+	.timeline-legend__icon :global(.watchtower-icon) {
+		display: block;
+		width: 100%;
+		height: 100%;
+		color: var(--watchtower-icon-colour, currentColor);
 	}
 
 	.timeline-point-event__status {
@@ -1560,7 +1595,6 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		place-items: center;
 		width: 1rem;
 		height: 1rem;
-		color: var(--accent-strong);
 		font-weight: 950;
 	}
 
@@ -1666,7 +1700,7 @@ const legendSourceTypes = Array.from(new Set(timelineEvents.map((event) => event
 		height: 1.8rem;
 		border: 1px solid var(--event-border);
 		border-radius: 999px;
-		color: var(--event-accent);
+		color: var(--watchtower-icon-colour, var(--muted-strong));
 		font-weight: 950;
 	}
 

@@ -10,6 +10,7 @@ import {
 	isNarrativeSourceType,
 	listProjectNarrativeEntries,
 	markProjectNarrativeViewed,
+	narrativeSourceIconKey,
 	normaliseProjectNarrativeLinks,
 	normaliseProjectNarrativeLinkUrl,
 	NARRATIVE_ATTENTION_LEVELS,
@@ -99,6 +100,10 @@ test('source and attention types cover manual and future RAID-linked entries', a
 	assert.equal(isNarrativeSourceType('decision'), false);
 	assert.equal(isNarrativeAttentionLevel('neutral'), true);
 	assert.equal(isNarrativeAttentionLevel('blue'), false);
+	assert.equal(narrativeSourceIconKey('manual'), 'manual-diary-entry');
+	assert.equal(narrativeSourceIconKey('system'), 'system-event');
+	assert.equal(narrativeSourceIconKey('risk'), 'risk');
+	assert.equal(narrativeSourceIconKey('unknown-source'), 'system-event');
 });
 
 test('UTC-compatible timestamps and optional IANA timezone context are enforced', async () => {

@@ -561,7 +561,8 @@ test('Project dashboard areas tiles render icon and title only with equal square
 		'No data yet',
 	];
 
-	assert.match(areasSource, /<span class="dashboard-tile__icon" aria-hidden="true">\{tile\.icon\}<\/span>/);
+	assert.match(areasSource, /<WatchtowerIcon icon=\{tile\.semanticIcon\} size="full" decorative \/>/);
+	assert.match(areasSource, /\{tile\.semanticIcon \? <WatchtowerIcon icon=\{tile\.semanticIcon\} size="full" decorative \/> : tile\.icon\}/);
 	assert.match(areasSource, /<strong>\{tile\.title\}<\/strong>/);
 	assert.match(areasSource, /<article[\s\S]*?dashboard-tile--unavailable[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'unknown'\} rag-tile--disabled[\s\S]*?aria-disabled="true"[\s\S]*?aria-label=\{`\$\{tile\.ariaLabel \?\? tile\.title\}, unavailable`\}[\s\S]*?title=\{`\$\{tile\.ariaLabel \?\? tile\.title\}, unavailable`\}[\s\S]*?tabindex="0"/);
 	assert.match(areasSource, /<a[\s\S]*?class={`dashboard-tile[\s\S]*?rag-tile--attention-\$\{tile\.attentionTone \?\? 'neutral'\}[\s\S]*?href=\{tile\.href\}[\s\S]*?aria-label=\{`Open \$\{tile\.title\}, \$\{tile\.statusLabel \?\? 'Neutral state'\}`\}[\s\S]*?title=\{`\$\{tile\.ariaLabel \?\? tile\.title\}`\}/);
