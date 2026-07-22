@@ -92,8 +92,8 @@ export function workspaceTeamPersonName(member: Pick<WorkspaceTeamMember, 'first
 	return member.membership_status === 'deactivated' ? `${baseName} [deactivated]` : baseName;
 }
 
-export function workspaceTeamLoginLabel(member: Pick<WorkspaceTeamMember, 'login_name'>): string {
-	return cleanText(member.login_name) || 'Not set';
+export function workspaceTeamLoginLabel(member: Pick<WorkspaceTeamMember, 'login_name' | 'display_name'>): string {
+	return cleanText(member.login_name) || cleanText(member.display_name) || 'Not set';
 }
 
 export function compareWorkspaceTeamMembers(a: WorkspaceTeamMember, b: WorkspaceTeamMember): number {

@@ -7,6 +7,7 @@ import {
 	membershipStateCounts,
 	membershipStatusLabel,
 	workspaceRoleLabel,
+	workspaceTeamLoginLabel,
 	workspaceTeamPersonName,
 } from '../src/lib/workspaceTeam.ts';
 import { buildWorkspaceTeamPath } from '../src/lib/projectRoutes.ts';
@@ -41,6 +42,7 @@ test('Workspace Team route selects the correct membership directory by role', as
 	assert.match(route, /\.eq\('organisation_id', organisation\.id\)/);
 	assert.match(route, /organisation_membership_id/);
 	assert.match(route, /profile_id/);
+	assert.match(route, /\{member\.loginLabel\}/);
 	assert.doesNotMatch(route, /contact_email|auth_email|data-email|email as/i);
 });
 
@@ -95,6 +97,12 @@ test('Workspace Team helper resolves person names without inventing identity', (
 	assert.equal(workspaceTeamPersonName({ first_name: null, last_name: null, display_name: null, login_name: 'viewer-01', membership_status: 'active' }), 'viewer-01');
 	assert.equal(workspaceTeamPersonName({ first_name: null, last_name: null, display_name: null, login_name: null, membership_status: 'active' }), 'Workspace user');
 	assert.equal(workspaceTeamPersonName({ first_name: 'Jane', last_name: 'Smith', display_name: null, login_name: 'jsmith', membership_status: 'deactivated' }), 'Jane Smith [deactivated]');
+});
+
+test('Workspace Team login display uses backfilled login names before Not set fallback', () => {
+	assert.equal(workspaceTeamLoginLabel({ login_name: 'mark.nesbit', display_name: 'Mark Nesbit' }), 'mark.nesbit');
+	assert.equal(workspaceTeamLoginLabel({ login_name: '   ', display_name: 'Mark Nesbit' }), 'Mark Nesbit');
+	assert.equal(workspaceTeamLoginLabel({ login_name: null, display_name: null }), 'Not set');
 });
 
 test('Workspace Team helper sorts by last first login and membership UUID', () => {

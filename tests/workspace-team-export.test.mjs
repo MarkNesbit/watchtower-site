@@ -183,6 +183,7 @@ test('Workspace Team page displays checkout warning and confirmation dialog flow
 
 	assert.match(page, /data-active-editable-checkout/);
 	assert.match(page, /data-workspace-team-export-open/);
+	assert.match(page, /data-workspace-team-export-download-form/);
 	assert.match(page, /workspace-team-editable-export-dialog/);
 	assert.match(page, /workspace-team-export-conflict-dialog/);
 	assert.match(page, /This creates a versioned export and starts a 24-hour advisory editing window/);
@@ -197,6 +198,33 @@ test('Workspace Team page displays checkout warning and confirmation dialog flow
 	assert.doesNotMatch(page, /contact_email|auth_email|service_role|auth\.users/);
 });
 
+test('Workspace Team export forms close only after a successful download response', async () => {
+	const page = await readFile(pageUrl, 'utf8');
+
+	assert.match(page, /await fetch\(form\.action/);
+	assert.match(page, /method: 'POST'/);
+	assert.match(page, /credentials: 'same-origin'/);
+	assert.match(page, /const blob = await response\.blob\(\)/);
+	assert.match(page, /downloadBlob\(blob, exportFilenameFromResponse\(response\)\)/);
+	assert.match(page, /content-disposition/);
+	assert.match(page, /dialog\.close\('downloaded'\)/);
+	assert.match(page, /formData\.get\('export_mode'\) === 'editable'/);
+	assert.match(page, /window\.location\.reload\(\)/);
+});
+
+test('Workspace Team export modal prevents duplicates and remains open on failure', async () => {
+	const page = await readFile(pageUrl, 'utf8');
+
+	assert.match(page, /if \(submitButton\?\.disabled\) return/);
+	assert.match(page, /submitButton\.disabled = true/);
+	assert.match(page, /submitButton\.textContent = 'Preparing CSV\.\.\.'/);
+	assert.match(page, /if \(!response\.ok\)/);
+	assert.match(page, /const failureText = await response\.text\(\)/);
+	assert.match(page, /setExportMessage\(form, message\)/);
+	assert.match(page, /data-workspace-team-export-message/);
+	assert.match(page, /role="alert"/);
+});
+
 test('Workspace Team export docs record snapshot checkout and exclusion boundaries', async () => {
 	const docs = await readFile(docsUrl, 'utf8');
 
@@ -204,6 +232,7 @@ test('Workspace Team export docs record snapshot checkout and exclusion boundari
 	assert.match(docs, /watchtower-workspace-team-\{workspace-slug\}-\{YYYYMMDD-HHmm\}-\{mode\}\.csv/);
 	assert.match(docs, /profiles\.contact_email/);
 	assert.match(docs, /24-hour advisory checkout/);
+	assert.match(docs, /Successful browser exports wait for the server response/);
 	assert.match(docs, /formula-injection/);
 	assert.match(docs, /does not implement CSV upload, parsing, comparison, approval or membership mutation/);
 });

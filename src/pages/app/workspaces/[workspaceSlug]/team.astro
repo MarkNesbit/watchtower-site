@@ -200,7 +200,7 @@ const disabledHistoryExplanation = canAdministerLater
 						</div>
 						<div>
 							{canAdministerLater && exportAction ? (
-								<form method="post" action={exportAction} data-read-only-export-form>
+								<form method="post" action={exportAction} data-read-only-export-form data-workspace-team-export-download-form>
 									<input type="hidden" name="export_mode" value="read_only" />
 									<button class="button button--secondary" type="submit" data-read-only-team-csv-download>
 										Download read-only copy
@@ -230,15 +230,17 @@ const disabledHistoryExplanation = canAdministerLater
 							/>
 						</div>
 					</div>
+					<p class="workspace-team-export-message" role="alert" data-workspace-team-export-page-message hidden></p>
 
 					{canAdministerLater && exportAction && (
 						<dialog class="workspace-team-export-dialog" id="workspace-team-editable-export-dialog" aria-labelledby="workspace-team-editable-export-title" data-workspace-team-export-dialog>
-							<form method="post" action={exportAction}>
+							<form method="post" action={exportAction} data-workspace-team-export-download-form>
 								<input type="hidden" name="export_mode" value="editable" />
 								<div class="workspace-team-export-dialog__body">
 									<h3 id="workspace-team-editable-export-title" tabindex="-1" data-workspace-team-dialog-focus>Download editable team CSV</h3>
 									<p>This creates a versioned export and starts a 24-hour advisory editing window. The CSV is an offline working copy; the database remains the source of truth.</p>
 									<p>Future upload validation will compare this export ID and snapshot version against the live Workspace Team data.</p>
+									<p class="workspace-team-export-message" role="alert" data-workspace-team-export-message hidden></p>
 								</div>
 								<div class="workspace-team-export-dialog__actions">
 									<button class="button button--secondary" type="button" data-workspace-team-dialog-cancel>Cancel</button>
@@ -254,14 +256,15 @@ const disabledHistoryExplanation = canAdministerLater
 								<h3 id="workspace-team-export-conflict-title" tabindex="-1" data-workspace-team-dialog-focus>Editing window already active</h3>
 								<p>{checkoutEditorName} downloaded this Workspace Team file for update at {formatDateTime(activeCheckout.exported_at)}. Their editing window expires at {formatDateTime(activeCheckout.checkout_expires_at)}.</p>
 								<p>Download a read-only copy if you only need the latest data. Take over only when you need a new editable working copy; the earlier editable export will be superseded and ineligible for later upload.</p>
+								<p class="workspace-team-export-message" role="alert" data-workspace-team-export-message hidden></p>
 							</div>
 							<div class="workspace-team-export-dialog__actions">
 								<button class="button button--secondary" type="button" data-workspace-team-dialog-cancel>Cancel</button>
-								<form method="post" action={exportAction}>
+								<form method="post" action={exportAction} data-workspace-team-export-download-form>
 									<input type="hidden" name="export_mode" value="read_only" />
 									<button class="button button--secondary" type="submit">Download read-only copy</button>
 								</form>
-								<form method="post" action={exportAction}>
+								<form method="post" action={exportAction} data-workspace-team-export-download-form>
 									<input type="hidden" name="export_mode" value="editable" />
 									<input type="hidden" name="takeover_export_id" value={activeCheckout.id} />
 									<input type="hidden" name="confirm_takeover" value="true" />
@@ -374,6 +377,88 @@ const disabledHistoryExplanation = canAdministerLater
 			button.addEventListener('click', () => dialog.close());
 		});
 	});
+
+	function exportFilenameFromResponse(response) {
+		const disposition = response.headers.get('content-disposition') || '';
+		const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+		if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1]);
+		const quotedMatch = disposition.match(/filename="([^"]+)"/i);
+		if (quotedMatch?.[1]) return quotedMatch[1];
+		const plainMatch = disposition.match(/filename=([^;]+)/i);
+		return plainMatch?.[1]?.trim() || 'watchtower-workspace-team.csv';
+	}
+
+	function setExportMessage(form, message) {
+		const dialog = form.closest('dialog');
+		const messageTarget = dialog?.querySelector('[data-workspace-team-export-message]')
+			|| document.querySelector('[data-workspace-team-export-page-message]');
+		if (!(messageTarget instanceof HTMLElement)) return;
+		messageTarget.textContent = message;
+		messageTarget.hidden = !message;
+	}
+
+	function downloadBlob(blob, filename) {
+		const objectUrl = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = objectUrl;
+		link.download = filename;
+		document.body.append(link);
+		link.click();
+		link.remove();
+		window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+	}
+
+	document.querySelectorAll('[data-workspace-team-export-download-form]').forEach((form) => {
+		if (!(form instanceof HTMLFormElement)) return;
+		form.addEventListener('submit', async (event) => {
+			event.preventDefault();
+			const submitButton = event.submitter instanceof HTMLButtonElement
+				? event.submitter
+				: form.querySelector('button[type="submit"]');
+			if (submitButton?.disabled) return;
+
+			setExportMessage(form, '');
+			if (submitButton instanceof HTMLButtonElement) {
+				submitButton.disabled = true;
+				submitButton.dataset.originalText = submitButton.textContent || '';
+				submitButton.textContent = 'Preparing CSV...';
+			}
+
+			try {
+				const formData = new FormData(form);
+				const response = await fetch(form.action, {
+					method: 'POST',
+					body: formData,
+					credentials: 'same-origin',
+				});
+
+				if (!response.ok) {
+					const failureText = await response.text();
+					throw new Error(failureText || 'Workspace Team CSV export could not be downloaded.');
+				}
+
+				const blob = await response.blob();
+				downloadBlob(blob, exportFilenameFromResponse(response));
+				const dialog = form.closest('dialog');
+				if (dialog instanceof HTMLDialogElement) dialog.close('downloaded');
+
+				if (formData.get('export_mode') === 'editable') {
+					window.setTimeout(() => window.location.reload(), 350);
+				}
+			} catch (error) {
+				const message = error instanceof Error && error.message
+					? error.message
+					: 'Workspace Team CSV export could not be downloaded.';
+				setExportMessage(form, message);
+			} finally {
+				if (submitButton instanceof HTMLButtonElement) {
+					submitButton.disabled = false;
+					submitButton.textContent = submitButton.dataset.originalText || 'Download CSV';
+					delete submitButton.dataset.originalText;
+				}
+			}
+		});
+	});
 </script>
 
 <style>
@@ -462,6 +547,16 @@ const disabledHistoryExplanation = canAdministerLater
 	.workspace-team-checkout p {
 		margin: 0;
 		color: var(--muted-strong);
+	}
+
+	.workspace-team-export-message {
+		margin: 0.65rem 0 0;
+		border: 1px solid rgba(239, 68, 68, 0.4);
+		border-radius: 0.5rem;
+		padding: 0.65rem 0.75rem;
+		background: rgba(239, 68, 68, 0.12);
+		color: #fecaca;
+		font-weight: 750;
 	}
 
 	.workspace-team-export-dialog {
