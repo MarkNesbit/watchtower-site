@@ -7,6 +7,7 @@ import {
 	buildWorkspaceTeamCheckoutReleasePath,
 	buildWorkspaceTeamExportPath,
 	buildWorkspaceTeamImportPath,
+	buildWorkspaceTeamImportReviewPath,
 	getWorkspaceBySlug,
 } from '../../../../lib/projects';
 import { isWorkspaceRole } from '../../../../lib/permissions';
@@ -170,6 +171,7 @@ const canAdministerLater = workspaceRole === 'owner' || workspaceRole === 'admin
 const exportAction = workspaceSlug ? buildWorkspaceTeamExportPath(workspaceSlug) : '';
 const checkoutReleaseAction = workspaceSlug ? buildWorkspaceTeamCheckoutReleasePath(workspaceSlug) : '';
 const importAction = workspaceSlug ? buildWorkspaceTeamImportPath(workspaceSlug) : '';
+const importReviewPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewPath(workspaceSlug, importRun.id) : '';
 const importMaxSizeLabel = `${Math.round(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES / 1024 / 1024)} MB`;
 const checkoutEditorMember = activeCheckout?.requested_by
 	? members.find((member) => member.profile_id === activeCheckout?.requested_by)
@@ -387,7 +389,7 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 										{importRun.file_hash && ` File hash ${importRun.file_hash.slice(0, 12)}...`}
 									</p>
 								</div>
-								<strong>{importRun.status === 'validated' ? 'Ready for review in a later slice' : importRun.status === 'stale_review_required' ? 'Stale review required' : 'Needs correction'}</strong>
+								<strong>{importRun.status === 'validated' ? 'Ready for review' : importRun.status === 'stale_review_required' ? 'Stale review required' : importRun.status === 'approved_for_application' ? 'Approved for application' : 'Needs correction'}</strong>
 							</div>
 							{(importRun.checkout_expired || importRun.source_stale || importRun.source_superseded || importRun.failure_message) && (
 								<div class="workspace-team-import-warnings" role="status">
@@ -405,6 +407,13 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 								<span><strong>{importSummary.unchanged ?? 0}</strong> unchanged</span>
 								<span><strong>{importSummary.invalid_rows ?? 0}</strong> invalid</span>
 							</div>
+							{importReviewPath && ['validated', 'stale_review_required', 'approved_for_application'].includes(importRun.status) && !importRun.source_superseded && (
+								<p class="workspace-team-import-review-link">
+									<a class="button button--primary" href={importReviewPath} data-workspace-team-import-review-link>
+										Review proposed changes
+									</a>
+								</p>
+							)}
 							{([
 								['Proposed additions', importGroups.additions],
 								['Proposed corrections', importGroups.corrections],
@@ -935,6 +944,10 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 	.workspace-team-import-summary strong {
 		color: var(--text);
 		font-size: 1.2rem;
+	}
+
+	.workspace-team-import-review-link {
+		margin: 0;
 	}
 
 	.workspace-team-import-group {

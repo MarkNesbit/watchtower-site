@@ -75,7 +75,14 @@ alter table public.workspace_membership_audit_events
       'membership_export_read_only_generated',
       'membership_export_taken_over',
       'membership_export_superseded',
-      'workspace_membership_csv_checkout_released'
+      'workspace_membership_csv_checkout_released',
+      'membership_change_approved',
+      'membership_change_excluded',
+      'membership_deactivation_kept_active',
+      'membership_change_decision_revised',
+      'membership_change_blocked',
+      'membership_change_no_longer_required',
+      'membership_change_set_confirmed'
     ));
 
 create or replace function public.release_workspace_membership_csv_checkout(
