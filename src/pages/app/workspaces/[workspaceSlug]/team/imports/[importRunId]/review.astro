@@ -1,14 +1,14 @@
 ---
-import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
-import EmptyState from '../../../../../../components/app/EmptyState.astro';
-import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
+import AuthenticatedLayout from '../../../../../../../layouts/AuthenticatedLayout.astro';
+import EmptyState from '../../../../../../../components/app/EmptyState.astro';
+import ProjectContentPanel from '../../../../../../../components/app/ProjectContentPanel.astro';
 import {
 	buildWorkspaceTeamImportReviewPath,
 	buildWorkspaceTeamPath,
 	getWorkspaceBySlug,
-} from '../../../../../../lib/projects';
-import { isWorkspaceRole } from '../../../../../../lib/permissions';
-import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
+} from '../../../../../../../lib/projects';
+import { isWorkspaceRole } from '../../../../../../../lib/permissions';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../../lib/supabaseServer';
 
 type JsonRecord = Record<string, unknown>;
 type ReviewItem = {
