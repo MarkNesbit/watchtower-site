@@ -154,9 +154,9 @@ One profile maps to one Supabase Auth user.
 | `id`            | `uuid`        |       No | None               | `auth.users.id` | Primary key. Same identifier as the Supabase Auth user.                      |
 | `email`         | `text`        |       No | None               | None            | User email address copied from Supabase Auth for display/search convenience. |
 | `display_name`  | `text`        |       No | Derived from email | None            | User-facing name. Initially generated from the email address.                |
-| `first_name`    | `text`        |      Yes | `null`             | None            | Nullable future team administration first-name field.                        |
-| `last_name`     | `text`        |      Yes | `null`             | None            | Nullable future team administration last-name field.                         |
-| `login_name`    | `text`        |      Yes | `null`             | None            | Future unique Watchtower login identifier; not used for login in WT-WORKSPACE-TEAM-002. |
+| `first_name`    | `text`        |      Yes | Safe existing profile derivation where available | None | Nullable future team administration first-name field.                        |
+| `last_name`     | `text`        |      Yes | Safe existing profile derivation where available | None | Nullable future team administration last-name field.                         |
+| `login_name`    | `text`        |      Yes | Derived from existing profile data | None       | Future unique Watchtower login identifier; not used for login in WT-WORKSPACE-TEAM-002. |
 | `contact_email` | `text`        |      Yes | Backfilled from `email` | None        | Future contact/notification email distinct from the Supabase Auth email.     |
 | `avatar_url`    | `text`        |      Yes | `null`             | None            | Optional profile image URL for future use.                                   |
 | `last_login_at` | `timestamptz` |      Yes | `null`             | None            | Last known successful login time. May be populated later.                    |
@@ -191,7 +191,7 @@ Display name editing is governed by workspace settings, not hardcoded user behav
 
 `is_internal_tester` is not a workspace role, customer permission, platform administrator flag or impersonation capability. It only unlocks the scoped internal role simulation utility when the user also has active membership in the Mark.Nesbit.Professional test workspace.
 
-`profiles.email` remains a compatibility mirror of `auth.users.email`. `contact_email` is the future contact/notification address. `login_name` is schema-ready for future work but does not change the current email/password login journey.
+`profiles.email` remains a compatibility mirror of `auth.users.email`. `contact_email` is the future contact/notification address and is backfilled from `profiles.email` where missing; this does not modify `auth.users.email`. `login_name` is schema-ready for future work but does not change the current email/password login journey. Missing login names are normalised from existing display/profile email data and receive deterministic `.02`, `.03` suffixes if the generated value already exists. `first_name` and `last_name` are backfilled only when existing profile text clearly resolves to exactly two name parts; uncertain names remain nullable and continue to use display-name fallback.
 
 ---
 

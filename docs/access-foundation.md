@@ -1,8 +1,8 @@
 # User profile and access foundation
 
 **Status:** WT-US-0105 validation reference  
-**Last updated:** 23 June 2026  
-**Related:** `supabase/migrations/20260614000200_create_foundation_tables.sql`, `supabase/migrations/20260614000300_enable_rls_and_baseline_policies.sql`, `supabase/migrations/20260614000600_create_auth_onboarding.sql`, `src/lib/permissions.ts`
+**Last updated:** 22 July 2026
+**Related:** `supabase/migrations/20260614000200_create_foundation_tables.sql`, `supabase/migrations/20260614000300_enable_rls_and_baseline_policies.sql`, `supabase/migrations/20260614000600_create_auth_onboarding.sql`, `supabase/migrations/20260722000300_workspace_profile_identity_backfill.sql`, `src/lib/permissions.ts`
 
 ## Purpose
 
@@ -16,7 +16,7 @@ Supabase Auth owns account credentials, sign-up, login, password reset and email
 
 A Watchtower account uses one primary email address. That email comes from the Supabase Auth user and is mirrored on the profile for display, audit and lookup convenience. Watchtower does not model multiple personal recovery email addresses on profiles. Future account recovery should be handled through an authorised admin/support process, not through additional profile-level recovery emails.
 
-WT-WORKSPACE-TEAM-002 keeps this login behaviour unchanged but adds profile fields for future team administration: `first_name`, `last_name`, `login_name` and `contact_email`. `profiles.email` remains the current compatibility mirror of the Supabase Auth email. `contact_email` is the future contact/notification field and is not a login identifier in this slice. `login_name` is stored and uniquely constrained for future use, but login-name authentication is not implemented.
+WT-WORKSPACE-TEAM-002 keeps this login behaviour unchanged but adds profile fields for future team administration: `first_name`, `last_name`, `login_name` and `contact_email`. WT-WORKSPACE-TEAM-004-FIX-001 backfills missing values for existing profiles and updates onboarding defaults for new profiles. `profiles.email` remains the current compatibility mirror of the Supabase Auth email. `contact_email` is the future contact/notification field and is not a login identifier in this slice. `login_name` is stored and uniquely constrained for future use, but login-name authentication is not implemented.
 
 ## Profile
 
@@ -25,9 +25,9 @@ A profile is account identity and audit metadata only. The current profile table
 - `id` — the Supabase authenticated user id.
 - `email` — the primary account email.
 - `display_name` — a user-facing display name, generated from email during onboarding when needed.
-- `first_name` and `last_name` — nullable future team administration name fields.
-- `login_name` — nullable, case-normalised future login identifier with a unique normalised index.
-- `contact_email` — nullable contact/notification email, initially backfilled from `email` where available.
+- `first_name` and `last_name` — nullable future team administration name fields, backfilled only where existing profile text safely resolves to exactly two name parts.
+- `login_name` — nullable, case-normalised future login identifier with a unique normalised index. Missing login names are derived from existing display/email profile data, with deterministic `.02`, `.03` suffixes for duplicates.
+- `contact_email` — nullable contact/notification email, backfilled from `email` where available. The backfill does not modify `auth.users.email`.
 - `avatar_url` — nullable future-ready display metadata.
 - `last_login_at` — nullable account activity metadata.
 - `created_at` and `updated_at` timestamps.
@@ -37,7 +37,7 @@ Profiles deliberately do not store global roles, workspace roles, workspace perm
 
 ## Profile creation
 
-When a Supabase user has verified their email, the onboarding trigger creates or refreshes the matching profile using the auth user id, primary email and derived display name. The same onboarding path also creates the user's default personal Workspace, adds an active owner membership and creates default organisation settings.
+When a Supabase user has verified their email, the onboarding trigger creates or refreshes the matching profile using the auth user id, primary email, derived display name, contact email, unique login name and safe first/last-name defaults where available. The same onboarding path also creates the user's default personal Workspace, adds an active owner membership and creates default organisation settings.
 
 Because onboarding is keyed by the Supabase user id, each authenticated account has at most one profile record. If the auth email changes in future, the onboarding function can refresh the mirrored profile email without creating a second profile or modelling secondary email addresses.
 
@@ -101,6 +101,8 @@ The page reads `workspace_member_directory` for normal active workspace users. O
 
 The page shows a safe membership directory with role, lifecycle state, relevant dates, simple state filters and search by name/login. The rendered lifecycle labels are `Active`, `Invited`, `Invitation expired`, `Suspended` and `Deactivated`; the database value `invite_expired` must not appear in the UI. Deactivated people remain visible for history as neutral inactive rows and use the display pattern `Jane Smith [deactivated]`.
 
+For the Team page Login column, `login_name` is preferred. If it is absent, the page may fall back to `display_name` because that field is already exposed in the safe directory; it must not fall back to `profiles.email`, `contact_email`, `auth_email` or raw UUIDs for Member/Viewer visibility.
+
 CSV update and membership-history controls are visible but disabled in this slice. Members and Viewers see an Owner/Admin-required explanation. WT-WORKSPACE-TEAM-003 does not implement mutation, invitation delivery, CSV generation, CSV parsing, CSV apply behaviour, login-name authentication, shared-contact-email authentication or service-role access.
 
 ## Workspace Team CSV export and advisory checkout
@@ -115,7 +117,7 @@ CSV filenames use `watchtower-workspace-team-{workspace-slug}-{YYYYMMDD-HHmm}-{m
 
 Snapshot versions are deterministic hashes over membership UUID, profile UUID, first name, last name, login name, contact email, last login timestamp, role, membership status and invitation/activation/suspension/add/deactivation/reactivation timestamps. They are not derived from `exported_at`.
 
-CSV cells are RFC-4180 escaped and formula-injection protected. Values beginning with `=`, `+`, `-` or `@` are prefixed with a single quote in the exported file. WT-WORKSPACE-TEAM-005 should normalise that leading quote back only when validating imported values that were formula-protected by export.
+CSV cells are RFC-4180 escaped and formula-injection protected. Values beginning with `=`, `+`, `-` or `@` are prefixed with a single quote in the exported file. Successful browser exports wait for the server response, trigger the CSV download, close the export dialog and refresh after editable export or takeover so the current checkout notice is visible. Failed exports keep the dialog open and show an accessible retryable error. WT-WORKSPACE-TEAM-005 should normalise that leading quote back only when validating imported values that were formula-protected by export.
 
 WT-WORKSPACE-TEAM-004 does not implement CSV upload, parsing, comparison, approval or membership mutation. It also does not implement invitation delivery, Supabase Auth account creation, role change UI, profile correction UI, audit history UI, shared-email login or password-flow changes.
 
