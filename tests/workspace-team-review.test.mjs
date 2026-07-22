@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { buildWorkspaceTeamImportReviewPath } from '../src/lib/projectRoutes.ts';
 
@@ -104,6 +104,31 @@ test('Workspace Team review page groups proposals and saves decisions through co
 	assert.match(page, /Full deactivation impact assessment remains WT-WORKSPACE-TEAM-010/);
 	assert.match(page, /No workspace membership changes have been made yet/);
 	assert.doesNotMatch(page, /\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update|auth\.admin|Send invitation|Apply changes|\.delete\(/);
+});
+
+test('Workspace Team review page relative imports resolve from the nested route directory', async () => {
+	const page = await readFile(reviewPageUrl, 'utf8');
+	const importPaths = [...page.matchAll(/from ['"](\.{1,2}\/[^'"]+)['"]/g)].map((match) => match[1]);
+
+	assert.deepEqual(importPaths, [
+		'../../../../../../../layouts/AuthenticatedLayout.astro',
+		'../../../../../../../components/app/EmptyState.astro',
+		'../../../../../../../components/app/ProjectContentPanel.astro',
+		'../../../../../../../lib/projects',
+		'../../../../../../../lib/permissions',
+		'../../../../../../../lib/supabaseServer',
+	]);
+
+	for (const importPath of importPaths) {
+		const resolved = new URL(importPath, reviewPageUrl);
+		const candidates = /\.[a-z]+$/i.test(importPath)
+			? [resolved]
+			: [resolved, new URL(`${importPath}.ts`, reviewPageUrl), new URL(`${importPath}.astro`, reviewPageUrl)];
+		await assert.doesNotReject(
+			Promise.any(candidates.map((candidate) => access(candidate))),
+			`${importPath} should resolve from the review page directory`,
+		);
+	}
 });
 
 test('Workspace Team page links validated imports into review without apply controls', async () => {
