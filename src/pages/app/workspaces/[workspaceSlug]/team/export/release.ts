@@ -2,6 +2,13 @@ import type { APIRoute } from 'astro';
 import { buildWorkspaceTeamPath, getWorkspaceBySlug } from '../../../../../../lib/projects.ts';
 import { isWorkspaceRole } from '../../../../../../lib/permissions.ts';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer.ts';
+import {
+	WORKSPACE_TEAM_CHECKOUT_RELEASE_RPC,
+	logWorkspaceTeamCheckoutReleaseFailure,
+	workspaceTeamCheckoutReleaseErrorCode,
+	workspaceTeamCheckoutReleaseStateErrorCode,
+	type WorkspaceTeamCheckoutReleaseExportState,
+} from '../../../../../../lib/workspaceTeamCheckoutRelease.ts';
 
 function teamRedirect(workspaceSlug: string, params: Record<string, string>) {
 	const query = new URLSearchParams(params);
@@ -12,15 +19,6 @@ function teamRedirect(workspaceSlug: string, params: Record<string, string>) {
 			'cache-control': 'private, no-store, no-cache, must-revalidate',
 		},
 	});
-}
-
-function releaseErrorCode(message: string | undefined) {
-	if (!message) return 'failed';
-	if (message.includes('WT_MEMBERSHIP_EXPORT_RELEASE_HOLDER_ONLY')) return 'holder_only';
-	if (message.includes('WT_MEMBERSHIP_EXPORT_RELEASE_NOT_ACTIVE')) return 'not_active';
-	if (message.includes('WT_MEMBERSHIP_EXPORT_RELEASE_RACE')) return 'stale';
-	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) return 'permission';
-	return 'failed';
 }
 
 export const POST: APIRoute = async ({ cookies, params, request }) => {
@@ -42,16 +40,36 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 	const exportId = String(formData.get('export_id') ?? '').trim();
 	if (!exportId) return teamRedirect(workspaceSlug, { checkout_release: 'error', checkout_release_error: 'missing_export' });
 
-	const { error } = await serverSupabase.rpc('release_workspace_membership_csv_checkout', {
+	const { data: actorData } = await serverSupabase.auth.getUser(accessToken);
+	const actorId = actorData.user?.id ?? null;
+	const { data: exportState } = await serverSupabase
+		.from('workspace_membership_export_runs')
+		.select('requested_by, export_mode, status, editing_mode, checkout_expires_at, superseded_at, released_at')
+		.eq('organisation_id', organisation.id)
+		.eq('id', exportId)
+		.maybeSingle();
+	const stateErrorCode = workspaceTeamCheckoutReleaseStateErrorCode(
+		exportState as WorkspaceTeamCheckoutReleaseExportState | null,
+		actorId,
+	);
+
+	const { error } = await serverSupabase.rpc(WORKSPACE_TEAM_CHECKOUT_RELEASE_RPC, {
 		target_organisation_id: organisation.id,
 		target_export_id: exportId,
 		release_reason: 'Current holder selected Undo from Team administration.',
 		release_source: 'holder_undo',
 	});
 	if (error) {
+		logWorkspaceTeamCheckoutReleaseFailure({
+			workspaceId: organisation.id,
+			workspaceSlug,
+			exportId,
+			actorId,
+			error,
+		});
 		return teamRedirect(workspaceSlug, {
 			checkout_release: 'error',
-			checkout_release_error: releaseErrorCode(error.message),
+			checkout_release_error: workspaceTeamCheckoutReleaseErrorCode(error, stateErrorCode),
 		});
 	}
 
