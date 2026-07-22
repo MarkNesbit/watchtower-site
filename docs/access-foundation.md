@@ -16,6 +16,8 @@ Supabase Auth owns account credentials, sign-up, login, password reset and email
 
 A Watchtower account uses one primary email address. That email comes from the Supabase Auth user and is mirrored on the profile for display, audit and lookup convenience. Watchtower does not model multiple personal recovery email addresses on profiles. Future account recovery should be handled through an authorised admin/support process, not through additional profile-level recovery emails.
 
+WT-WORKSPACE-TEAM-002 keeps this login behaviour unchanged but adds profile fields for future team administration: `first_name`, `last_name`, `login_name` and `contact_email`. `profiles.email` remains the current compatibility mirror of the Supabase Auth email. `contact_email` is the future contact/notification field and is not a login identifier in this slice. `login_name` is stored and uniquely constrained for future use, but login-name authentication is not implemented.
+
 ## Profile
 
 A profile is account identity and audit metadata only. The current profile table is linked one-to-one to `auth.users.id` and includes:
@@ -23,6 +25,9 @@ A profile is account identity and audit metadata only. The current profile table
 - `id` — the Supabase authenticated user id.
 - `email` — the primary account email.
 - `display_name` — a user-facing display name, generated from email during onboarding when needed.
+- `first_name` and `last_name` — nullable future team administration name fields.
+- `login_name` — nullable, case-normalised future login identifier with a unique normalised index.
+- `contact_email` — nullable contact/notification email, initially backfilled from `email` where available.
 - `avatar_url` — nullable future-ready display metadata.
 - `last_login_at` — nullable account activity metadata.
 - `created_at` and `updated_at` timestamps.
@@ -47,7 +52,9 @@ Projects belong to a workspace/organisation. Users gain access to workspace-owne
 - a role;
 - a membership status.
 
-This means the same user can theoretically have different roles in different workspaces. Access checks must require an active membership, so inactive, invited, suspended or removed memberships do not grant workspace/project access.
+This means the same user can theoretically have different roles in different workspaces. Access checks must require an active membership, so invited, invite-expired, suspended or deactivated memberships do not grant workspace/project access.
+
+WT-WORKSPACE-TEAM-002 migrates the legacy `removed` membership status to the product-facing `deactivated` lifecycle term and adds lifecycle timestamps and actor/reason fields for invitation expiry, acceptance, suspension, deactivation and reactivation.
 
 ## Fixed MVP roles
 
@@ -77,6 +84,40 @@ Role simulation changes the effective role used by application permission helper
 WT-TEST-002 adds CSV demo people import and persona simulation to the same internal Test tools area. Imported demo people are stored in `workspace_demo_people`, scoped to the Mark.Nesbit.Professional test workspace, flagged as demo data, and never inserted into Supabase Auth or real `profiles`. The CSV import replaces demo people for the scoped workspace only and keeps real memberships untouched. Each demo person can carry a workspace role, project/persona metadata, and `notification_email` for future test notification routing. When a demo person is simulated, the real authenticated user remains Mark, while the demo person's role becomes the effective role for normal RBAC checks. Broad Mark/internal tester authority must stay explicit and must not silently override persona restrictions during simulated browsing.
 
 Future organisation-level permission policies can extend this model by adding policy checks after active membership and fixed role have been established. They should not move permission decisions onto profiles and should not introduce user-configurable permission builders in MVP.
+
+## Membership lifecycle administration foundation
+
+WT-WORKSPACE-TEAM-002 adds controlled database functions for invitation, invitation expiry, activation, suspension, deactivation, reactivation and permitted profile identity correction. The functions derive the actor from `auth.uid()`, check the actor's real stored active membership role, lock the target membership row and write membership audit events.
+
+These functions deliberately use real `organisation_members.role` rather than internal role simulation, so test simulation cannot bypass Owner/Admin protection. Admins can manage Members and Viewers only in this foundation slice. The final active Owner cannot be suspended, deactivated or demoted, and users cannot deactivate or suspend their own membership through the administration functions.
+
+The slice also adds `workspace_member_directory` for same-workspace display identity without contact email and `workspace_member_admin_directory` for Owner/Admin future administration views that include contact/auth email fields. CSV export/import foundation tables are present for later slices, but no CSV files are generated, uploaded, parsed or applied by WT-WORKSPACE-TEAM-002.
+
+## Workspace Team page foundation
+
+WT-WORKSPACE-TEAM-003 adds the first read-focused Workspace Team page at `/app/workspaces/{workspaceSlug}/team`. The page is available only through the user's existing active workspace membership path and uses **Workspace** in user-facing copy while the database continues to use `organisation`.
+
+The page reads `workspace_member_directory` for normal active workspace users. Owner/Admin users can read through `workspace_member_admin_directory` where the page needs administration-oriented lifecycle dates, but WT-WORKSPACE-TEAM-003 deliberately does not render contact email or auth email. Rows are identified by membership/profile UUIDs, never by email.
+
+The page shows a safe membership directory with role, lifecycle state, relevant dates, simple state filters and search by name/login. The rendered lifecycle labels are `Active`, `Invited`, `Invitation expired`, `Suspended` and `Deactivated`; the database value `invite_expired` must not appear in the UI. Deactivated people remain visible for history as neutral inactive rows and use the display pattern `Jane Smith [deactivated]`.
+
+CSV update and membership-history controls are visible but disabled in this slice. Members and Viewers see an Owner/Admin-required explanation. WT-WORKSPACE-TEAM-003 does not implement mutation, invitation delivery, CSV generation, CSV parsing, CSV apply behaviour, login-name authentication, shared-contact-email authentication or service-role access.
+
+## Workspace Team CSV export and advisory checkout
+
+WT-WORKSPACE-TEAM-004 enables Owner/Admin CSV export from `/app/workspaces/{workspaceSlug}/team` through the server-side POST route `/app/workspaces/{workspaceSlug}/team/export`. The route resolves the requested workspace through the current user's active membership, requires the real stored role to be Owner or Admin, calls the controlled database function `create_workspace_membership_csv_export`, and returns a UTF-8 CSV download.
+
+Editable exports create a `workspace_membership_export_runs` record, persist normalised `workspace_membership_export_rows`, record a deterministic `membership_snapshot_version`, and start a 24-hour advisory checkout. Read-only exports create their own versioned snapshot and audit event but use `export_mode = read_only`, do not start checkout, and cannot replace the active editable export. Expired or superseded exports remain historical but do not block a new editable export.
+
+The checkout is advisory, not a database lock on membership changes. The database remains authoritative, and future upload validation must compare the file's `export_id` and `membership_snapshot_version` with the current database state. Transactional enforcement uses a security-definer RPC with a workspace-scoped advisory transaction lock and row locking on active export runs, so two concurrent editable requests cannot both create an active editable checkout. Takeover requires explicit confirmation, marks the earlier editable export as superseded, links the new export through `takeover_of_export_id`, and writes supersession/takeover audit events.
+
+CSV filenames use `watchtower-workspace-team-{workspace-slug}-{YYYYMMDD-HHmm}-{mode}.csv`. Columns are stable and repeated on every row: `export_id`, `membership_snapshot_version`, `exported_at`, `export_mode`, `workspace_membership_id`, `user_id`, `login_name`, `first_name`, `last_name`, `email`, `workspace_role`, `membership_status`, `invited_at`, `invitation_expires_at`, `accepted_at`, `last_login_at`, `added_at`, `deactivated_at`, `reactivated_at`. The CSV `email` column maps to `profiles.contact_email`; the Supabase authentication email mirror is deliberately not exported.
+
+Snapshot versions are deterministic hashes over membership UUID, profile UUID, first name, last name, login name, contact email, last login timestamp, role, membership status and invitation/activation/suspension/add/deactivation/reactivation timestamps. They are not derived from `exported_at`.
+
+CSV cells are RFC-4180 escaped and formula-injection protected. Values beginning with `=`, `+`, `-` or `@` are prefixed with a single quote in the exported file. WT-WORKSPACE-TEAM-005 should normalise that leading quote back only when validating imported values that were formula-protected by export.
+
+WT-WORKSPACE-TEAM-004 does not implement CSV upload, parsing, comparison, approval or membership mutation. It also does not implement invitation delivery, Supabase Auth account creation, role change UI, profile correction UI, audit history UI, shared-email login or password-flow changes.
 
 ## Future concepts not implemented in MVP
 

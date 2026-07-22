@@ -65,7 +65,8 @@ test('shared header swaps Login for the existing sign-out action when authentica
 	const header = await readFile(new URL('../src/components/Header.astro', import.meta.url), 'utf8');
 	const signOutButton = await readFile(new URL('../src/components/auth/SignOutButton.astro', import.meta.url), 'utf8');
 
-	assert.match(header, /const hasAuthCookie = Boolean\(Astro\.cookies\.get\('wt-access-token'\)\?\.value\)/);
+	assert.match(header, /const accessToken = getServerAccessToken\(Astro\.cookies\)/);
+	assert.match(header, /const hasAuthCookie = Boolean\(accessToken\)/);
 	assert.match(header, /const publicNavItems = \[/);
 	for (const label of ['Home', 'Products', 'Roadmap', 'About']) {
 		assert.match(header, new RegExp(`label: '${label}'`));
@@ -73,9 +74,11 @@ test('shared header swaps Login for the existing sign-out action when authentica
 	assert.match(header, /const appNavItems = \[/);
 	assert.match(header, /\{ href: '\/app', label: 'Dashboard', exact: true \}/);
 	assert.match(header, /\{ href: '\/app\/projects', label: 'Projects' \}/);
-	assert.match(header, /\{ label: 'Workspace' \}/);
+	assert.match(header, /workspaceTeamHref \? \{ href: workspaceTeamHref, label: 'Workspace' \} : \{ label: 'Workspace' \}/);
 	assert.match(header, /\{ href: '\/app\/account', label: 'Admin' \}/);
 	assert.match(header, /\{ label: 'Settings' \}/);
+	assert.match(header, /getCurrentWorkspace\(serverSupabase, accessToken\)/);
+	assert.match(header, /buildWorkspaceTeamPath\(organisation\.slug\)/);
 	assert.match(header, /data-public-nav hidden=\{hasAuthCookie \|\| undefined\}/);
 	assert.match(header, /data-app-nav hidden=\{!hasAuthCookie \|\| undefined\}/);
 	assert.match(header, /nav__item nav__item--disabled/);

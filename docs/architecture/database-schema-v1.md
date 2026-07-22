@@ -154,6 +154,10 @@ One profile maps to one Supabase Auth user.
 | `id`            | `uuid`        |       No | None               | `auth.users.id` | Primary key. Same identifier as the Supabase Auth user.                      |
 | `email`         | `text`        |       No | None               | None            | User email address copied from Supabase Auth for display/search convenience. |
 | `display_name`  | `text`        |       No | Derived from email | None            | User-facing name. Initially generated from the email address.                |
+| `first_name`    | `text`        |      Yes | `null`             | None            | Nullable future team administration first-name field.                        |
+| `last_name`     | `text`        |      Yes | `null`             | None            | Nullable future team administration last-name field.                         |
+| `login_name`    | `text`        |      Yes | `null`             | None            | Future unique Watchtower login identifier; not used for login in WT-WORKSPACE-TEAM-002. |
+| `contact_email` | `text`        |      Yes | Backfilled from `email` | None        | Future contact/notification email distinct from the Supabase Auth email.     |
 | `avatar_url`    | `text`        |      Yes | `null`             | None            | Optional profile image URL for future use.                                   |
 | `last_login_at` | `timestamptz` |      Yes | `null`             | None            | Last known successful login time. May be populated later.                    |
 | `is_internal_tester` | `boolean` |       No | `false`            | None            | WT-TEST-001 internal test-tool eligibility for the scoped production test workspace only. |
@@ -168,6 +172,8 @@ One profile maps to one Supabase Auth user.
 * `id` references `auth.users.id`.
 * `email` must not be empty.
 * `display_name` must not be empty.
+* `login_name`, when present, must be lower-case normalised and unique by normalised comparison.
+* `contact_email`, when present, must be lower-case normalised and email-shaped.
 
 ## Notes
 
@@ -184,6 +190,8 @@ becomes:
 Display name editing is governed by workspace settings, not hardcoded user behaviour.
 
 `is_internal_tester` is not a workspace role, customer permission, platform administrator flag or impersonation capability. It only unlocks the scoped internal role simulation utility when the user also has active membership in the Mark.Nesbit.Professional test workspace.
+
+`profiles.email` remains a compatibility mirror of `auth.users.email`. `contact_email` is the future contact/notification address. `login_name` is schema-ready for future work but does not change the current email/password login journey.
 
 ---
 
@@ -269,12 +277,24 @@ A workspace may have multiple users.
 | `organisation_id` | `uuid`        |       No | None                | `organisations.id` | Workspace the membership belongs to.                                                    |
 | `user_id`         | `uuid`        |       No | None                | `auth.users.id`    | User who is a member of the workspace.                                                  |
 | `role`            | `text`        |       No | `member`            | None               | User role within the workspace. Supported values: `owner`, `admin`, `member`, `viewer`. |
-| `status`          | `text`        |       No | `active`            | None               | Membership status. Supported values: `active`, `invited`, `suspended`, `removed`.       |
+| `status`          | `text`        |       No | `active`            | None               | Membership status. Supported values: `invited`, `invite_expired`, `active`, `suspended`, `deactivated`. |
 | `invited_by`      | `uuid`        |      Yes | `null`              | `auth.users.id`    | User who invited this member. Null for automatically created owner membership.          |
 | `invited_at`      | `timestamptz` |      Yes | `null`              | None               | Timestamp when the invitation was created.                                              |
+| `invitation_expires_at` | `timestamptz` | Yes | `null`         | None               | Timestamp used for invitation expiry and expired-invitation state.                      |
+| `accepted_at`     | `timestamptz` |      Yes | `null`              | None               | Timestamp when an invitation was accepted or activated.                                 |
 | `joined_at`       | `timestamptz` |      Yes | `now()`             | None               | Timestamp when the user joined. For the original owner this may equal creation time.    |
+| `suspended_at`    | `timestamptz` |      Yes | `null`              | None               | Timestamp when the membership was suspended.                                            |
+| `suspended_by`    | `uuid`        |      Yes | `null`              | `auth.users.id`    | Actor who suspended the membership.                                                     |
+| `suspension_reason` | `text`      |      Yes | `null`              | None               | Optional suspension reason.                                                             |
+| `deactivated_at`  | `timestamptz` |      Yes | `null`              | None               | Timestamp when the membership was deactivated.                                          |
+| `deactivated_by`  | `uuid`        |      Yes | `null`              | `auth.users.id`    | Actor who deactivated the membership.                                                   |
+| `deactivation_reason` | `text`    |      Yes | `null`              | None               | Optional deactivation reason.                                                           |
+| `reactivated_at`  | `timestamptz` |      Yes | `null`              | None               | Timestamp when a suspended/deactivated membership was reactivated.                      |
+| `reactivated_by`  | `uuid`        |      Yes | `null`              | `auth.users.id`    | Actor who reactivated the membership.                                                   |
+| `reactivation_reason` | `text`    |      Yes | `null`              | None               | Optional reactivation reason.                                                           |
 | `created_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the membership record was created.                                       |
 | `updated_at`      | `timestamptz` |       No | `now()`             | None               | Timestamp when the membership record was last updated.                                  |
+| `updated_by`      | `uuid`        |      Yes | `null`              | `auth.users.id`    | Actor who last updated controlled lifecycle fields.                                     |
 
 ## Constraints
 
@@ -282,17 +302,75 @@ A workspace may have multiple users.
 * `organisation_id` references `organisations.id`.
 * `user_id` references `auth.users.id`.
 * `role` must be one of: `owner`, `admin`, `member`, `viewer`.
-* `status` must be one of: `active`, `invited`, `suspended`, `removed`.
+* `status` must be one of: `invited`, `invite_expired`, `active`, `suspended`, `deactivated`.
 * A user should not have duplicate membership records for the same organisation.
 * Each organisation should have at least one owner.
+* `invited` and `invite_expired` require `invited_at`.
+* `invite_expired` requires `invitation_expires_at`.
+* `suspended` requires `suspended_at`.
+* `deactivated` requires `deactivated_at`.
 
 ## Notes
 
 Only `active` memberships grant access to workspace data.
 
-Admins must not be able to demote or remove the owner.
+Admins must not be able to demote, suspend or deactivate the owner or another admin in this foundation slice.
 
-That rule may be enforced through application logic and/or database policies.
+WT-WORKSPACE-TEAM-002 adds database functions for controlled lifecycle transitions and a trigger that protects the final active owner from deactivation, suspension or demotion. The legacy `removed` status is migrated to `deactivated`.
+
+---
+
+# View: `workspace_member_directory`
+
+Provides safe same-workspace display identity for active workspace users. It includes profile UUID, membership UUID, workspace UUID, display name, first name, last name, login name, role, membership status and deactivated presentation fields. It deliberately excludes `contact_email` and the auth email mirror.
+
+Access is constrained by `is_active_organisation_member(organisation_id)`.
+
+---
+
+# View: `workspace_member_admin_directory`
+
+Provides Owner/Admin-only membership administration display identity for future team administration. It includes the safe directory fields plus `contact_email`, `auth_email` and lifecycle timestamps.
+
+Access is constrained by `has_real_active_organisation_role(organisation_id, array['owner', 'admin'])`, which uses the real stored membership role rather than internal role simulation.
+
+---
+
+# Table: `workspace_membership_audit_events`
+
+## Purpose
+
+Append-only audit foundation for workspace membership lifecycle and profile identity correction events.
+
+## Key fields
+
+`organisation_id`, `organisation_membership_id`, `target_user_id`, `actor_user_id`, `event_type`, `previous_status`, `new_status`, `previous_values`, `new_values`, `reason`, `source`, `correlation_id`, `created_at`.
+
+Supported event types include `membership_invited`, `invitation_expired`, `membership_activated`, `membership_suspended`, `membership_deactivated`, `membership_reactivated`, `profile_identity_corrected`, `membership_import_proposed`, `membership_import_applied`, `membership_import_failed`, `membership_export_generated` and `membership_export_superseded`.
+
+Owner/Admin users can read audit events for their workspace. Normal authenticated users cannot update or delete audit events.
+
+---
+
+# Tables: Workspace Membership CSV Administration Foundation
+
+WT-WORKSPACE-TEAM-002 creates the schema foundation for later CSV administration without generating, uploading, parsing or applying CSV files.
+
+The foundation tables are:
+
+* `workspace_membership_export_runs`
+* `workspace_membership_export_rows`
+* `workspace_membership_import_runs`
+* `workspace_membership_import_rows`
+* `workspace_membership_change_decisions`
+
+These tables store future export snapshot versions, import run state, parsed row/proposed value evidence and row-level decisions. RLS restricts access to real active Owners/Admins in the same workspace. Members and Viewers do not receive membership administration write access.
+
+WT-WORKSPACE-TEAM-004 completes the export half of this foundation. `workspace_membership_export_runs.export_mode` distinguishes `editable` from `read_only` exports. Editable exports use `status = checked_out`, `editing_mode = checked_out` and a 24-hour `checkout_expires_at`; read-only exports use `export_mode = read_only`, `editing_mode = none` and no checkout expiry. Takeover is represented by `takeover_of_export_id`, `superseded_at`, `superseded_by`, `superseded_by_export_id` and `takeover_at`.
+
+`workspace_membership_export_rows` stores the exact normalised membership snapshot used to generate the CSV, including membership UUID, profile/user UUID, login name, first name, last name, `contact_email`, role, membership status and lifecycle timestamps. The exported CSV column named `email` maps to `profiles.contact_email`; it does not expose `profiles.email` or `auth.users.email`.
+
+`current_workspace_membership_snapshot_version(organisation_id)` returns a deterministic bigint hash over membership identity, role, state and lifecycle fields. `create_workspace_membership_csv_export(organisation_id, export_mode, takeover_export_id)` is the controlled security-definer export operation. It checks the actor's real active Owner/Admin role, serialises editable checkout creation with a workspace advisory transaction lock, inserts the export run and rows, supersedes a taken-over export where confirmed, and records membership export audit events. Authenticated users keep read access through RLS but direct insert/update on export runs is revoked after this function exists.
 
 ---
 
