@@ -11,6 +11,7 @@ import {
 	buildProjectRiskPath,
 	buildProjectRisksPath,
 	buildProjectTimelinePath,
+	buildWorkspaceTeamExportPath,
 	buildWorkspaceTeamPath,
 } from './projectRoutes.ts';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs.ts';
@@ -66,6 +67,7 @@ export {
 	buildProjectRiskPath,
 	buildProjectRisksPath,
 	buildProjectTimelinePath,
+	buildWorkspaceTeamExportPath,
 	buildWorkspaceTeamPath,
 	buildUniqueProjectRef,
 	normaliseProjectRef,

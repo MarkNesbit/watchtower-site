@@ -44,15 +44,18 @@ test('Workspace Team route selects the correct membership directory by role', as
 	assert.doesNotMatch(route, /contact_email|auth_email|data-email|email as/i);
 });
 
-test('Workspace Team route is read-only and exposes disabled future controls', async () => {
+test('Workspace Team route exposes CSV export controls without membership mutation UI', async () => {
 	const route = await routeSource();
 
 	assert.match(route, /Download team CSV for update/);
 	assert.match(route, /data-team-csv-download/);
+	assert.match(route, /Download read-only copy/);
+	assert.match(route, /data-read-only-team-csv-download/);
+	assert.match(route, /data-team-csv-takeover/);
 	assert.match(route, /data-membership-history/);
 	assert.match(route, /Owner or Admin access is required for future team CSV administration/);
 	assert.match(route, /No actions in this release/);
-	assert.doesNotMatch(route, /method="post"|\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\(/);
+	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\(/);
 });
 
 test('Workspace Team route renders roles states filters search and accessible responsive table', async () => {

@@ -103,6 +103,22 @@ The page shows a safe membership directory with role, lifecycle state, relevant 
 
 CSV update and membership-history controls are visible but disabled in this slice. Members and Viewers see an Owner/Admin-required explanation. WT-WORKSPACE-TEAM-003 does not implement mutation, invitation delivery, CSV generation, CSV parsing, CSV apply behaviour, login-name authentication, shared-contact-email authentication or service-role access.
 
+## Workspace Team CSV export and advisory checkout
+
+WT-WORKSPACE-TEAM-004 enables Owner/Admin CSV export from `/app/workspaces/{workspaceSlug}/team` through the server-side POST route `/app/workspaces/{workspaceSlug}/team/export`. The route resolves the requested workspace through the current user's active membership, requires the real stored role to be Owner or Admin, calls the controlled database function `create_workspace_membership_csv_export`, and returns a UTF-8 CSV download.
+
+Editable exports create a `workspace_membership_export_runs` record, persist normalised `workspace_membership_export_rows`, record a deterministic `membership_snapshot_version`, and start a 24-hour advisory checkout. Read-only exports create their own versioned snapshot and audit event but use `export_mode = read_only`, do not start checkout, and cannot replace the active editable export. Expired or superseded exports remain historical but do not block a new editable export.
+
+The checkout is advisory, not a database lock on membership changes. The database remains authoritative, and future upload validation must compare the file's `export_id` and `membership_snapshot_version` with the current database state. Transactional enforcement uses a security-definer RPC with a workspace-scoped advisory transaction lock and row locking on active export runs, so two concurrent editable requests cannot both create an active editable checkout. Takeover requires explicit confirmation, marks the earlier editable export as superseded, links the new export through `takeover_of_export_id`, and writes supersession/takeover audit events.
+
+CSV filenames use `watchtower-workspace-team-{workspace-slug}-{YYYYMMDD-HHmm}-{mode}.csv`. Columns are stable and repeated on every row: `export_id`, `membership_snapshot_version`, `exported_at`, `export_mode`, `workspace_membership_id`, `user_id`, `login_name`, `first_name`, `last_name`, `email`, `workspace_role`, `membership_status`, `invited_at`, `invitation_expires_at`, `accepted_at`, `last_login_at`, `added_at`, `deactivated_at`, `reactivated_at`. The CSV `email` column maps to `profiles.contact_email`; the Supabase authentication email mirror is deliberately not exported.
+
+Snapshot versions are deterministic hashes over membership UUID, profile UUID, first name, last name, login name, contact email, last login timestamp, role, membership status and invitation/activation/suspension/add/deactivation/reactivation timestamps. They are not derived from `exported_at`.
+
+CSV cells are RFC-4180 escaped and formula-injection protected. Values beginning with `=`, `+`, `-` or `@` are prefixed with a single quote in the exported file. WT-WORKSPACE-TEAM-005 should normalise that leading quote back only when validating imported values that were formula-protected by export.
+
+WT-WORKSPACE-TEAM-004 does not implement CSV upload, parsing, comparison, approval or membership mutation. It also does not implement invitation delivery, Supabase Auth account creation, role change UI, profile correction UI, audit history UI, shared-email login or password-flow changes.
+
 ## Future concepts not implemented in MVP
 
 The following concepts are recognised as possible future needs but are explicitly not implemented by WT-US-0105:

@@ -37,6 +37,23 @@ The page keeps the WT-WORKSPACE-TEAM-001/002 identity separation intact:
 
 The page includes disabled future controls for `Download team CSV for update` and `Membership history`. WT-WORKSPACE-TEAM-003 does not implement mutations, CSV export/import processing, invitation delivery, shared-email authentication, login-name authentication or service-role access.
 
+## WT-WORKSPACE-TEAM-004 Implementation Note
+
+WT-WORKSPACE-TEAM-004 turns the Workspace Team CSV control into a server-side export and advisory checkout flow.
+
+The slice adds:
+
+- `workspace_membership_export_rows` to preserve the exact normalised rows included in each export;
+- `export_mode` on `workspace_membership_export_runs` with `editable` and `read_only` values;
+- `current_workspace_membership_snapshot_version`, a deterministic membership snapshot hash;
+- `create_workspace_membership_csv_export`, a security-definer function that checks the real active Owner/Admin role, serialises editable export creation with a workspace advisory transaction lock, records snapshot rows, starts a 24-hour checkout for editable exports, and handles takeover/supersession;
+- `/app/workspaces/{workspaceSlug}/team/export`, a POST-only download endpoint that returns the CSV generated from the persisted snapshot;
+- page-level checkout visibility, read-only download and takeover confirmation.
+
+The CSV `email` column is `profiles.contact_email`, not the Supabase authentication email mirror. Existing people continue to be identified by `workspace_membership_id` and `user_id` UUIDs. Read-only exports are auditable but cannot become an editable upload source. Superseded editable exports are retained for history and made ineligible for later upload by status and supersession metadata.
+
+WT-WORKSPACE-TEAM-004 does not implement CSV upload, parsing, comparison, approval, apply behaviour, invitation delivery, membership mutation, profile correction UI, role editing, Supabase Auth account creation, shared-email login or password-flow changes.
+
 ## 1. Executive Conclusion
 
 Watchtower already has a usable workspace-first foundation:

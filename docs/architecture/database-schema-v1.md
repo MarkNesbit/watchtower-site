@@ -359,11 +359,18 @@ WT-WORKSPACE-TEAM-002 creates the schema foundation for later CSV administration
 The foundation tables are:
 
 * `workspace_membership_export_runs`
+* `workspace_membership_export_rows`
 * `workspace_membership_import_runs`
 * `workspace_membership_import_rows`
 * `workspace_membership_change_decisions`
 
 These tables store future export snapshot versions, import run state, parsed row/proposed value evidence and row-level decisions. RLS restricts access to real active Owners/Admins in the same workspace. Members and Viewers do not receive membership administration write access.
+
+WT-WORKSPACE-TEAM-004 completes the export half of this foundation. `workspace_membership_export_runs.export_mode` distinguishes `editable` from `read_only` exports. Editable exports use `status = checked_out`, `editing_mode = checked_out` and a 24-hour `checkout_expires_at`; read-only exports use `export_mode = read_only`, `editing_mode = none` and no checkout expiry. Takeover is represented by `takeover_of_export_id`, `superseded_at`, `superseded_by`, `superseded_by_export_id` and `takeover_at`.
+
+`workspace_membership_export_rows` stores the exact normalised membership snapshot used to generate the CSV, including membership UUID, profile/user UUID, login name, first name, last name, `contact_email`, role, membership status and lifecycle timestamps. The exported CSV column named `email` maps to `profiles.contact_email`; it does not expose `profiles.email` or `auth.users.email`.
+
+`current_workspace_membership_snapshot_version(organisation_id)` returns a deterministic bigint hash over membership identity, role, state and lifecycle fields. `create_workspace_membership_csv_export(organisation_id, export_mode, takeover_export_id)` is the controlled security-definer export operation. It checks the actor's real active Owner/Admin role, serialises editable checkout creation with a workspace advisory transaction lock, inserts the export run and rows, supersedes a taken-over export where confirmed, and records membership export audit events. Authenticated users keep read access through RLS but direct insert/update on export runs is revoked after this function exists.
 
 ---
 

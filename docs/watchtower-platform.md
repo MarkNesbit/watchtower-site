@@ -57,6 +57,8 @@ This workspace foundation supports future project intelligence across risk, depe
 
 WT-WORKSPACE-TEAM-003 adds the first read-only Workspace Team page at `/app/workspaces/{workspaceSlug}/team`. It is linked from authenticated workspace-level navigation, requires the current user's active workspace membership, reads the WT-WORKSPACE-TEAM-002 membership directory views, displays role/state/date information without contact email, and exposes disabled future CSV/history controls only as foundation markers for later administration slices.
 
+WT-WORKSPACE-TEAM-004 enables a controlled Workspace Team CSV export from that page for active Owners/Admins. Editable exports are versioned, snapshot-preserved and checked out for a 24-hour advisory editing window. Read-only exports are separately versioned and audited without replacing the active checkout. Takeover supersedes the earlier editable export and creates a new editable version. CSV upload, comparison and membership application remain future slices.
+
 ## Project references and routing slugs
 
 Project slugs are URL-safe routing identifiers only and are unique within a workspace rather than globally. Canonical project URLs therefore use `/app/workspaces/{workspaceSlug}/projects/{projectSlug}`, with `/edit` and `/risks` suffixes for those destinations. Scoped lookups require the signed-in user's active workspace membership and match both workspace and project slug; visible URLs do not contain raw UUIDs. The older `/app/projects/{projectSlug}` family is transitional and redirects only for one accessible match, presenting a workspace choice when the same slug is accessible in more than one workspace.

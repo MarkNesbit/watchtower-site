@@ -3,12 +3,13 @@ import AuthenticatedLayout from '../../../../layouts/AuthenticatedLayout.astro';
 import DisabledActionHint from '../../../../components/app/DisabledActionHint.astro';
 import EmptyState from '../../../../components/app/EmptyState.astro';
 import ProjectContentPanel from '../../../../components/app/ProjectContentPanel.astro';
-import { getWorkspaceBySlug } from '../../../../lib/projects';
+import { buildWorkspaceTeamExportPath, getWorkspaceBySlug } from '../../../../lib/projects';
 import { isWorkspaceRole } from '../../../../lib/permissions';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../lib/supabaseServer';
 import {
 	buildWorkspaceTeamDisplayMembers,
 	membershipStateCounts,
+	workspaceTeamPersonName,
 	type TeamFilter,
 	type WorkspaceTeamMember,
 } from '../../../../lib/workspaceTeam';
@@ -27,9 +28,19 @@ let currentUserId = '';
 let loadMessage = '';
 let loadError = '';
 let members: WorkspaceTeamMember[] = [];
+let activeCheckout: {
+	id: string;
+	requested_by: string | null;
+	exported_at: string;
+	checkout_expires_at: string;
+	membership_snapshot_version: number;
+} | null = null;
 
 const formatDate = (value: string | null) => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value))
+	: 'Not available';
+const formatDateTime = (value: string | null) => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
 	: 'Not available';
 
 try {
@@ -62,6 +73,22 @@ try {
 			.eq('organisation_id', organisation.id);
 		if (error) throw error;
 		members = data ?? [];
+
+		if (canUseAdminDirectory) {
+			const { data: checkoutData, error: checkoutError } = await serverSupabase
+				.from('workspace_membership_export_runs')
+				.select('id, requested_by, exported_at, checkout_expires_at, membership_snapshot_version')
+				.eq('organisation_id', organisation.id)
+				.eq('export_mode', 'editable')
+				.eq('status', 'checked_out')
+				.is('superseded_at', null)
+				.gt('checkout_expires_at', new Date().toISOString())
+				.order('exported_at', { ascending: false })
+				.limit(1)
+				.maybeSingle();
+			if (checkoutError) throw checkoutError;
+			activeCheckout = checkoutData ?? null;
+		}
 	}
 } catch {
 	loadError = 'Workspace Team could not be loaded. Refresh the page, or check that your workspace access is still active.';
@@ -82,8 +109,25 @@ const filterHref = (filter: TeamFilter) => {
 };
 const searchAction = Astro.url.pathname;
 const canAdministerLater = workspaceRole === 'owner' || workspaceRole === 'admin';
+const exportAction = workspaceSlug ? buildWorkspaceTeamExportPath(workspaceSlug) : '';
+const checkoutEditorMember = activeCheckout?.requested_by
+	? members.find((member) => member.profile_id === activeCheckout?.requested_by)
+	: null;
+const checkoutEditorName = activeCheckout?.requested_by === currentUserId
+	? 'You'
+	: checkoutEditorMember
+		? workspaceTeamPersonName(checkoutEditorMember)
+		: 'Another Workspace administrator';
+const checkoutHeldByCurrentUser = Boolean(activeCheckout?.requested_by && activeCheckout.requested_by === currentUserId);
+const editableExportDialogId = activeCheckout && !checkoutHeldByCurrentUser
+	? 'workspace-team-export-conflict-dialog'
+	: 'workspace-team-editable-export-dialog';
 const disabledCsvExplanation = canAdministerLater
-	? 'Team CSV administration will be available in the next workspace-team release.'
+	? activeCheckout
+		? checkoutHeldByCurrentUser
+			? `You already have an editable export checked out until ${formatDateTime(activeCheckout.checkout_expires_at)}.`
+			: `${checkoutEditorName} has an active editable export until ${formatDateTime(activeCheckout.checkout_expires_at)}.`
+		: 'Creates a versioned CSV and starts a 24-hour advisory editing window.'
 	: 'Owner or Admin access is required for future team CSV administration.';
 const disabledHistoryExplanation = canAdministerLater
 	? 'Membership history will be available after the audit review journey is added.'
@@ -117,19 +161,61 @@ const disabledHistoryExplanation = canAdministerLater
 			<>
 				<ProjectContentPanel
 					title="Team administration"
-					helper="CSV administration and membership history controls are shown here as the foundation for later releases."
+					helper="Export a controlled Workspace Team CSV for offline preparation. The database remains authoritative."
 					headingId="workspace-team-admin-heading"
 				>
+					{canAdministerLater && activeCheckout && (
+						<div class="workspace-team-checkout" data-active-editable-checkout>
+							<strong>{checkoutHeldByCurrentUser ? 'You have the current editable team file.' : `${checkoutEditorName} downloaded the current team file for update.`}</strong>
+							<p>
+								Exported {formatDateTime(activeCheckout.exported_at)}. Editing window expires {formatDateTime(activeCheckout.checkout_expires_at)}.
+								Snapshot version {activeCheckout.membership_snapshot_version}.
+							</p>
+						</div>
+					)}
 					<div class="workspace-team-admin-actions" data-workspace-team-admin-controls>
 						<div>
-							<button class="button button--primary" type="button" disabled aria-describedby="workspace-team-csv-disabled" data-team-csv-download>
-								Download team CSV for update
-							</button>
+							{canAdministerLater && exportAction && !checkoutHeldByCurrentUser ? (
+								<button
+									class="button button--primary"
+									type="button"
+									aria-haspopup="dialog"
+									aria-describedby="workspace-team-csv-disabled"
+									data-team-csv-download
+									data-workspace-team-export-open={editableExportDialogId}
+								>
+									Download team CSV for update
+								</button>
+							) : (
+								<button class="button button--primary" type="button" disabled aria-describedby="workspace-team-csv-disabled" data-team-csv-download>
+									Download team CSV for update
+								</button>
+							)}
 							<DisabledActionHint
 								id="workspace-team-csv-disabled"
-								allowed={false}
+								allowed={canAdministerLater}
 								allowedText=""
 								disabledText={disabledCsvExplanation}
+							/>
+						</div>
+						<div>
+							{canAdministerLater && exportAction ? (
+								<form method="post" action={exportAction} data-read-only-export-form>
+									<input type="hidden" name="export_mode" value="read_only" />
+									<button class="button button--secondary" type="submit" data-read-only-team-csv-download>
+										Download read-only copy
+									</button>
+								</form>
+							) : (
+								<button class="button button--secondary" type="button" disabled aria-describedby="workspace-team-read-only-disabled" data-read-only-team-csv-download>
+									Download read-only copy
+								</button>
+							)}
+							<DisabledActionHint
+								id="workspace-team-read-only-disabled"
+								allowed={canAdministerLater}
+								allowedText="Read-only copies are versioned and do not replace an active editing window."
+								disabledText="Owner or Admin access is required for read-only team CSV export."
 							/>
 						</div>
 						<div>
@@ -144,6 +230,46 @@ const disabledHistoryExplanation = canAdministerLater
 							/>
 						</div>
 					</div>
+
+					{canAdministerLater && exportAction && (
+						<dialog class="workspace-team-export-dialog" id="workspace-team-editable-export-dialog" aria-labelledby="workspace-team-editable-export-title" data-workspace-team-export-dialog>
+							<form method="post" action={exportAction}>
+								<input type="hidden" name="export_mode" value="editable" />
+								<div class="workspace-team-export-dialog__body">
+									<h3 id="workspace-team-editable-export-title" tabindex="-1" data-workspace-team-dialog-focus>Download editable team CSV</h3>
+									<p>This creates a versioned export and starts a 24-hour advisory editing window. The CSV is an offline working copy; the database remains the source of truth.</p>
+									<p>Future upload validation will compare this export ID and snapshot version against the live Workspace Team data.</p>
+								</div>
+								<div class="workspace-team-export-dialog__actions">
+									<button class="button button--secondary" type="button" data-workspace-team-dialog-cancel>Cancel</button>
+									<button class="button button--primary" type="submit">Download editable CSV</button>
+								</div>
+							</form>
+						</dialog>
+					)}
+
+					{canAdministerLater && exportAction && activeCheckout && !checkoutHeldByCurrentUser && (
+						<dialog class="workspace-team-export-dialog" id="workspace-team-export-conflict-dialog" aria-labelledby="workspace-team-export-conflict-title" data-workspace-team-export-dialog>
+							<div class="workspace-team-export-dialog__body">
+								<h3 id="workspace-team-export-conflict-title" tabindex="-1" data-workspace-team-dialog-focus>Editing window already active</h3>
+								<p>{checkoutEditorName} downloaded this Workspace Team file for update at {formatDateTime(activeCheckout.exported_at)}. Their editing window expires at {formatDateTime(activeCheckout.checkout_expires_at)}.</p>
+								<p>Download a read-only copy if you only need the latest data. Take over only when you need a new editable working copy; the earlier editable export will be superseded and ineligible for later upload.</p>
+							</div>
+							<div class="workspace-team-export-dialog__actions">
+								<button class="button button--secondary" type="button" data-workspace-team-dialog-cancel>Cancel</button>
+								<form method="post" action={exportAction}>
+									<input type="hidden" name="export_mode" value="read_only" />
+									<button class="button button--secondary" type="submit">Download read-only copy</button>
+								</form>
+								<form method="post" action={exportAction}>
+									<input type="hidden" name="export_mode" value="editable" />
+									<input type="hidden" name="takeover_export_id" value={activeCheckout.id} />
+									<input type="hidden" name="confirm_takeover" value="true" />
+									<button class="button button--primary" type="submit" data-team-csv-takeover>Take over editing</button>
+								</form>
+							</div>
+						</dialog>
+					)}
 				</ProjectContentPanel>
 
 				<ProjectContentPanel
@@ -224,6 +350,32 @@ const disabledHistoryExplanation = canAdministerLater
 	</section>
 </AuthenticatedLayout>
 
+<script>
+	const lastTriggerByDialog = new WeakMap();
+	document.querySelectorAll('[data-workspace-team-export-open]').forEach((trigger) => {
+		trigger.addEventListener('click', () => {
+			const dialogId = trigger.getAttribute('data-workspace-team-export-open');
+			const dialog = dialogId ? document.getElementById(dialogId) : null;
+			if (!(dialog instanceof HTMLDialogElement)) return;
+			lastTriggerByDialog.set(dialog, trigger);
+			if (!dialog.open) dialog.showModal();
+			const focusTarget = dialog.querySelector('[data-workspace-team-dialog-focus], button, input');
+			if (focusTarget instanceof HTMLElement) focusTarget.focus();
+		});
+	});
+
+	document.querySelectorAll('[data-workspace-team-export-dialog]').forEach((dialog) => {
+		if (!(dialog instanceof HTMLDialogElement)) return;
+		dialog.addEventListener('close', () => {
+			const trigger = lastTriggerByDialog.get(dialog);
+			if (trigger instanceof HTMLElement) trigger.focus();
+		});
+		dialog.querySelectorAll('[data-workspace-team-dialog-cancel]').forEach((button) => {
+			button.addEventListener('click', () => dialog.close());
+		});
+	});
+</script>
+
 <style>
 	.workspace-team-page {
 		display: grid;
@@ -270,7 +422,7 @@ const disabledHistoryExplanation = canAdministerLater
 
 	.workspace-team-admin-actions {
 		display: grid;
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 0.9rem;
 	}
 
@@ -288,9 +440,74 @@ const disabledHistoryExplanation = canAdministerLater
 		width: fit-content;
 	}
 
+	.workspace-team-admin-actions form {
+		margin: 0;
+	}
+
 	.workspace-team-admin-actions button:disabled {
 		opacity: 0.62;
 		cursor: not-allowed;
+	}
+
+	.workspace-team-checkout {
+		display: grid;
+		gap: 0.25rem;
+		margin-bottom: 1rem;
+		border: 1px solid rgba(245, 171, 53, 0.28);
+		border-radius: 0.5rem;
+		padding: 0.85rem 0.95rem;
+		background: rgba(245, 171, 53, 0.1);
+	}
+
+	.workspace-team-checkout p {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-export-dialog {
+		width: min(100% - 2rem, 42rem);
+		border: 1px solid rgba(110, 181, 224, 0.34);
+		border-radius: 0.75rem;
+		padding: 0;
+		background: #07111d;
+		color: var(--text);
+		box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+	}
+
+	.workspace-team-export-dialog::backdrop {
+		background: rgba(2, 8, 23, 0.72);
+	}
+
+	.workspace-team-export-dialog form,
+	.workspace-team-export-dialog__body {
+		margin: 0;
+	}
+
+	.workspace-team-export-dialog__body {
+		padding: 1.1rem 1.15rem 0.25rem;
+	}
+
+	.workspace-team-export-dialog__body h3 {
+		margin-bottom: 0.45rem;
+		font-size: 1.35rem;
+		letter-spacing: 0;
+	}
+
+	.workspace-team-export-dialog__body p {
+		margin-bottom: 0.65rem;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-export-dialog__actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: 0.6rem;
+		padding: 0.9rem 1.15rem 1.15rem;
+	}
+
+	.workspace-team-export-dialog__actions form {
+		margin: 0;
 	}
 
 	.workspace-team-controls {
@@ -450,6 +667,11 @@ const disabledHistoryExplanation = canAdministerLater
 
 		.workspace-team-admin-actions {
 			grid-template-columns: 1fr;
+		}
+
+		.workspace-team-export-dialog__actions {
+			display: grid;
+			justify-content: stretch;
 		}
 
 		.workspace-team-search {
