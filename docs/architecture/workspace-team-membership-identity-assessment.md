@@ -5,6 +5,22 @@
 **Related epic:** WT-WORKSPACE-TEAM-ACCESS-EPIC-001 Workspace Team Administration and Access Lifecycle
 **Evidence base:** Supabase migrations, authentication components, application helpers, tests and architecture docs in this repository. External Supabase references are linked only where platform behaviour needs confirmation.
 
+## WT-WORKSPACE-TEAM-002 Implementation Note
+
+WT-WORKSPACE-TEAM-002 implements the database foundation recommended by this assessment. The migration `20260722000100_workspace_membership_lifecycle_audit_schema.sql`:
+
+- adds `first_name`, `last_name`, `login_name` and `contact_email` to `profiles` without changing the current email/password login journey;
+- migrates legacy `organisation_members.status = 'removed'` to the product-facing `deactivated` state;
+- constrains membership states to `invited`, `invite_expired`, `active`, `suspended` and `deactivated`;
+- adds lifecycle timestamps, actors and reasons for invitation expiry, activation, suspension, deactivation and reactivation;
+- adds controlled lifecycle functions and profile identity correction functions that use real stored active membership roles rather than internal role simulation;
+- adds final-active-Owner, Admin-vs-Owner/Admin and self-deactivation/suspension safeguards;
+- adds `workspace_member_directory` and `workspace_member_admin_directory` for scoped identity display;
+- adds append-only `workspace_membership_audit_events`;
+- adds CSV administration foundation tables for later export/import slices.
+
+WT-WORKSPACE-TEAM-002 does not implement invitation delivery, Supabase Auth user creation, CSV generation/parsing/apply behaviour, login-name authentication, shared-contact-email authentication, reassignment actions or Workspace Team UI.
+
 ## 1. Executive Conclusion
 
 Watchtower already has a usable workspace-first foundation:

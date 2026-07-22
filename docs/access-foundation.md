@@ -16,6 +16,8 @@ Supabase Auth owns account credentials, sign-up, login, password reset and email
 
 A Watchtower account uses one primary email address. That email comes from the Supabase Auth user and is mirrored on the profile for display, audit and lookup convenience. Watchtower does not model multiple personal recovery email addresses on profiles. Future account recovery should be handled through an authorised admin/support process, not through additional profile-level recovery emails.
 
+WT-WORKSPACE-TEAM-002 keeps this login behaviour unchanged but adds profile fields for future team administration: `first_name`, `last_name`, `login_name` and `contact_email`. `profiles.email` remains the current compatibility mirror of the Supabase Auth email. `contact_email` is the future contact/notification field and is not a login identifier in this slice. `login_name` is stored and uniquely constrained for future use, but login-name authentication is not implemented.
+
 ## Profile
 
 A profile is account identity and audit metadata only. The current profile table is linked one-to-one to `auth.users.id` and includes:
@@ -23,6 +25,9 @@ A profile is account identity and audit metadata only. The current profile table
 - `id` — the Supabase authenticated user id.
 - `email` — the primary account email.
 - `display_name` — a user-facing display name, generated from email during onboarding when needed.
+- `first_name` and `last_name` — nullable future team administration name fields.
+- `login_name` — nullable, case-normalised future login identifier with a unique normalised index.
+- `contact_email` — nullable contact/notification email, initially backfilled from `email` where available.
 - `avatar_url` — nullable future-ready display metadata.
 - `last_login_at` — nullable account activity metadata.
 - `created_at` and `updated_at` timestamps.
@@ -47,7 +52,9 @@ Projects belong to a workspace/organisation. Users gain access to workspace-owne
 - a role;
 - a membership status.
 
-This means the same user can theoretically have different roles in different workspaces. Access checks must require an active membership, so inactive, invited, suspended or removed memberships do not grant workspace/project access.
+This means the same user can theoretically have different roles in different workspaces. Access checks must require an active membership, so invited, invite-expired, suspended or deactivated memberships do not grant workspace/project access.
+
+WT-WORKSPACE-TEAM-002 migrates the legacy `removed` membership status to the product-facing `deactivated` lifecycle term and adds lifecycle timestamps and actor/reason fields for invitation expiry, acceptance, suspension, deactivation and reactivation.
 
 ## Fixed MVP roles
 
@@ -77,6 +84,14 @@ Role simulation changes the effective role used by application permission helper
 WT-TEST-002 adds CSV demo people import and persona simulation to the same internal Test tools area. Imported demo people are stored in `workspace_demo_people`, scoped to the Mark.Nesbit.Professional test workspace, flagged as demo data, and never inserted into Supabase Auth or real `profiles`. The CSV import replaces demo people for the scoped workspace only and keeps real memberships untouched. Each demo person can carry a workspace role, project/persona metadata, and `notification_email` for future test notification routing. When a demo person is simulated, the real authenticated user remains Mark, while the demo person's role becomes the effective role for normal RBAC checks. Broad Mark/internal tester authority must stay explicit and must not silently override persona restrictions during simulated browsing.
 
 Future organisation-level permission policies can extend this model by adding policy checks after active membership and fixed role have been established. They should not move permission decisions onto profiles and should not introduce user-configurable permission builders in MVP.
+
+## Membership lifecycle administration foundation
+
+WT-WORKSPACE-TEAM-002 adds controlled database functions for invitation, invitation expiry, activation, suspension, deactivation, reactivation and permitted profile identity correction. The functions derive the actor from `auth.uid()`, check the actor's real stored active membership role, lock the target membership row and write membership audit events.
+
+These functions deliberately use real `organisation_members.role` rather than internal role simulation, so test simulation cannot bypass Owner/Admin protection. Admins can manage Members and Viewers only in this foundation slice. The final active Owner cannot be suspended, deactivated or demoted, and users cannot deactivate or suspend their own membership through the administration functions.
+
+The slice also adds `workspace_member_directory` for same-workspace display identity without contact email and `workspace_member_admin_directory` for Owner/Admin future administration views that include contact/auth email fields. CSV export/import foundation tables are present for later slices, but no CSV files are generated, uploaded, parsed or applied by WT-WORKSPACE-TEAM-002.
 
 ## Future concepts not implemented in MVP
 
