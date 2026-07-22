@@ -39,6 +39,7 @@ test('Workspace Team CSV columns and filename follow the export contract', () =>
 		'added_at',
 		'deactivated_at',
 		'reactivated_at',
+		'proposed_membership_action',
 	]);
 	assert.equal(
 		safeWorkspaceTeamCsvFilename('Mark Nesbit Professional Workspace', '2026-07-22T09:42:30.000Z', 'editable'),
@@ -231,8 +232,9 @@ test('Workspace Team export docs record snapshot checkout and exclusion boundari
 	assert.match(docs, /WT-WORKSPACE-TEAM-004/);
 	assert.match(docs, /watchtower-workspace-team-\{workspace-slug\}-\{YYYYMMDD-HHmm\}-\{mode\}\.csv/);
 	assert.match(docs, /profiles\.contact_email/);
+	assert.match(docs, /proposed_membership_action/);
 	assert.match(docs, /24-hour advisory checkout/);
 	assert.match(docs, /Successful browser exports wait for the server response/);
 	assert.match(docs, /formula-injection/);
-	assert.match(docs, /does not implement CSV upload, parsing, comparison, approval or membership mutation/);
+	assert.match(docs, /WT-WORKSPACE-TEAM-005 adds upload, parsing, validation and comparison evidence only/);
 });

@@ -10,6 +10,10 @@ export function buildWorkspaceTeamExportPath(workspaceSlug: string): string {
 	return `${buildWorkspaceTeamPath(workspaceSlug)}/export`;
 }
 
+export function buildWorkspaceTeamImportPath(workspaceSlug: string): string {
+	return `${buildWorkspaceTeamPath(workspaceSlug)}/import`;
+}
+
 export function buildProjectEditPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/edit`;
 }
