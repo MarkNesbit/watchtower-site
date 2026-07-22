@@ -22,6 +22,20 @@ export type WorkspaceTeamMember = {
 	reactivated_at?: string | null;
 };
 
+export type WorkspaceTeamActiveEditableCheckout = {
+	id: string;
+	organisation_id: string;
+	requested_by: string | null;
+	exported_at: string;
+	export_mode: string;
+	editing_mode: string;
+	status: string;
+	checkout_expires_at: string;
+	membership_snapshot_version: number;
+	superseded_at: string | null;
+	released_at: string | null;
+};
+
 export type WorkspaceTeamDisplayMember = WorkspaceTeamMember & {
 	personName: string;
 	displayRole: string;
@@ -33,6 +47,20 @@ export type WorkspaceTeamDisplayMember = WorkspaceTeamMember & {
 	lifecycleDateValue: string | null;
 	isCurrentUser: boolean;
 };
+
+export const WORKSPACE_TEAM_ACTIVE_EDITABLE_CHECKOUT_SELECT = [
+	'id',
+	'organisation_id',
+	'requested_by',
+	'exported_at',
+	'export_mode',
+	'editing_mode',
+	'status',
+	'checkout_expires_at',
+	'membership_snapshot_version',
+	'superseded_at',
+	'released_at',
+].join(', ');
 
 const ROLE_LABELS: Record<WorkspaceRole, string> = {
 	owner: 'Owner',
@@ -82,6 +110,37 @@ export function statusTone(status: unknown): WorkspaceTeamDisplayMember['statusT
 
 function cleanText(value: unknown): string {
 	return typeof value === 'string' ? value.trim() : '';
+}
+
+export function applyWorkspaceTeamActiveEditableCheckoutFilters(query: any, organisationId: string, nowIso = new Date().toISOString()) {
+	return query
+		.select(WORKSPACE_TEAM_ACTIVE_EDITABLE_CHECKOUT_SELECT)
+		.eq('organisation_id', organisationId)
+		.eq('export_mode', 'editable')
+		.eq('status', 'checked_out')
+		.eq('editing_mode', 'checked_out')
+		.is('superseded_at', null)
+		.is('released_at', null)
+		.gt('checkout_expires_at', nowIso)
+		.order('exported_at', { ascending: false })
+		.limit(1);
+}
+
+export function isWorkspaceTeamActiveEditableCheckout(
+	checkout: WorkspaceTeamActiveEditableCheckout | null | undefined,
+	organisationId: string,
+	now = new Date(),
+): checkout is WorkspaceTeamActiveEditableCheckout {
+	if (!checkout) return false;
+	return (
+		checkout.organisation_id === organisationId &&
+		checkout.export_mode === 'editable' &&
+		checkout.status === 'checked_out' &&
+		checkout.editing_mode === 'checked_out' &&
+		checkout.superseded_at === null &&
+		checkout.released_at === null &&
+		new Date(checkout.checkout_expires_at).getTime() > now.getTime()
+	);
 }
 
 export function workspaceTeamPersonName(member: Pick<WorkspaceTeamMember, 'first_name' | 'last_name' | 'display_name' | 'login_name' | 'membership_status'>): string {

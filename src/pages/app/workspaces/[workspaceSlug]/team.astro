@@ -14,12 +14,19 @@ import { isWorkspaceRole } from '../../../../lib/permissions';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../lib/supabaseServer';
 import { WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES } from '../../../../lib/workspaceTeamCsvImport';
 import {
+	applyWorkspaceTeamActiveEditableCheckoutFilters,
 	buildWorkspaceTeamDisplayMembers,
+	isWorkspaceTeamActiveEditableCheckout,
 	membershipStateCounts,
 	workspaceTeamPersonName,
 	type TeamFilter,
+	type WorkspaceTeamActiveEditableCheckout,
 	type WorkspaceTeamMember,
 } from '../../../../lib/workspaceTeam';
+
+Astro.response.headers.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+Astro.response.headers.set('Pragma', 'no-cache');
+Astro.response.headers.set('Expires', '0');
 
 const workspaceSlug = Astro.params.workspaceSlug;
 const accessToken = getServerAccessToken(Astro.cookies);
@@ -62,14 +69,7 @@ let importRows: Array<{
 	field_differences: Array<{ field?: string; from?: unknown; to?: unknown }> | null;
 	is_unchanged: boolean;
 }> = [];
-let activeCheckout: {
-	id: string;
-	requested_by: string | null;
-	exported_at: string;
-	checkout_expires_at: string;
-	membership_snapshot_version: number;
-	released_at?: string | null;
-} | null = null;
+let activeCheckout: WorkspaceTeamActiveEditableCheckout | null = null;
 
 const formatDate = (value: string | null) => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value))
@@ -110,20 +110,12 @@ try {
 		members = data ?? [];
 
 		if (canUseAdminDirectory) {
-				const { data: checkoutData, error: checkoutError } = await serverSupabase
-					.from('workspace_membership_export_runs')
-					.select('id, requested_by, exported_at, checkout_expires_at, membership_snapshot_version, released_at')
-					.eq('organisation_id', organisation.id)
-					.eq('export_mode', 'editable')
-					.eq('status', 'checked_out')
-					.is('superseded_at', null)
-					.is('released_at', null)
-					.gt('checkout_expires_at', new Date().toISOString())
-					.order('exported_at', { ascending: false })
-					.limit(1)
-				.maybeSingle();
+			const { data: checkoutData, error: checkoutError } = await applyWorkspaceTeamActiveEditableCheckoutFilters(
+				serverSupabase.from('workspace_membership_export_runs'),
+				organisation.id,
+			).maybeSingle();
 			if (checkoutError) throw checkoutError;
-			activeCheckout = checkoutData ?? null;
+			activeCheckout = isWorkspaceTeamActiveEditableCheckout(checkoutData, organisation.id) ? checkoutData : null;
 
 			if (requestedImportRunId) {
 				const { data: importData, error: importError } = await serverSupabase
@@ -201,7 +193,7 @@ const disabledUploadExplanation = canAdministerLater
 const checkoutReleaseState = String(Astro.url.searchParams.get('checkout_release') ?? '');
 const checkoutReleaseError = String(Astro.url.searchParams.get('checkout_release_error') ?? '');
 const checkoutReleaseMessage = checkoutReleaseState === 'success'
-	? 'Editable team-file checkout released. Another Owner or Admin can download a new editable copy now.'
+	? 'Editable team-file checkout undone.'
 	: checkoutReleaseState === 'error'
 		? ({
 			holder_only: 'Only the current checkout holder can undo this editable file checkout.',
