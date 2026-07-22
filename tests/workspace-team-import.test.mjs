@@ -159,12 +159,18 @@ test('Workspace Team import proposes deactivation only when a structurally valid
 	assert.equal(missingActive.summary.deactivations, 0, 'empty files do not generate mass deactivations');
 });
 
-test('Workspace Team import rejects read-only superseded and stale states distinctly', () => {
+test('Workspace Team import rejects read-only released superseded and stale states distinctly', () => {
 	const readOnly = validate(csv([{ ...sourceRows()[0] }], { export_mode: 'read_only' }), {
 		sourceExport: sourceExport({ export_mode: 'read_only' }),
 	});
 	assert.equal(readOnly.status, 'validation_failed');
 	assert.match(readOnly.fileErrors.map((entry) => entry.message).join(' '), /Read-only/);
+
+	const released = validate(csv([{ ...sourceRows()[0] }]), {
+		sourceExport: sourceExport({ status: 'released', released_at: '2026-07-22T10:30:00.000Z', release_source: 'holder_undo' }),
+	});
+	assert.equal(released.status, 'validation_failed');
+	assert.match(released.fileErrors.map((entry) => entry.message).join(' '), /released by its holder/);
 
 	const superseded = validate(csv([{ ...sourceRows()[0] }]), {
 		sourceExport: sourceExport({ status: 'superseded', superseded_at: '2026-07-22T10:00:00.000Z' }),
@@ -254,6 +260,7 @@ test('Workspace Team import route is POST-only scoped and does not mutate member
 	assert.match(route, /WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES/);
 	assert.match(route, /new TextDecoder\('utf-8', \{ fatal: true \}\)/);
 	assert.match(route, /crypto\.subtle\.digest\('SHA-256'/);
+	assert.match(route, /released_at, released_by, release_source/);
 	assert.match(route, /\.rpc\('record_workspace_membership_import_validation'/);
 	assert.doesNotMatch(route, /auth\.admin|auth\.users|\.from\('profiles'\)\.update|\.from\('organisation_members'\)\.update|\.delete\(/);
 });
@@ -273,6 +280,7 @@ test('Workspace Team page exposes upload validation UI results and no apply cont
 	assert.match(page, /No changes are applied/);
 	assert.doesNotMatch(page, /Approve|Apply changes|Send invitation/);
 	assert.match(docs, /csv-parse/);
+	assert.match(docs, /rejects a released file with a clear message to download a new editable export/);
 	assert.match(docs, /does not approve or apply changes/);
 	assert.ok(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES <= 1024 * 1024);
 });

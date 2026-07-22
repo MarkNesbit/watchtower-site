@@ -58,6 +58,9 @@ export type WorkspaceTeamImportSourceExport = {
 	checkout_expires_at?: string | null;
 	superseded_at?: string | null;
 	superseded_by_export_id?: string | null;
+	released_at?: string | null;
+	released_by?: string | null;
+	release_source?: string | null;
 };
 
 export type WorkspaceTeamImportMemberSnapshot = {
@@ -354,6 +357,7 @@ export function validateWorkspaceTeamCsvImport(csvText: string, context: Workspa
 		: Number(context.liveSnapshotVersion);
 	const checkoutExpired = Boolean(sourceExport?.checkout_expires_at && new Date(sourceExport.checkout_expires_at).getTime() < now.getTime());
 	const sourceSuperseded = Boolean(sourceExport?.superseded_at || sourceExport?.status === 'superseded');
+	const sourceReleased = Boolean(sourceExport?.released_at || sourceExport?.status === 'released');
 	const sourceStale = Boolean(
 		sourceExport
 		&& liveSnapshotVersion
@@ -397,6 +401,7 @@ export function validateWorkspaceTeamCsvImport(csvText: string, context: Workspa
 			if (uploadedSnapshot !== Number(sourceExport.membership_snapshot_version)) fileErrors.push(message('membership_snapshot_version', 'CSV snapshot version does not match the stored source export.'));
 			if (uploadedExportedAt && uploadedExportedAt !== sourceExport.exported_at) fileErrors.push(message('exported_at', 'CSV exported_at does not match the stored source export.'));
 			if (sourceExport.export_mode === 'read_only') fileErrors.push(message('export_mode', 'Read-only Workspace Team exports cannot be used for membership administration.'));
+			if (sourceReleased) fileErrors.push(message('source_export_id', 'This editable Workspace Team file checkout was released by its holder. Download a new editable export before uploading changes.'));
 			if (sourceSuperseded) fileErrors.push(message('source_export_id', 'This team file has been superseded by a newer editable export and can no longer be used.'));
 		}
 

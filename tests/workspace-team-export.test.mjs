@@ -7,10 +7,12 @@ import {
 	encodeCsvCell,
 	safeWorkspaceTeamCsvFilename,
 } from '../src/lib/workspaceTeamCsv.ts';
-import { buildWorkspaceTeamExportPath } from '../src/lib/projectRoutes.ts';
+import { buildWorkspaceTeamCheckoutReleasePath, buildWorkspaceTeamExportPath } from '../src/lib/projectRoutes.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260722000200_workspace_membership_csv_export_checkout.sql', import.meta.url);
+const checkoutReleaseMigrationUrl = new URL('../supabase/migrations/20260722000600_workspace_membership_csv_checkout_release.sql', import.meta.url);
 const endpointUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/export.ts', import.meta.url);
+const releaseEndpointUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/export/release.ts', import.meta.url);
 const pageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
 
@@ -46,6 +48,7 @@ test('Workspace Team CSV columns and filename follow the export contract', () =>
 		'watchtower-workspace-team-mark-nesbit-professional-workspace-20260722-0942-editable.csv',
 	);
 	assert.equal(buildWorkspaceTeamExportPath('alpha workspace'), '/app/workspaces/alpha%20workspace/team/export');
+	assert.equal(buildWorkspaceTeamCheckoutReleasePath('alpha workspace'), '/app/workspaces/alpha%20workspace/team/export/release');
 });
 
 test('Workspace Team CSV encoding escapes special characters unicode and formula-like values', () => {
@@ -163,6 +166,27 @@ test('CSV export migration enforces one active editable checkout transactionally
 	assert.match(sql, /takeover_of_export_id/);
 });
 
+test('CSV checkout release migration adds holder-only release without evidence deletion', async () => {
+	const sql = await readFile(checkoutReleaseMigrationUrl, 'utf8');
+
+	for (const field of ['released_at', 'released_by', 'release_source', 'release_reason']) {
+		assert.match(sql, new RegExp(`add column if not exists ${field}`));
+	}
+	assert.match(sql, /status in \('generated', 'checked_out', 'released', 'superseded', 'expired', 'cancelled'\)/);
+	assert.match(sql, /release_source is null or release_source in \('holder_undo'\)/);
+	assert.match(sql, /released_at is null/);
+	assert.match(sql, /create or replace function public\.release_workspace_membership_csv_checkout/);
+	assert.match(sql, /pg_advisory_xact_lock\(hashtextextended\(target_organisation_id::text, 4004\)\)/);
+	assert.match(sql, /workspace_membership_require_admin_actor\(target_organisation_id\)/);
+	assert.match(sql, /checkout_export\.requested_by is distinct from actor\.actor_user_id/);
+	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_HOLDER_ONLY/);
+	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_NOT_ACTIVE/);
+	assert.match(sql, /workspace_membership_csv_checkout_released/);
+	assert.match(sql, /grant execute on function public\.release_workspace_membership_csv_checkout/);
+	assert.doesNotMatch(sql, /delete from public\.workspace_membership_export_runs|delete from public\.workspace_membership_export_rows|delete from public\.workspace_membership_import_runs|delete from public\.workspace_membership_import_rows|delete from public\.workspace_membership_change_decisions/i);
+	assert.doesNotMatch(sql, /insert into public\.organisation_members|update public\.organisation_members|insert into public\.profiles|update public\.profiles|auth\.admin|insert into auth\.users/i);
+});
+
 test('CSV export endpoint authenticates scopes authorises and returns download headers', async () => {
 	const endpoint = await readFile(endpointUrl, 'utf8');
 
@@ -177,6 +201,24 @@ test('CSV export endpoint authenticates scopes authorises and returns download h
 	assert.match(endpoint, /x-watchtower-export-id/);
 	assert.match(endpoint, /export const GET/);
 	assert.doesNotMatch(endpoint, /auth\.users|service_role|\.from\('profiles'\)|\.insert\(|\.update\(|\.delete\(/);
+});
+
+test('CSV checkout release endpoint is POST-only scoped and delegates to the release RPC', async () => {
+	const endpoint = await readFile(releaseEndpointUrl, 'utf8');
+
+	assert.match(endpoint, /export const POST/);
+	assert.match(endpoint, /export const GET/);
+	assert.match(endpoint, /405/);
+	assert.match(endpoint, /getServerAccessToken\(cookies\)/);
+	assert.match(endpoint, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
+	assert.match(endpoint, /workspace\.role !== 'owner' && workspace\.role !== 'admin'/);
+	assert.match(endpoint, /request\.formData\(\)/);
+	assert.match(endpoint, /target_export_id: exportId/);
+	assert.match(endpoint, /\.rpc\('release_workspace_membership_csv_checkout'/);
+	assert.match(endpoint, /release_source: 'holder_undo'/);
+	assert.match(endpoint, /303/);
+	assert.match(endpoint, /checkout_release=success|checkout_release/);
+	assert.doesNotMatch(endpoint, /auth\.users|service_role|\.from\('profiles'\)|\.from\('organisation_members'\)|\.from\('workspace_membership_change_decisions'\)|\.insert\(|\.update\(|\.delete\(/);
 });
 
 test('Workspace Team page displays checkout warning and confirmation dialog flows', async () => {
@@ -196,7 +238,26 @@ test('Workspace Team page displays checkout warning and confirmation dialog flow
 	assert.match(page, /lastTriggerByDialog/);
 	assert.match(page, /data-workspace-team-dialog-cancel/);
 	assert.match(page, /\.gt\('checkout_expires_at', new Date\(\)\.toISOString\(\)\)/);
+	assert.match(page, /\.is\('released_at', null\)/);
 	assert.doesNotMatch(page, /contact_email|auth_email|service_role|auth\.users/);
+});
+
+test('Workspace Team page shows holder-only Undo checkout confirmation', async () => {
+	const page = await readFile(pageUrl, 'utf8');
+
+	assert.match(page, /buildWorkspaceTeamCheckoutReleasePath/);
+	assert.match(page, /checkoutHeldByCurrentUser && checkoutReleaseAction/);
+	assert.match(page, /data-team-csv-checkout-undo/);
+	assert.match(page, />\s*Undo\s*</);
+	assert.match(page, /Undo editable file checkout\?/);
+	assert.match(page, /Your downloaded CSV will not be deleted/);
+	assert.match(page, /Keep checkout/);
+	assert.match(page, /Undo checkout/);
+	assert.match(page, /data-workspace-team-checkout-release-dialog/);
+	assert.match(page, /data-workspace-team-checkout-release-form/);
+	assert.match(page, /data-workspace-team-checkout-release-message/);
+	assert.match(page, /submitButton\.disabled = true/);
+	assert.match(page, /lastTriggerByDialog/);
 });
 
 test('Workspace Team export forms close only after a successful download response', async () => {
@@ -234,6 +295,10 @@ test('Workspace Team export docs record snapshot checkout and exclusion boundari
 	assert.match(docs, /profiles\.contact_email/);
 	assert.match(docs, /proposed_membership_action/);
 	assert.match(docs, /24-hour advisory checkout/);
+	assert.match(docs, /release_workspace_membership_csv_checkout/);
+	assert.match(docs, /release_source = holder_undo/);
+	assert.match(docs, /workspace_membership_csv_checkout_released/);
+	assert.match(docs, /does not delete the export record, snapshot rows, import evidence, review decisions or the user's downloaded CSV/);
 	assert.match(docs, /Successful browser exports wait for the server response/);
 	assert.match(docs, /formula-injection/);
 	assert.match(docs, /WT-WORKSPACE-TEAM-005 adds upload, parsing, validation and comparison evidence only/);

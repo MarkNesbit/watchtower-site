@@ -125,7 +125,7 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 	if (sourceExportId) {
 		const { data: exportData } = await serverSupabase
 			.from('workspace_membership_export_runs')
-			.select('id, organisation_id, export_mode, status, exported_at, membership_snapshot_version, checkout_expires_at, superseded_at, superseded_by_export_id')
+			.select('id, organisation_id, export_mode, status, exported_at, membership_snapshot_version, checkout_expires_at, superseded_at, superseded_by_export_id, released_at, released_by, release_source')
 			.eq('id', sourceExportId)
 			.maybeSingle();
 		sourceExport = exportData ?? null;
