@@ -7,6 +7,11 @@ import {
 	encodeCsvCell,
 	safeWorkspaceTeamCsvFilename,
 } from '../src/lib/workspaceTeamCsv.ts';
+import {
+	WORKSPACE_TEAM_ACTIVE_EDITABLE_CHECKOUT_SELECT,
+	applyWorkspaceTeamActiveEditableCheckoutFilters,
+	isWorkspaceTeamActiveEditableCheckout,
+} from '../src/lib/workspaceTeam.ts';
 import { buildWorkspaceTeamCheckoutReleasePath, buildWorkspaceTeamExportPath } from '../src/lib/projectRoutes.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260722000200_workspace_membership_csv_export_checkout.sql', import.meta.url);
@@ -18,6 +23,57 @@ const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
 
 async function migrationSql() {
 	return readFile(migrationUrl, 'utf8');
+}
+
+class QueryRecorder {
+	operations = [];
+
+	select(columns) {
+		this.operations.push(['select', columns]);
+		return this;
+	}
+
+	eq(column, value) {
+		this.operations.push(['eq', column, value]);
+		return this;
+	}
+
+	is(column, value) {
+		this.operations.push(['is', column, value]);
+		return this;
+	}
+
+	gt(column, value) {
+		this.operations.push(['gt', column, value]);
+		return this;
+	}
+
+	order(column, options) {
+		this.operations.push(['order', column, options]);
+		return this;
+	}
+
+	limit(count) {
+		this.operations.push(['limit', count]);
+		return this;
+	}
+}
+
+function checkoutRecord(overrides = {}) {
+	return {
+		id: 'export-1',
+		organisation_id: 'workspace-1',
+		requested_by: 'user-1',
+		exported_at: '2026-07-22T09:42:30.000Z',
+		export_mode: 'editable',
+		editing_mode: 'checked_out',
+		status: 'checked_out',
+		checkout_expires_at: '2026-07-23T09:42:30.000Z',
+		membership_snapshot_version: 12345,
+		superseded_at: null,
+		released_at: null,
+		...overrides,
+	};
 }
 
 test('Workspace Team CSV columns and filename follow the export contract', () => {
@@ -166,6 +222,35 @@ test('CSV export migration enforces one active editable checkout transactionally
 	assert.match(sql, /takeover_of_export_id/);
 });
 
+test('Workspace Team active checkout filter excludes released superseded expired and non-editable exports', () => {
+	const query = new QueryRecorder();
+	const nowIso = '2026-07-22T10:00:00.000Z';
+
+	assert.equal(applyWorkspaceTeamActiveEditableCheckoutFilters(query, 'workspace-1', nowIso), query);
+	assert.deepEqual(query.operations, [
+		['select', WORKSPACE_TEAM_ACTIVE_EDITABLE_CHECKOUT_SELECT],
+		['eq', 'organisation_id', 'workspace-1'],
+		['eq', 'export_mode', 'editable'],
+		['eq', 'status', 'checked_out'],
+		['eq', 'editing_mode', 'checked_out'],
+		['is', 'superseded_at', null],
+		['is', 'released_at', null],
+		['gt', 'checkout_expires_at', nowIso],
+		['order', 'exported_at', { ascending: false }],
+		['limit', 1],
+	]);
+
+	const now = new Date(nowIso);
+	assert.equal(isWorkspaceTeamActiveEditableCheckout(checkoutRecord(), 'workspace-1', now), true);
+	assert.equal(isWorkspaceTeamActiveEditableCheckout(checkoutRecord({ released_at: '2026-07-22T10:01:00.000Z', status: 'released', editing_mode: 'none' }), 'workspace-1', now), false);
+	assert.equal(isWorkspaceTeamActiveEditableCheckout(checkoutRecord({ released_at: '2026-07-22T10:01:00.000Z' }), 'workspace-1', now), false);
+	assert.equal(isWorkspaceTeamActiveEditableCheckout(checkoutRecord({ superseded_at: '2026-07-22T10:01:00.000Z' }), 'workspace-1', now), false);
+	assert.equal(isWorkspaceTeamActiveEditableCheckout(checkoutRecord({ checkout_expires_at: '2026-07-22T09:59:59.000Z' }), 'workspace-1', now), false);
+	assert.equal(isWorkspaceTeamActiveEditableCheckout(checkoutRecord({ export_mode: 'read_only' }), 'workspace-1', now), false);
+	assert.equal(isWorkspaceTeamActiveEditableCheckout(checkoutRecord({ editing_mode: 'none' }), 'workspace-1', now), false);
+	assert.equal(isWorkspaceTeamActiveEditableCheckout(checkoutRecord({ organisation_id: 'workspace-2' }), 'workspace-1', now), false);
+});
+
 test('CSV checkout release migration adds holder-only release without evidence deletion', async () => {
 	const sql = await readFile(checkoutReleaseMigrationUrl, 'utf8');
 
@@ -181,6 +266,13 @@ test('CSV checkout release migration adds holder-only release without evidence d
 	assert.match(sql, /checkout_export\.requested_by is distinct from actor\.actor_user_id/);
 	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_HOLDER_ONLY/);
 	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_NOT_ACTIVE/);
+	assert.match(sql, /set status = 'released'/);
+	assert.match(sql, /editing_mode = 'none'/);
+	assert.match(sql, /released_at = now\(\)/);
+	assert.match(sql, /released_by = actor\.actor_user_id/);
+	assert.match(sql, /release_source = 'holder_undo'/);
+	assert.match(sql, /where id = checkout_export\.id[\s\S]*and status = 'checked_out'[\s\S]*and editing_mode = 'checked_out'[\s\S]*and released_at is null[\s\S]*returning \* into released_export/);
+	assert.match(sql, /return released_export\.id/);
 	assert.match(sql, /workspace_membership_csv_checkout_released/);
 	assert.match(sql, /grant execute on function public\.release_workspace_membership_csv_checkout/);
 	assert.doesNotMatch(sql, /delete from public\.workspace_membership_export_runs|delete from public\.workspace_membership_export_rows|delete from public\.workspace_membership_import_runs|delete from public\.workspace_membership_import_rows|delete from public\.workspace_membership_change_decisions/i);
@@ -237,14 +329,17 @@ test('Workspace Team page displays checkout warning and confirmation dialog flow
 	assert.match(page, /dialog\.showModal\(\)/);
 	assert.match(page, /lastTriggerByDialog/);
 	assert.match(page, /data-workspace-team-dialog-cancel/);
-	assert.match(page, /\.gt\('checkout_expires_at', new Date\(\)\.toISOString\(\)\)/);
-	assert.match(page, /\.is\('released_at', null\)/);
+	assert.match(page, /applyWorkspaceTeamActiveEditableCheckoutFilters/);
+	assert.match(page, /isWorkspaceTeamActiveEditableCheckout\(checkoutData, organisation\.id\) \? checkoutData : null/);
 	assert.doesNotMatch(page, /contact_email|auth_email|service_role|auth\.users/);
 });
 
 test('Workspace Team page shows holder-only Undo checkout confirmation', async () => {
 	const page = await readFile(pageUrl, 'utf8');
 
+	assert.match(page, /Astro\.response\.headers\.set\('Cache-Control', 'private, no-store, no-cache, must-revalidate'\)/);
+	assert.match(page, /Astro\.response\.headers\.set\('Pragma', 'no-cache'\)/);
+	assert.match(page, /Astro\.response\.headers\.set\('Expires', '0'\)/);
 	assert.match(page, /buildWorkspaceTeamCheckoutReleasePath/);
 	assert.match(page, /checkoutHeldByCurrentUser && checkoutReleaseAction/);
 	assert.match(page, /data-team-csv-checkout-undo/);
@@ -256,6 +351,8 @@ test('Workspace Team page shows holder-only Undo checkout confirmation', async (
 	assert.match(page, /data-workspace-team-checkout-release-dialog/);
 	assert.match(page, /data-workspace-team-checkout-release-form/);
 	assert.match(page, /data-workspace-team-checkout-release-message/);
+	assert.match(page, /Editable team-file checkout undone\./);
+	assert.match(page, /canAdministerLater && exportAction && !checkoutHeldByCurrentUser/);
 	assert.match(page, /submitButton\.disabled = true/);
 	assert.match(page, /lastTriggerByDialog/);
 });
