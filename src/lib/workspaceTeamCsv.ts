@@ -18,6 +18,7 @@ export const WORKSPACE_TEAM_CSV_COLUMNS = [
 	'added_at',
 	'deactivated_at',
 	'reactivated_at',
+	'proposed_membership_action',
 ] as const;
 
 export type WorkspaceTeamCsvColumn = (typeof WORKSPACE_TEAM_CSV_COLUMNS)[number];
@@ -40,6 +41,7 @@ export type WorkspaceTeamCsvRow = {
 	added_at?: string | null;
 	deactivated_at?: string | null;
 	reactivated_at?: string | null;
+	proposed_membership_action?: string | null;
 };
 
 export type WorkspaceTeamCsvExport = {
