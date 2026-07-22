@@ -1,5 +1,7 @@
 ---
 import SignOutButton from './auth/SignOutButton.astro';
+import { buildWorkspaceTeamPath, getCurrentWorkspace } from '../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../lib/supabaseServer';
 
 const publicNavItems = [
 	{ href: '/', label: 'Home' },
@@ -7,16 +9,30 @@ const publicNavItems = [
 	{ href: '/roadmap', label: 'Roadmap' },
 	{ href: '/about', label: 'About' },
 ];
+const accessToken = getServerAccessToken(Astro.cookies);
+let workspaceTeamHref = '';
+
+if (accessToken) {
+	try {
+		const serverSupabase = createSupabaseServerClient(accessToken);
+		const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
+		const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+		workspaceTeamHref = organisation?.slug ? buildWorkspaceTeamPath(organisation.slug) : '';
+	} catch {
+		workspaceTeamHref = '';
+	}
+}
+
 const appNavItems = [
 	{ href: '/app', label: 'Dashboard', exact: true },
 	{ href: '/app/projects', label: 'Projects' },
-	{ label: 'Workspace' },
+	workspaceTeamHref ? { href: workspaceTeamHref, label: 'Workspace' } : { label: 'Workspace' },
 	{ href: '/app/account', label: 'Admin' },
 	{ label: 'Settings' },
 ];
 
 const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/';
-const hasAuthCookie = Boolean(Astro.cookies.get('wt-access-token')?.value);
+const hasAuthCookie = Boolean(accessToken);
 
 const isActivePath = (href: string, exact = false) => {
 	const normalizedHref = href.replace(/\/$/, '') || '/';

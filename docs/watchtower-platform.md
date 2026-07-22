@@ -55,6 +55,8 @@ WatchTower is built around workspaces. The database and internal implementation 
 
 This workspace foundation supports future project intelligence across risk, dependencies, delivery confidence and governance clarity. Future project health should use both explicit data and missing or uncertain data as signals, with expectations that vary by lifecycle stage and commitment level.
 
+WT-WORKSPACE-TEAM-003 adds the first read-only Workspace Team page at `/app/workspaces/{workspaceSlug}/team`. It is linked from authenticated workspace-level navigation, requires the current user's active workspace membership, reads the WT-WORKSPACE-TEAM-002 membership directory views, displays role/state/date information without contact email, and exposes disabled future CSV/history controls only as foundation markers for later administration slices.
+
 ## Project references and routing slugs
 
 Project slugs are URL-safe routing identifiers only and are unique within a workspace rather than globally. Canonical project URLs therefore use `/app/workspaces/{workspaceSlug}/projects/{projectSlug}`, with `/edit` and `/risks` suffixes for those destinations. Scoped lookups require the signed-in user's active workspace membership and match both workspace and project slug; visible URLs do not contain raw UUIDs. The older `/app/projects/{projectSlug}` family is transitional and redirects only for one accessible match, presenting a workspace choice when the same slug is accessible in more than one workspace.

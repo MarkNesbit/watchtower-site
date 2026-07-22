@@ -93,6 +93,16 @@ These functions deliberately use real `organisation_members.role` rather than in
 
 The slice also adds `workspace_member_directory` for same-workspace display identity without contact email and `workspace_member_admin_directory` for Owner/Admin future administration views that include contact/auth email fields. CSV export/import foundation tables are present for later slices, but no CSV files are generated, uploaded, parsed or applied by WT-WORKSPACE-TEAM-002.
 
+## Workspace Team page foundation
+
+WT-WORKSPACE-TEAM-003 adds the first read-focused Workspace Team page at `/app/workspaces/{workspaceSlug}/team`. The page is available only through the user's existing active workspace membership path and uses **Workspace** in user-facing copy while the database continues to use `organisation`.
+
+The page reads `workspace_member_directory` for normal active workspace users. Owner/Admin users can read through `workspace_member_admin_directory` where the page needs administration-oriented lifecycle dates, but WT-WORKSPACE-TEAM-003 deliberately does not render contact email or auth email. Rows are identified by membership/profile UUIDs, never by email.
+
+The page shows a safe membership directory with role, lifecycle state, relevant dates, simple state filters and search by name/login. The rendered lifecycle labels are `Active`, `Invited`, `Invitation expired`, `Suspended` and `Deactivated`; the database value `invite_expired` must not appear in the UI. Deactivated people remain visible for history as neutral inactive rows and use the display pattern `Jane Smith [deactivated]`.
+
+CSV update and membership-history controls are visible but disabled in this slice. Members and Viewers see an Owner/Admin-required explanation. WT-WORKSPACE-TEAM-003 does not implement mutation, invitation delivery, CSV generation, CSV parsing, CSV apply behaviour, login-name authentication, shared-contact-email authentication or service-role access.
+
 ## Future concepts not implemented in MVP
 
 The following concepts are recognised as possible future needs but are explicitly not implemented by WT-US-0105:

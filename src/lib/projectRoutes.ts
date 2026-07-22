@@ -2,6 +2,10 @@ export function buildProjectPath(workspaceSlug: string, projectSlug: string): st
 	return `/app/workspaces/${encodeURIComponent(workspaceSlug)}/projects/${encodeURIComponent(projectSlug)}`;
 }
 
+export function buildWorkspaceTeamPath(workspaceSlug: string): string {
+	return `/app/workspaces/${encodeURIComponent(workspaceSlug)}/team`;
+}
+
 export function buildProjectEditPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/edit`;
 }

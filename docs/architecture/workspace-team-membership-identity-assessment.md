@@ -21,6 +21,22 @@ WT-WORKSPACE-TEAM-002 implements the database foundation recommended by this ass
 
 WT-WORKSPACE-TEAM-002 does not implement invitation delivery, Supabase Auth user creation, CSV generation/parsing/apply behaviour, login-name authentication, shared-contact-email authentication, reassignment actions or Workspace Team UI.
 
+## WT-WORKSPACE-TEAM-003 Implementation Note
+
+WT-WORKSPACE-TEAM-003 adds a read-only Workspace Team page at `/app/workspaces/{workspaceSlug}/team` and links it from the authenticated workspace-level navigation when an active workspace can be resolved.
+
+The page keeps the WT-WORKSPACE-TEAM-001/002 identity separation intact:
+
+- access comes from the current user's active workspace membership loaded through the existing workspace slug helpers;
+- general directory display uses `workspace_member_directory`;
+- Owner/Admin users can use `workspace_member_admin_directory` for administration-oriented lifecycle fields;
+- contact email and auth email are not rendered by this slice;
+- rows are keyed by `organisation_membership_id` and `profile_id`, not by email;
+- deactivated memberships remain visible for history but are rendered as neutral inactive rows;
+- role and membership-state values are mapped to product labels before display, including `invite_expired` as `Invitation expired`.
+
+The page includes disabled future controls for `Download team CSV for update` and `Membership history`. WT-WORKSPACE-TEAM-003 does not implement mutations, CSV export/import processing, invitation delivery, shared-email authentication, login-name authentication or service-role access.
+
 ## 1. Executive Conclusion
 
 Watchtower already has a usable workspace-first foundation:
