@@ -4,12 +4,20 @@ import test from 'node:test';
 import { buildWorkspaceTeamCsv } from '../src/lib/workspaceTeamCsv.ts';
 import {
 	WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES,
+	decodeWorkspaceTeamCsvBytes,
 	extractWorkspaceTeamCsvMetadata,
+	parseWorkspaceTeamCsvText,
+	sha256HexFromWorkspaceTeamBytes,
 	validateWorkspaceTeamCsvImport,
+	workspaceTeamBytesFromArrayBuffer,
+	workspaceTeamUtf8ByteLength,
 } from '../src/lib/workspaceTeamCsvImport.ts';
 import { buildWorkspaceTeamImportPath } from '../src/lib/projectRoutes.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260722000400_workspace_membership_csv_import_validation.sql', import.meta.url);
+const importModuleUrl = new URL('../src/lib/workspaceTeamCsvImport.ts', import.meta.url);
+const permissionsModuleUrl = new URL('../src/lib/permissions.ts', import.meta.url);
+const csvExportModuleUrl = new URL('../src/lib/workspaceTeamCsv.ts', import.meta.url);
 const routeUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/import.ts', import.meta.url);
 const pageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
@@ -100,6 +108,46 @@ test('Workspace Team import path and CSV contract include explicit reactivation 
 	assert.equal(extractWorkspaceTeamCsvMetadata(text).exportId, EXPORT_ID);
 });
 
+test('Workspace Team import module stays Cloudflare-compatible without Buffer references', async () => {
+	const sources = await Promise.all([
+		readFile(importModuleUrl, 'utf8'),
+		readFile(permissionsModuleUrl, 'utf8'),
+		readFile(csvExportModuleUrl, 'utf8'),
+		readFile(routeUrl, 'utf8'),
+		readFile(pageUrl, 'utf8'),
+	]);
+	const combinedSource = sources.join('\n');
+
+	assert.doesNotMatch(combinedSource, /\bBuffer\b|node:buffer|require\(['"]buffer['"]\)/);
+	assert.doesNotMatch(sources[0], /csv-parse/);
+	assert.match(pageUrl.pathname, /team\.astro$/);
+	assert.match(sources[4], /WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES/);
+});
+
+test('Workspace Team import byte text and hash helpers use Web Platform data types', async () => {
+	const unicodeText = 'A£😀東京';
+	const bytes = new TextEncoder().encode(unicodeText);
+	const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+
+	assert.equal(workspaceTeamUtf8ByteLength('A£😀'), 7);
+	assert.equal(workspaceTeamUtf8ByteLength(unicodeText), bytes.byteLength);
+	assert.deepEqual([...workspaceTeamBytesFromArrayBuffer(arrayBuffer)], [...bytes]);
+	assert.equal(decodeWorkspaceTeamCsvBytes(arrayBuffer), unicodeText);
+	assert.equal(decodeWorkspaceTeamCsvBytes(bytes), unicodeText);
+	assert.equal(
+		await sha256HexFromWorkspaceTeamBytes(arrayBuffer),
+		await sha256HexFromWorkspaceTeamBytes(bytes),
+	);
+	assert.equal(
+		await sha256HexFromWorkspaceTeamBytes(new TextEncoder().encode('abc')),
+		'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+	);
+	assert.throws(
+		() => decodeWorkspaceTeamCsvBytes(new Uint8Array([0xff, 0xfe, 0xfd])),
+		TypeError,
+	);
+});
+
 test('Workspace Team import parser supports BOM commas quotes newlines unicode blanks and formula reversal', () => {
 	const source = sourceRows();
 	source[0].first_name = '=Mark';
@@ -118,6 +166,34 @@ test('Workspace Team import parser supports BOM commas quotes newlines unicode b
 	assert.equal(row.normalised_values.email, 'mark@example.com');
 	assert.equal(row.formula_safety.first_name.reversed, true);
 	assert.match(row.raw_values.last_name, /Senior/);
+});
+
+test('Workspace Team import parser preserves existing CSV behaviour without Node parser imports', () => {
+	const parsed = parseWorkspaceTeamCsvText('\uFEFFname,note\r\n"A, B","Line 1\nLine ""2"""\r\n,\r\n');
+
+	assert.deepEqual(parsed.header, ['name', 'note']);
+	assert.deepEqual(parsed.rows, [['A, B', 'Line 1\nLine "2"'], ['', '']]);
+	assert.deepEqual(parsed.errors, []);
+
+	const malformed = parseWorkspaceTeamCsvText('name,note\n"unterminated,value\n');
+	assert.deepEqual(malformed.header, []);
+	assert.match(malformed.errors[0].message, /CSV could not be parsed/);
+});
+
+test('Workspace Team page can import CSV limits without upload-time byte handling', async () => {
+	const page = await readFile(pageUrl, 'utf8');
+
+	assert.match(page, /import \{ WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES \} from '..\/..\/..\/..\/lib\/workspaceTeamCsvImport'/);
+	assert.doesNotMatch(page, /decodeWorkspaceTeamCsvBytes|sha256HexFromWorkspaceTeamBytes|arrayBuffer\(/);
+});
+
+test('Workspace Team import route decodes ArrayBuffer bytes and hashes with Web Crypto helpers', async () => {
+	const route = await readFile(routeUrl, 'utf8');
+
+	assert.match(route, /uploadedFile\.arrayBuffer\(\)/);
+	assert.match(route, /decodeWorkspaceTeamCsvBytes\(fileBytes\)/);
+	assert.match(route, /sha256HexFromWorkspaceTeamBytes\(fileBytes\)/);
+	assert.doesNotMatch(route, /TextDecoder\(|crypto\.subtle\.digest\(|\bBuffer\b|node:buffer|require\(['"]buffer['"]\)/);
 });
 
 test('Workspace Team import validates additions corrections deactivations and explicit reactivations without mutation', () => {
@@ -258,8 +334,8 @@ test('Workspace Team import route is POST-only scoped and does not mutate member
 	assert.match(route, /workspace\.role !== 'owner' && workspace\.role !== 'admin'/);
 	assert.match(route, /request\.formData\(\)/);
 	assert.match(route, /WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES/);
-	assert.match(route, /new TextDecoder\('utf-8', \{ fatal: true \}\)/);
-	assert.match(route, /crypto\.subtle\.digest\('SHA-256'/);
+	assert.match(route, /decodeWorkspaceTeamCsvBytes\(fileBytes\)/);
+	assert.match(route, /sha256HexFromWorkspaceTeamBytes\(fileBytes\)/);
 	assert.match(route, /released_at, released_by, release_source/);
 	assert.match(route, /\.rpc\('record_workspace_membership_import_validation'/);
 	assert.doesNotMatch(route, /auth\.admin|auth\.users|\.from\('profiles'\)\.update|\.from\('organisation_members'\)\.update|\.delete\(/);
@@ -280,7 +356,7 @@ test('Workspace Team page exposes upload validation UI results and no apply cont
 	assert.match(page, /No changes are applied/);
 	assert.match(page, /Review proposed changes/);
 	assert.doesNotMatch(page, /Apply changes|Send invitation/);
-	assert.match(docs, /csv-parse/);
+	assert.match(docs, /Workers-compatible CSV parser/);
 	assert.match(docs, /rejects a released file with a clear message to download a new editable export/);
 	assert.match(docs, /does not approve or apply changes/);
 	assert.ok(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES <= 1024 * 1024);
