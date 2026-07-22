@@ -139,6 +139,18 @@ Removed source rows are classified as proposed deactivations only after structur
 
 WT-WORKSPACE-TEAM-005 does not implement approvals, final confirmation, membership application, profile mutation, role changes, invitation delivery, Supabase Auth user creation, password links, reassignment actions, CSV history UI, shared-contact authentication or restricted-project access.
 
+## Workspace Team CSV change review and approval
+
+WT-WORKSPACE-TEAM-006 enables Owner/Admin users to review a validated upload at `/app/workspaces/{workspaceSlug}/team/imports/{importRunId}/review`. Review is workspace-scoped and requires the user's real active Owner/Admin membership. Member, Viewer, inactive and cross-workspace access is denied by route checks, RLS and controlled database functions.
+
+The review page groups proposed additions, identity corrections, deactivations, reactivations and invalid/protected rows. Unchanged rows stay suppressed. Additions show first name, last name, contact email, requested/effective role and Viewer defaults. Corrections show only changed name/contact-email fields and repeat that contact-email correction does not change Supabase authentication login. Deactivation and reactivation cards show current role/state/lifecycle context and preliminary responsibility impact counts from current reliable schema.
+
+Every valid material proposal starts as `pending` in `workspace_membership_change_decisions`. Decisions are recorded through `record_workspace_membership_change_decision(decision_id, decision, reason)` as `approved`, `excluded` or `keep_active`; protected, superseded, blocked and no-longer-required states cannot be approved. Revisions before final confirmation increment `decision_version` and append `decision_history` with actor, previous/new decision, reason, timestamp and live snapshot. Direct authenticated insert/update grants on the decision and import-run tables remain revoked in favour of the controlled functions.
+
+Live recalculation runs before rendering review cards and again before final confirmation. It checks that the source export/import is still eligible, the membership still exists in the workspace, the membership/user pairing still matches, role/status/profile values remain current, duplicate contact-email state has not introduced a conflict, protected Owner/Admin changes remain blocked, self-deactivation is denied and the final active Owner is protected.
+
+Final confirmation calls `confirm_workspace_membership_change_set(import_run_id)`. It requires every valid proposal to be decided, reruns live recalculation, blocks approved stale/protected/no-longer-required proposals, stores `approved_change_set`, `approved_change_set_summary`, `approved_change_set_version`, `approved_change_set_snapshot_version`, `approval_locked_at` and sets the import to `approved_for_application`. This is the WT-007 handoff state only: no profile, auth, invitation, membership lifecycle, role or reassignment mutation is applied by WT-WORKSPACE-TEAM-006.
+
 ## Future concepts not implemented in MVP
 
 The following concepts are recognised as possible future needs but are explicitly not implemented by WT-US-0105:

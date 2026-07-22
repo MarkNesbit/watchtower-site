@@ -1,0 +1,686 @@
+---
+import AuthenticatedLayout from '../../../../../../layouts/AuthenticatedLayout.astro';
+import EmptyState from '../../../../../../components/app/EmptyState.astro';
+import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
+import {
+	buildWorkspaceTeamImportReviewPath,
+	buildWorkspaceTeamPath,
+	getWorkspaceBySlug,
+} from '../../../../../../lib/projects';
+import { isWorkspaceRole } from '../../../../../../lib/permissions';
+import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer';
+
+type JsonRecord = Record<string, unknown>;
+type ReviewItem = {
+	row_id: string;
+	decision_id: string | null;
+	source_row_number: number;
+	supplied_membership_id: string | null;
+	supplied_user_id: string | null;
+	proposed_change_type: string;
+	validation_state: string;
+	validation_messages: Array<{ field?: string; message?: string }>;
+	source_export_values: JsonRecord;
+	upload_live_values: JsonRecord;
+	current_live_values: JsonRecord;
+	proposed_values: JsonRecord;
+	recalculated_proposed_values: JsonRecord;
+	field_differences: Array<{ field?: string; from?: unknown; to?: unknown }>;
+	live_recalculation_status: string;
+	live_recalculation_messages: Array<{ message?: string }>;
+	impact_counts: JsonRecord;
+	live_snapshot_version: number | null;
+	decision: string;
+	decision_version: number;
+	decision_history: JsonRecord[];
+	decided_by: string | null;
+	decided_at: string | null;
+	decision_reason: string | null;
+};
+
+const workspaceSlug = Astro.params.workspaceSlug ?? '';
+const importRunId = Astro.params.importRunId ?? '';
+const accessToken = getServerAccessToken(Astro.cookies);
+const reviewPath = workspaceSlug && importRunId ? buildWorkspaceTeamImportReviewPath(workspaceSlug, importRunId) : Astro.url.pathname;
+const teamPath = workspaceSlug ? buildWorkspaceTeamPath(workspaceSlug) : '/app';
+
+let workspaceName = '';
+let workspaceRole = '';
+let loadMessage = '';
+let loadError = '';
+let actionMessage = '';
+let importRun: {
+	id: string;
+	status: string;
+	review_status: string;
+	uploaded_by: string | null;
+	uploaded_at: string;
+	original_filename: string | null;
+	source_export_id: string | null;
+	source_snapshot_version: number | null;
+	live_snapshot_version: number | null;
+	source_export_mode: string | null;
+	checkout_expired: boolean;
+	source_stale: boolean;
+	source_superseded: boolean;
+	validation_summary: JsonRecord;
+	invalid_row_count: number;
+	approved_change_set_version: number;
+	approved_change_set_snapshot_version: number | null;
+	approved_change_set: JsonRecord[];
+	approved_change_set_summary: JsonRecord;
+	review_completed_at: string | null;
+	review_completed_by: string | null;
+	approval_locked_at: string | null;
+} | null = null;
+let sourceExport: { exported_at: string | null; export_mode: string | null; status: string | null; superseded_at: string | null } | null = null;
+let uploaderName = 'Workspace administrator';
+let reviewItems: ReviewItem[] = [];
+
+const asRecord = (value: unknown): JsonRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
+const asArray = <T,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
+const textValue = (value: unknown, fallback = 'Not set') => {
+	const text = value === null || value === undefined ? '' : String(value).trim();
+	return text || fallback;
+};
+const formatDateTime = (value: string | null | undefined) => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
+	: 'Not available';
+const labelFromToken = (value: unknown, fallback = 'Not set') => {
+	const text = textValue(value, fallback);
+	if (text === fallback) return text;
+	return text.split('_').filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+};
+const proposalLabel = (value: string) => ({
+	addition: 'Addition',
+	identity_correction: 'Identity correction',
+	deactivation: 'Deactivation',
+	reactivation: 'Reactivation',
+	invalid: 'Invalid row',
+}[value] ?? labelFromToken(value));
+const decisionLabel = (value: string) => ({
+	pending: 'Pending',
+	approved: 'Approved',
+	excluded: 'Excluded',
+	keep_active: 'Keep active',
+	blocked: 'Blocked',
+	superseded: 'Superseded',
+	no_longer_required: 'No longer required',
+	rejected: 'Rejected',
+	skipped: 'Skipped',
+}[value] ?? labelFromToken(value));
+const fieldLabel = (value: unknown) => ({
+	first_name: 'First name',
+	last_name: 'Last name',
+	email: 'Contact email',
+	workspace_role: 'Workspace role',
+	membership_status: 'Membership status',
+}[String(value)] ?? labelFromToken(value));
+const identityForItem = (item: ReviewItem) => {
+	const current = asRecord(item.current_live_values);
+	const source = asRecord(item.source_export_values);
+	const proposed = asRecord(item.proposed_values);
+	const first = textValue(proposed.first_name ?? current.first_name ?? source.first_name, '');
+	const last = textValue(proposed.last_name ?? current.last_name ?? source.last_name, '');
+	const name = `${first} ${last}`.trim();
+	return name || textValue(current.email ?? proposed.email ?? source.email ?? current.login_name ?? source.login_name, 'Workspace person');
+};
+const messagesForItem = (item: ReviewItem) => [
+	...asArray<{ field?: string; message?: string }>(item.validation_messages).map((entry) => entry.field ? `${fieldLabel(entry.field)}: ${entry.message ?? 'Validation issue'}` : entry.message ?? 'Validation issue'),
+	...asArray<{ message?: string }>(item.live_recalculation_messages).map((entry) => entry.message ?? 'Live recalculation issue'),
+].filter(Boolean);
+const changedFields = (item: ReviewItem) => asArray<{ field?: string; from?: unknown; to?: unknown }>(item.field_differences)
+	.filter((difference) => difference.field && (difference.from ?? '') !== (difference.to ?? ''));
+const knownImpactText = (item: ReviewItem) => {
+	const impact = asRecord(item.impact_counts);
+	const parts = [
+		[impact.active_risks_owned, 'risks'],
+		[impact.non_terminal_actions_assigned, 'actions'],
+		[impact.non_terminal_approvals_held, 'approvals'],
+		[impact.active_project_roles, 'project roles'],
+	] as const;
+	const rendered = parts
+		.map(([count, label]) => `${Number(count ?? 0)} ${label}`)
+		.join(', ');
+	return `Current known responsibilities: ${rendered}. Full deactivation impact assessment remains WT-WORKSPACE-TEAM-010.`;
+};
+const decisionRequiresReason = (item: ReviewItem) => item.proposed_change_type === 'deactivation'
+	|| item.validation_state === 'warning'
+	|| importRun?.status === 'stale_review_required'
+	|| item.decision !== 'pending';
+const canShowControls = (item: ReviewItem) => Boolean(
+	item.decision_id
+	&& importRun?.status !== 'approved_for_application'
+	&& item.validation_state !== 'error'
+	&& !['blocked', 'superseded', 'requires_revalidation', 'no_longer_required'].includes(item.live_recalculation_status)
+);
+
+try {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug, accessToken);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+
+	if (!workspace || !organisation) {
+		loadMessage = 'Workspace not found or you do not have access.';
+		Astro.response.status = 404;
+	} else if (!isWorkspaceRole(workspace.role) || (workspace.role !== 'owner' && workspace.role !== 'admin')) {
+		loadMessage = 'Only active Workspace Owners and Admins can review team imports.';
+		Astro.response.status = 403;
+	} else {
+		workspaceName = organisation.name;
+		workspaceRole = workspace.role;
+
+		const { data: importData, error: importError } = await serverSupabase
+			.from('workspace_membership_import_runs')
+			.select('id, status, review_status, uploaded_by, uploaded_at, original_filename, source_export_id, source_snapshot_version, live_snapshot_version, source_export_mode, checkout_expired, source_stale, source_superseded, validation_summary, invalid_row_count, approved_change_set_version, approved_change_set_snapshot_version, approved_change_set, approved_change_set_summary, review_completed_at, review_completed_by, approval_locked_at')
+			.eq('organisation_id', organisation.id)
+			.eq('id', importRunId)
+			.maybeSingle();
+		if (importError) throw importError;
+		importRun = importData ? {
+			...importData,
+			validation_summary: asRecord(importData.validation_summary),
+			approved_change_set: asArray<JsonRecord>(importData.approved_change_set),
+			approved_change_set_summary: asRecord(importData.approved_change_set_summary),
+		} : null;
+
+		if (!importRun) {
+			loadMessage = 'Import run not found for this workspace.';
+			Astro.response.status = 404;
+		} else if (!['validated', 'stale_review_required', 'approval_pending', 'approved_for_application'].includes(importRun.status) || importRun.source_superseded) {
+			loadMessage = 'This import run is not eligible for Workspace Team change review.';
+			Astro.response.status = 409;
+		} else {
+			if (importRun.source_export_id) {
+				const { data: exportData, error: exportError } = await serverSupabase
+					.from('workspace_membership_export_runs')
+					.select('exported_at, export_mode, status, superseded_at')
+					.eq('organisation_id', organisation.id)
+					.eq('id', importRun.source_export_id)
+					.maybeSingle();
+				if (exportError) throw exportError;
+				sourceExport = exportData ?? null;
+			}
+
+			if (importRun.uploaded_by) {
+				const { data: uploaderData } = await serverSupabase
+					.from('profiles')
+					.select('display_name, first_name, last_name, login_name')
+					.eq('id', importRun.uploaded_by)
+					.maybeSingle();
+				if (uploaderData) {
+					const name = `${textValue(uploaderData.first_name, '')} ${textValue(uploaderData.last_name, '')}`.trim();
+					uploaderName = name || textValue(uploaderData.display_name ?? uploaderData.login_name, uploaderName);
+				}
+			}
+
+			if (Astro.request.method === 'POST' && importRun.status !== 'approved_for_application') {
+				const formData = await Astro.request.formData();
+				const intent = String(formData.get('intent') ?? '');
+				try {
+					if (intent === 'confirm_change_set') {
+						const { error } = await serverSupabase.rpc('confirm_workspace_membership_change_set', {
+							target_import_run_id: importRun.id,
+						});
+						if (error) throw error;
+						return Astro.redirect(`${reviewPath}?confirmed=1`);
+					}
+
+					const decisionId = String(formData.get('decision_id') ?? '');
+					const decision = String(formData.get('decision') ?? '');
+					const reason = String(formData.get('reason') ?? '').trim() || null;
+					const { error } = await serverSupabase.rpc('record_workspace_membership_change_decision', {
+						target_decision_id: decisionId,
+						requested_decision: decision,
+						decision_reason: reason,
+					});
+					if (error) throw error;
+					return Astro.redirect(`${reviewPath}?saved=1#proposal-${encodeURIComponent(decisionId)}`);
+				} catch (error) {
+					actionMessage = error instanceof Error && error.message ? error.message : 'Decision could not be saved.';
+				}
+			}
+
+			if (importRun.status !== 'approved_for_application') {
+				const { error: ensureError } = await serverSupabase.rpc('ensure_workspace_membership_change_decisions', {
+					target_import_run_id: importRun.id,
+				});
+				if (ensureError) throw ensureError;
+
+				const { data: recalculatedData, error: recalculationError } = await serverSupabase.rpc('recalculate_workspace_membership_change_proposals', {
+					target_import_run_id: importRun.id,
+				});
+				if (recalculationError) throw recalculationError;
+				reviewItems = asArray<ReviewItem>(recalculatedData).map((item) => ({
+					...item,
+					validation_messages: asArray<{ field?: string; message?: string }>(item.validation_messages),
+					source_export_values: asRecord(item.source_export_values),
+					upload_live_values: asRecord(item.upload_live_values),
+					current_live_values: asRecord(item.current_live_values),
+					proposed_values: asRecord(item.proposed_values),
+					recalculated_proposed_values: asRecord(item.recalculated_proposed_values),
+					field_differences: asArray<{ field?: string; from?: unknown; to?: unknown }>(item.field_differences),
+					live_recalculation_messages: asArray<{ message?: string }>(item.live_recalculation_messages),
+					impact_counts: asRecord(item.impact_counts),
+					decision_history: asArray<JsonRecord>(item.decision_history),
+				}));
+			}
+		}
+	}
+} catch (error) {
+	loadError = error instanceof Error && error.message
+		? error.message
+		: 'Workspace Team import review could not be loaded.';
+}
+
+const querySaved = Astro.url.searchParams.get('saved') === '1';
+const queryConfirmed = Astro.url.searchParams.get('confirmed') === '1';
+const visibleItems = reviewItems.filter((item) => item.proposed_change_type !== 'unchanged');
+const decisionItems = visibleItems.filter((item) => item.validation_state !== 'error' && item.proposed_change_type !== 'invalid');
+const blockedItems = visibleItems.filter((item) => item.validation_state === 'error' || item.proposed_change_type === 'invalid' || ['blocked', 'superseded', 'requires_revalidation', 'no_longer_required'].includes(item.live_recalculation_status));
+const activeDecisionItems = decisionItems.filter((item) => !blockedItems.includes(item));
+const groups = [
+	['Additions', activeDecisionItems.filter((item) => item.proposed_change_type === 'addition')],
+	['Corrections', activeDecisionItems.filter((item) => item.proposed_change_type === 'identity_correction')],
+	['Deactivations', activeDecisionItems.filter((item) => item.proposed_change_type === 'deactivation')],
+	['Reactivations', activeDecisionItems.filter((item) => item.proposed_change_type === 'reactivation')],
+] as const;
+const totalDecisionRequired = decisionItems.length;
+const reviewedCount = decisionItems.filter((item) => item.decision !== 'pending').length;
+const remainingCount = decisionItems.filter((item) => item.decision === 'pending').length;
+const approvedCount = decisionItems.filter((item) => item.decision === 'approved').length;
+const excludedCount = decisionItems.filter((item) => item.decision === 'excluded' || item.decision === 'keep_active').length;
+const blockedCount = blockedItems.length;
+const canConfirm = Boolean(importRun && importRun.status !== 'approved_for_application' && totalDecisionRequired > 0 && remainingCount === 0 && !decisionItems.some((item) => item.decision === 'approved' && ['blocked', 'superseded', 'requires_revalidation', 'no_longer_required'].includes(item.live_recalculation_status)));
+const finalSummary = importRun?.approved_change_set_summary ?? {};
+const latestSnapshot = reviewItems.find((item) => item.live_snapshot_version)?.live_snapshot_version ?? importRun?.approved_change_set_snapshot_version ?? importRun?.live_snapshot_version ?? null;
+---
+
+<AuthenticatedLayout title="Workspace Team Import Review | WatchTower">
+	<section class="team-review-page" data-workspace-team-import-review>
+		<header class="team-review-hero" aria-labelledby="team-review-heading">
+			<div>
+				<p class="eyebrow">Workspace Team</p>
+				<h1 id="team-review-heading">Import review</h1>
+				<p>Review proposed changes, record decisions and freeze the approved set for later application.</p>
+			</div>
+			<a class="button button--secondary" href={teamPath}>Back to Team</a>
+		</header>
+
+		{loadError ? (
+			<EmptyState title="Import review could not be loaded." tone="error" role="alert">
+				<p>{loadError}</p>
+			</EmptyState>
+		) : loadMessage ? (
+			<EmptyState title="Import review unavailable." tone="error" role="alert">
+				<p>{loadMessage}</p>
+			</EmptyState>
+		) : importRun && (
+			<>
+				<ProjectContentPanel title="Review status" helper="Approval records intent only. No workspace membership, profile or authentication change is applied here." headingId="team-review-status-heading">
+					{(querySaved || queryConfirmed || actionMessage) && (
+						<p class={actionMessage ? 'team-review-message team-review-message--error' : 'team-review-message'} role="status">
+							{actionMessage || (queryConfirmed ? 'Approved change set confirmed for later application. No workspace changes have been made yet.' : 'Decision saved.')}
+						</p>
+					)}
+					<div class="team-review-header-grid">
+						<span><strong>{workspaceName}</strong><small>Workspace</small></span>
+						<span><strong>{importRun.original_filename ?? 'Workspace Team CSV'}</strong><small>File</small></span>
+						<span><strong>{uploaderName}</strong><small>Uploaded by</small></span>
+						<span><strong>{formatDateTime(importRun.uploaded_at)}</strong><small>Uploaded</small></span>
+						<span><strong>{formatDateTime(sourceExport?.exported_at)}</strong><small>Source export</small></span>
+						<span><strong>{labelFromToken(sourceExport?.export_mode ?? importRun.source_export_mode)}</strong><small>Source mode</small></span>
+					</div>
+					{(importRun.checkout_expired || importRun.source_stale || sourceExport?.status === 'superseded' || sourceExport?.superseded_at) && (
+						<div class="team-review-warning" role="status">
+							{importRun.checkout_expired && <p>The editable checkout expired before upload. Review uses current live Workspace Team data.</p>}
+							{importRun.source_stale && <p>Workspace membership changed after export. Watchtower recalculated proposals against live data for this review.</p>}
+							{(sourceExport?.status === 'superseded' || sourceExport?.superseded_at) && <p>The source export has been superseded and cannot progress.</p>}
+						</div>
+					)}
+					<div class="team-review-counts" aria-label="Decision progress">
+						<span><strong>{importRun.validation_summary.additions ?? 0}</strong> additions</span>
+						<span><strong>{importRun.validation_summary.identity_corrections ?? 0}</strong> corrections</span>
+						<span><strong>{importRun.validation_summary.deactivations ?? 0}</strong> deactivations</span>
+						<span><strong>{importRun.validation_summary.reactivations ?? 0}</strong> reactivations</span>
+						<span><strong>{importRun.validation_summary.invalid_rows ?? importRun.invalid_row_count ?? 0}</strong> invalid</span>
+						<span><strong>{reviewedCount} of {totalDecisionRequired}</strong> reviewed</span>
+						<span><strong>{remainingCount}</strong> remaining</span>
+						<span><strong>{blockedCount}</strong> blocked or no longer required</span>
+					</div>
+				</ProjectContentPanel>
+
+				{importRun.status === 'approved_for_application' ? (
+					<ProjectContentPanel title="Ready for application" helper="These changes have been approved for application. No workspace membership changes have been made yet." headingId="team-review-ready-heading">
+						<div class="team-review-final-summary" data-workspace-team-approved-set>
+							<span><strong>{finalSummary.approved_additions ?? 0}</strong> additions</span>
+							<span><strong>{finalSummary.approved_name_corrections ?? 0}</strong> name corrections</span>
+							<span><strong>{finalSummary.approved_email_corrections ?? 0}</strong> email corrections</span>
+							<span><strong>{finalSummary.approved_deactivations ?? 0}</strong> deactivations</span>
+							<span><strong>{finalSummary.approved_reactivations ?? 0}</strong> reactivations</span>
+							<span><strong>{finalSummary.excluded_changes ?? 0}</strong> excluded</span>
+							<span><strong>{finalSummary.kept_active ?? 0}</strong> kept active</span>
+							<span><strong>{finalSummary.invalid_rows_not_included ?? 0}</strong> invalid not included</span>
+						</div>
+						<p>Approved set version {importRun.approved_change_set_version}. Live snapshot {importRun.approved_change_set_snapshot_version ?? 'not recorded'}. Confirmed {formatDateTime(importRun.review_completed_at)}.</p>
+					</ProjectContentPanel>
+				) : (
+					<>
+						{groups.map(([title, items]) => items.length > 0 && (
+							<ProjectContentPanel title={title} helper={`${items.length} ${items.length === 1 ? 'proposal' : 'proposals'} requiring an explicit decision.`} headingId={`team-review-${title.toLowerCase()}-heading`}>
+								<div class="team-review-card-list">
+									{items.map((item) => {
+										const proposed = asRecord(item.proposed_values);
+										const current = asRecord(item.current_live_values);
+										const changes = changedFields(item);
+										return (
+											<article class="team-review-card" id={`proposal-${item.decision_id ?? item.row_id}`}>
+												<header>
+													<div>
+														<p class="eyebrow">Row {item.source_row_number} · {proposalLabel(item.proposed_change_type)}</p>
+														<h3>{identityForItem(item)}</h3>
+													</div>
+													<span class={`team-review-pill team-review-pill--${item.decision}`}>{decisionLabel(item.decision)}</span>
+												</header>
+												<div class="team-review-values">
+													{item.proposed_change_type === 'addition' ? (
+														<>
+															<span><strong>{textValue(proposed.first_name)}</strong><small>First name</small></span>
+															<span><strong>{textValue(proposed.last_name)}</strong><small>Last name</small></span>
+															<span><strong>{textValue(proposed.email)}</strong><small>Contact email</small></span>
+															<span><strong>{labelFromToken(proposed.workspace_role ?? 'viewer')}</strong><small>{proposed.workspace_role ? 'Effective role' : 'Viewer, defaulted by Watchtower'}</small></span>
+														</>
+													) : changes.length > 0 ? changes.map((difference) => (
+														<span>
+															<strong>{fieldLabel(difference.field)}</strong>
+															<small>{textValue(difference.from)} to {textValue(difference.to)}</small>
+														</span>
+													)) : (
+														<span><strong>{labelFromToken(current.membership_status)}</strong><small>Current status</small></span>
+													)}
+													{item.proposed_change_type === 'deactivation' && <span><strong>{labelFromToken(current.workspace_role)}</strong><small>Current role</small></span>}
+													{item.proposed_change_type === 'reactivation' && <span><strong>{labelFromToken(current.membership_status)}</strong><small>Current deactivated state</small></span>}
+												</div>
+												{item.proposed_change_type === 'identity_correction' && proposed.email && (
+													<p class="team-review-note">Contact email correction does not change the Supabase authentication login email.</p>
+												)}
+												{['deactivation', 'reactivation'].includes(item.proposed_change_type) && (
+													<p class="team-review-note">{knownImpactText(item)}</p>
+												)}
+												{messagesForItem(item).length > 0 && (
+													<ul class="team-review-messages">
+														{messagesForItem(item).map((message) => <li>{message}</li>)}
+													</ul>
+												)}
+												<p class="team-review-live">Live recalculation: {labelFromToken(item.live_recalculation_status)}. Snapshot {item.live_snapshot_version ?? latestSnapshot ?? 'not recorded'}.</p>
+												{item.decided_at && (
+													<p class="team-review-decision-meta">Decision version {item.decision_version}, saved {formatDateTime(item.decided_at)}{item.decision_reason ? `: ${item.decision_reason}` : ''}</p>
+												)}
+												{canShowControls(item) && (
+													<form class="team-review-decision-form" method="post" action={reviewPath}>
+														<input type="hidden" name="intent" value="record_decision" />
+														<input type="hidden" name="decision_id" value={item.decision_id ?? ''} />
+														<label>
+															<span>{decisionRequiresReason(item) ? 'Reason required where prompted' : 'Optional reason'}</span>
+															<textarea name="reason" rows="2" placeholder="Add context for audit history"></textarea>
+														</label>
+														<div>
+															<button class="button button--primary" type="submit" name="decision" value="approved">{item.proposed_change_type === 'deactivation' ? 'Approve deactivation' : item.proposed_change_type === 'reactivation' ? 'Approve reactivation' : item.proposed_change_type === 'addition' ? 'Approve addition' : 'Approve correction'}</button>
+															<button class="button button--secondary" type="submit" name="decision" value={item.proposed_change_type === 'deactivation' ? 'keep_active' : 'excluded'}>{item.proposed_change_type === 'deactivation' ? 'Keep active' : 'Exclude change'}</button>
+														</div>
+													</form>
+												)}
+											</article>
+										);
+									})}
+								</div>
+							</ProjectContentPanel>
+						))}
+
+						{blockedItems.length > 0 && (
+							<ProjectContentPanel title="Invalid or protected changes" helper="These rows remain visible as evidence and cannot be approved." headingId="team-review-blocked-heading">
+								<div class="team-review-card-list">
+									{blockedItems.map((item) => (
+										<article class="team-review-card team-review-card--blocked">
+											<header>
+												<div>
+													<p class="eyebrow">Row {item.source_row_number} · {proposalLabel(item.proposed_change_type)}</p>
+													<h3>{identityForItem(item)}</h3>
+												</div>
+												<span class="team-review-pill team-review-pill--blocked">{decisionLabel(item.live_recalculation_status === 'no_longer_required' ? 'no_longer_required' : 'blocked')}</span>
+											</header>
+											<ul class="team-review-messages">
+												{messagesForItem(item).map((message) => <li>{message}</li>)}
+											</ul>
+											<p class="team-review-note">Correct the source file or rerun export/upload if this row should be reconsidered.</p>
+										</article>
+									))}
+								</div>
+							</ProjectContentPanel>
+						)}
+
+						<ProjectContentPanel title="Final summary" helper="Confirming freezes this approved decision set for WT-WORKSPACE-TEAM-007. It does not apply the changes." headingId="team-review-final-heading">
+							<div class="team-review-final-summary">
+								<span><strong>{approvedCount}</strong> approved</span>
+								<span><strong>{excludedCount}</strong> excluded or kept active</span>
+								<span><strong>{remainingCount}</strong> pending</span>
+								<span><strong>{blockedCount}</strong> blocked or invalid</span>
+								<span><strong>{latestSnapshot ?? 'Not recorded'}</strong> live snapshot</span>
+							</div>
+							<form method="post" action={reviewPath} class="team-review-confirm-form">
+								<input type="hidden" name="intent" value="confirm_change_set" />
+								<button class="button button--primary" type="submit" disabled={!canConfirm}>Confirm approved change set</button>
+								<p>{canConfirm ? 'Ready for application. No workspace membership changes will be made by this action.' : 'Resolve every pending decision and any blocking live conflict before final confirmation.'}</p>
+							</form>
+						</ProjectContentPanel>
+					</>
+				)}
+			</>
+		)}
+	</section>
+</AuthenticatedLayout>
+
+<style>
+	.team-review-page {
+		display: grid;
+		gap: 0.9rem;
+	}
+
+	.team-review-hero {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		border: 1px solid var(--border);
+		border-radius: 1.35rem;
+		padding: clamp(1rem, 2vw, 1.5rem);
+		background: linear-gradient(135deg, rgba(5, 14, 25, 0.95), rgba(4, 12, 24, 0.74));
+		box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+	}
+
+	.team-review-hero h1 {
+		margin-bottom: 0.35rem;
+		font-size: clamp(2rem, 4vw, 3.2rem);
+		letter-spacing: 0;
+	}
+
+	.team-review-hero p:not(.eyebrow) {
+		max-width: 48rem;
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.team-review-header-grid,
+	.team-review-counts,
+	.team-review-final-summary {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+		gap: 0.55rem;
+	}
+
+	.team-review-header-grid span,
+	.team-review-counts span,
+	.team-review-final-summary span,
+	.team-review-values span {
+		display: grid;
+		gap: 0.12rem;
+		border: 1px solid rgba(110, 181, 224, 0.18);
+		border-radius: 0.5rem;
+		padding: 0.6rem;
+		background: rgba(18, 31, 42, 0.56);
+		color: var(--muted-strong);
+	}
+
+	.team-review-header-grid strong,
+	.team-review-counts strong,
+	.team-review-final-summary strong,
+	.team-review-values strong {
+		color: var(--text);
+		font-size: 1rem;
+	}
+
+	.team-review-header-grid small,
+	.team-review-values small {
+		color: var(--muted);
+	}
+
+	.team-review-warning,
+	.team-review-message,
+	.team-review-note,
+	.team-review-live,
+	.team-review-decision-meta {
+		border: 1px solid rgba(245, 171, 53, 0.28);
+		border-radius: 0.5rem;
+		padding: 0.7rem 0.8rem;
+		background: rgba(245, 171, 53, 0.1);
+		color: var(--muted-strong);
+	}
+
+	.team-review-message {
+		border-color: rgba(34, 197, 94, 0.32);
+		background: rgba(34, 197, 94, 0.1);
+	}
+
+	.team-review-message--error {
+		border-color: rgba(239, 68, 68, 0.42);
+		background: rgba(239, 68, 68, 0.12);
+		color: #fecaca;
+	}
+
+	.team-review-card-list {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.team-review-card {
+		display: grid;
+		gap: 0.75rem;
+		border: 1px solid rgba(110, 181, 224, 0.18);
+		border-radius: 0.5rem;
+		padding: 0.85rem;
+		background: rgba(3, 12, 24, 0.48);
+	}
+
+	.team-review-card--blocked {
+		border-color: rgba(239, 68, 68, 0.3);
+	}
+
+	.team-review-card header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.team-review-card h3 {
+		margin: 0.15rem 0 0;
+		font-size: 1.15rem;
+		letter-spacing: 0;
+	}
+
+	.team-review-pill {
+		display: inline-flex;
+		align-items: center;
+		width: fit-content;
+		border: 1px solid rgba(110, 181, 224, 0.24);
+		border-radius: 999px;
+		padding: 0.25rem 0.55rem;
+		color: var(--muted-strong);
+		font-size: 0.82rem;
+		font-weight: 850;
+		white-space: nowrap;
+	}
+
+	.team-review-pill--approved {
+		border-color: rgba(34, 197, 94, 0.42);
+		color: #bbf7d0;
+	}
+
+	.team-review-pill--blocked,
+	.team-review-pill--superseded {
+		border-color: rgba(239, 68, 68, 0.42);
+		color: #fecaca;
+	}
+
+	.team-review-values {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+		gap: 0.55rem;
+	}
+
+	.team-review-messages {
+		display: grid;
+		gap: 0.25rem;
+		margin: 0;
+		padding-left: 1.1rem;
+		color: var(--muted-strong);
+	}
+
+	.team-review-decision-form {
+		display: grid;
+		gap: 0.6rem;
+	}
+
+	.team-review-decision-form label {
+		display: grid;
+		gap: 0.3rem;
+		color: var(--muted-strong);
+		font-weight: 800;
+	}
+
+	.team-review-decision-form textarea {
+		width: 100%;
+		border: 1px solid rgba(110, 181, 224, 0.3);
+		border-radius: 0.5rem;
+		padding: 0.58rem 0.7rem;
+		background: rgba(3, 12, 24, 0.7);
+		color: var(--text);
+		font: inherit;
+	}
+
+	.team-review-decision-form div,
+	.team-review-confirm-form {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.6rem;
+	}
+
+	.team-review-confirm-form p {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.team-review-confirm-form button:disabled {
+		opacity: 0.62;
+		cursor: not-allowed;
+	}
+
+	@media (max-width: 720px) {
+		.team-review-hero,
+		.team-review-card header,
+		.team-review-confirm-form {
+			display: grid;
+		}
+	}
+</style>

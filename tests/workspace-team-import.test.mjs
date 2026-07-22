@@ -271,7 +271,8 @@ test('Workspace Team page exposes upload validation UI results and no apply cont
 	assert.match(page, /Proposed additions/);
 	assert.match(page, /Invalid rows/);
 	assert.match(page, /No changes are applied/);
-	assert.doesNotMatch(page, /Approve|Apply changes|Send invitation/);
+	assert.match(page, /Review proposed changes/);
+	assert.doesNotMatch(page, /Apply changes|Send invitation/);
 	assert.match(docs, /csv-parse/);
 	assert.match(docs, /does not approve or apply changes/);
 	assert.ok(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES <= 1024 * 1024);
