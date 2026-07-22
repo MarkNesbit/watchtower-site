@@ -6,7 +6,9 @@ import {
 	WORKSPACE_TEAM_IMPORT_ACCEPTED_CONTENT_TYPES,
 	WORKSPACE_TEAM_IMPORT_FILE_FIELD,
 	WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES,
+	decodeWorkspaceTeamCsvBytes,
 	extractWorkspaceTeamCsvMetadata,
+	sha256HexFromWorkspaceTeamBytes,
 	validateWorkspaceTeamCsvImport,
 	type WorkspaceTeamImportMemberSnapshot,
 } from '../../../../../lib/workspaceTeamCsvImport.ts';
@@ -19,13 +21,6 @@ function importError(message: string, status = 400) {
 			'cache-control': 'private, no-store, no-cache, must-revalidate',
 		},
 	});
-}
-
-async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
-	const digest = await crypto.subtle.digest('SHA-256', buffer);
-	return [...new Uint8Array(digest)]
-		.map((byte) => byte.toString(16).padStart(2, '0'))
-		.join('');
 }
 
 function redirectToImportRun(workspaceSlug: string, importRunId: string) {
@@ -106,15 +101,15 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 	if (uploadedFile.size === 0) return importError('Workspace Team CSV file is empty.', 400);
 	if (uploadedFile.size > WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES) return importError('Workspace Team CSV file is larger than the supported limit.', 413);
 
-	const buffer = await uploadedFile.arrayBuffer();
+	const fileBytes = await uploadedFile.arrayBuffer();
 	let csvText = '';
 	try {
-		csvText = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+		csvText = decodeWorkspaceTeamCsvBytes(fileBytes);
 	} catch {
 		return importError('Workspace Team CSV file must be valid UTF-8 text.', 400);
 	}
 
-	const fileHash = await sha256Hex(buffer);
+	const fileHash = await sha256HexFromWorkspaceTeamBytes(fileBytes);
 	const metadata = extractWorkspaceTeamCsvMetadata(csvText);
 	const sourceExportId = metadata.exportId;
 	let sourceExport = null;

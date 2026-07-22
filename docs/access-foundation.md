@@ -131,7 +131,7 @@ Upload validation uses the WT-004 export contract exactly and does not accept un
 
 Released editable exports are retained as historical evidence but cannot be uploaded for membership administration. WT-WORKSPACE-TEAM-005 rejects a released file with a clear message to download a new editable export. Uploading a released file never restores current-checkout status, and any later replacement export remains the valid source for the next editing journey.
 
-The parser uses `csv-parse` for RFC-style CSV support, including quoted commas, escaped quotes, CRLF/LF, quoted line breaks, Unicode text, blank values and UTF-8 BOM. Uploaded values are normalised by trimming surrounding whitespace, converting optional blanks to null, normalising email/role/action casing and preserving raw values for diagnostics.
+The import path uses a Workers-compatible CSV parser and Web Platform byte APIs rather than Node-only globals. It supports quoted commas, escaped quotes, CRLF/LF, quoted line breaks, Unicode text, blank values and UTF-8 BOM. Uploaded values are normalised by trimming surrounding whitespace, converting optional blanks to null, normalising email/role/action casing and preserving raw values for diagnostics.
 
 Formula-safety reversal is limited to Watchtower's own export protection. If an exported value beginning with `=`, `+`, `-` or `@` was prefixed with a single quote by WT-004 and still matches the stored source snapshot, upload validation reverses that protection and records the reversal. Newly introduced formula-like text remains data, is never executed, and is escaped by normal page rendering.
 

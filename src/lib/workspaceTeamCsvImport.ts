@@ -1,4 +1,3 @@
-import { parse } from 'csv-parse/sync';
 import { WORKSPACE_ROLES, isWorkspaceRole, type WorkspaceRole } from './permissions.ts';
 import { WORKSPACE_TEAM_CSV_COLUMNS, type WorkspaceTeamCsvColumn } from './workspaceTeamCsv.ts';
 
@@ -143,6 +142,118 @@ type ParsedCsv = {
 	errors: Array<{ field: string; message: string }>;
 };
 
+export function workspaceTeamUtf8ByteLength(value: string): number {
+	return new TextEncoder().encode(value).byteLength;
+}
+
+export function workspaceTeamBytesFromArrayBuffer(arrayBuffer: ArrayBuffer): Uint8Array {
+	return new Uint8Array(arrayBuffer);
+}
+
+export function decodeWorkspaceTeamCsvBytes(bytes: ArrayBuffer | Uint8Array): string {
+	const view = bytes instanceof Uint8Array ? bytes : workspaceTeamBytesFromArrayBuffer(bytes);
+	return new TextDecoder('utf-8', { fatal: true }).decode(view);
+}
+
+export async function sha256HexFromWorkspaceTeamBytes(bytes: ArrayBuffer | Uint8Array): Promise<string> {
+	const view = bytes instanceof Uint8Array ? bytes : workspaceTeamBytesFromArrayBuffer(bytes);
+	const digest = await crypto.subtle.digest('SHA-256', view);
+	return [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, '0'))
+		.join('');
+}
+
+function parseWorkspaceTeamCsvRecords(csvText: string): string[][] {
+	const records: string[][] = [];
+	let record: string[] = [];
+	let field = '';
+	let inQuotes = false;
+	let afterQuote = false;
+	let index = 0;
+	let text = csvText;
+
+	if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+	while (index < text.length) {
+		const char = text[index];
+
+		if (inQuotes) {
+			if (char === '"') {
+				if (text[index + 1] === '"') {
+					field += '"';
+					index += 2;
+					continue;
+				}
+				inQuotes = false;
+				afterQuote = true;
+				index += 1;
+				continue;
+			}
+			field += char;
+			index += 1;
+			continue;
+		}
+
+		if (afterQuote) {
+			if (char === ',') {
+				record.push(field);
+				field = '';
+				afterQuote = false;
+				index += 1;
+				continue;
+			}
+			if (char === '\r' || char === '\n') {
+				record.push(field);
+				records.push(record);
+				record = [];
+				field = '';
+				afterQuote = false;
+				if (char === '\r' && text[index + 1] === '\n') index += 2;
+				else index += 1;
+				continue;
+			}
+			if (char === ' ' || char === '\t') {
+				index += 1;
+				continue;
+			}
+			throw new Error('Invalid CSV quote sequence.');
+		}
+
+		if (char === '"') {
+			if (field.length > 0) throw new Error('Invalid CSV quote sequence.');
+			inQuotes = true;
+			index += 1;
+			continue;
+		}
+		if (char === ',') {
+			record.push(field);
+			field = '';
+			index += 1;
+			continue;
+		}
+		if (char === '\r' || char === '\n') {
+			record.push(field);
+			records.push(record);
+			record = [];
+			field = '';
+			if (char === '\r' && text[index + 1] === '\n') index += 2;
+			else index += 1;
+			continue;
+		}
+
+		field += char;
+		index += 1;
+	}
+
+	if (inQuotes) throw new Error('Unclosed CSV quote.');
+	if (field.length > 0 || record.length > 0 || csvText.endsWith(',')) {
+		record.push(field);
+		records.push(record);
+	}
+
+	return records.filter((row) => !(row.length === 1 && row[0] === ''));
+}
+
 function blankToNull(value: unknown): string | null {
 	if (value === null || value === undefined) return null;
 	const text = String(value).trim();
@@ -203,11 +314,7 @@ function message(field: string, text: string) {
 
 export function parseWorkspaceTeamCsvText(csvText: string): ParsedCsv {
 	try {
-		const records = parse(csvText, {
-			bom: true,
-			relax_column_count: true,
-			skip_empty_lines: true,
-		}) as string[][];
+		const records = parseWorkspaceTeamCsvRecords(csvText);
 		if (records.length === 0) return { header: [], rows: [], errors: [message('file', 'CSV file is empty.')] };
 		const [header, ...rows] = records;
 		const errors = rows
