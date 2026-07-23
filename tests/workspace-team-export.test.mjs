@@ -22,6 +22,7 @@ import { buildWorkspaceTeamCheckoutReleasePath, buildWorkspaceTeamExportPath } f
 const migrationUrl = new URL('../supabase/migrations/20260722000200_workspace_membership_csv_export_checkout.sql', import.meta.url);
 const checkoutReleaseMigrationUrl = new URL('../supabase/migrations/20260722000600_workspace_membership_csv_checkout_release.sql', import.meta.url);
 const checkoutReleaseDiagnosticsMigrationUrl = new URL('../supabase/migrations/20260722000700_workspace_membership_csv_checkout_release_diagnostics.sql', import.meta.url);
+const checkoutReleaseAmbiguityMigrationUrl = new URL('../supabase/migrations/20260723000100_workspace_membership_csv_checkout_release_ambiguity_fix.sql', import.meta.url);
 const endpointUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/export.ts', import.meta.url);
 const releaseEndpointUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/export/release.ts', import.meta.url);
 const checkoutReleaseHelperUrl = new URL('../src/lib/workspaceTeamCheckoutRelease.ts', import.meta.url);
@@ -337,6 +338,39 @@ test('CSV checkout release diagnostics migration fixes audit status compatibilit
 	assert.doesNotMatch(sql, /insert into public\.organisation_members|update public\.organisation_members|insert into public\.profiles|update public\.profiles|auth\.admin|insert into auth\.users/i);
 });
 
+test('CSV checkout release ambiguity fix qualifies parameters columns release reason and audit values', async () => {
+	const sql = await readFile(checkoutReleaseAmbiguityMigrationUrl, 'utf8');
+
+	assert.match(sql, /drop function if exists public\.release_workspace_membership_csv_checkout\(uuid, uuid, text, text\)/);
+	assert.match(sql, /create function public\.release_workspace_membership_csv_checkout\(\s*p_organisation_id uuid,\s*p_export_id uuid,\s*p_release_reason text default null,\s*p_release_source text default 'holder_undo'\s*\)/);
+	assert.match(sql, /v_actor_id uuid/);
+	assert.match(sql, /v_checkout_export public\.workspace_membership_export_runs/);
+	assert.match(sql, /v_released_export public\.workspace_membership_export_runs/);
+	assert.match(sql, /v_release_reason text := nullif\(btrim\(p_release_reason\), ''\)/);
+	assert.match(sql, /v_released_at timestamptz := now\(\)/);
+	assert.match(sql, /pg_advisory_xact_lock\(hashtextextended\(p_organisation_id::text, 4004\)\)/);
+	assert.match(sql, /workspace_membership_require_admin_actor\(p_organisation_id\)/);
+	assert.match(sql, /coalesce\(p_release_source, ''\) <> 'holder_undo'/);
+	assert.match(sql, /from public\.workspace_membership_export_runs as e[\s\S]*where e\.id = p_export_id[\s\S]*and e\.organisation_id = p_organisation_id/);
+	assert.match(sql, /v_checkout_export\.requested_by is distinct from v_actor_id/);
+	assert.match(sql, /update public\.workspace_membership_export_runs as e[\s\S]*released_at = v_released_at[\s\S]*released_by = v_actor_id[\s\S]*release_source = p_release_source[\s\S]*release_reason = v_release_reason/);
+	assert.match(sql, /where e\.id = p_export_id[\s\S]*and e\.organisation_id = p_organisation_id[\s\S]*and e\.requested_by = v_actor_id[\s\S]*and e\.released_at is null[\s\S]*and e\.superseded_at is null[\s\S]*and e\.status = 'checked_out'[\s\S]*and e\.editing_mode = 'checked_out'[\s\S]*and e\.checkout_expires_at > v_released_at/);
+	assert.match(sql, /returning e\.\* into v_released_export/);
+	assert.match(sql, /record_workspace_membership_audit_event\(\s*p_organisation_id,[\s\S]*v_actor_id,[\s\S]*'workspace_membership_csv_checkout_released',[\s\S]*'checked_out',[\s\S]*'released'/);
+	assert.match(sql, /'previous_expiry', v_checkout_export\.checkout_expires_at/);
+	assert.match(sql, /'release_source', v_released_export\.release_source/);
+	assert.match(sql, /'release_reason', v_released_export\.release_reason/);
+	assert.match(sql, /coalesce\(v_release_reason, 'Editable Workspace Team CSV checkout released by current holder\.'\)/);
+	assert.match(sql, /grant execute on function public\.release_workspace_membership_csv_checkout\(uuid, uuid, text, text\) to authenticated, service_role/);
+	assert.doesNotMatch(sql, /\brelease_reason text default null/);
+	assert.doesNotMatch(sql, /\brelease_source text default 'holder_undo'/);
+	assert.doesNotMatch(sql, /target_organisation_id|target_export_id/);
+	assert.doesNotMatch(sql, /nullif\(btrim\(release_reason\)|coalesce\(released_export\.release_reason|actor\.actor_user_id|\bcheckout_export\.|\breleased_export\./);
+	assert.doesNotMatch(sql, /where id =|and organisation_id =|and released_at is null|and superseded_at is null|and status = 'checked_out'|and editing_mode = 'checked_out'|and checkout_expires_at > now\(\)/);
+	assert.doesNotMatch(sql, /delete from public\.workspace_membership_export_runs|delete from public\.workspace_membership_export_rows|delete from public\.workspace_membership_import_runs|delete from public\.workspace_membership_import_rows|delete from public\.workspace_membership_change_decisions/i);
+	assert.doesNotMatch(sql, /insert into public\.organisation_members|update public\.organisation_members|insert into public\.profiles|update public\.profiles|auth\.admin|insert into auth\.users/i);
+});
+
 test('CSV export endpoint authenticates scopes authorises and returns download headers', async () => {
 	const endpoint = await readFile(endpointUrl, 'utf8');
 
@@ -368,9 +402,12 @@ test('CSV checkout release endpoint is POST-only scoped and delegates to the rel
 	assert.match(endpoint, /serverSupabase\.auth\.getUser\(accessToken\)/);
 	assert.match(endpoint, /\.select\('requested_by, export_mode, status, editing_mode, checkout_expires_at, superseded_at, released_at'\)/);
 	assert.match(endpoint, /workspaceTeamCheckoutReleaseStateErrorCode/);
-	assert.match(endpoint, /target_export_id: exportId/);
+	assert.match(endpoint, /p_organisation_id: organisation\.id/);
+	assert.match(endpoint, /p_export_id: exportId/);
+	assert.match(endpoint, /p_release_reason: 'Current holder selected Undo from Team administration\.'/);
+	assert.match(endpoint, /p_release_source: 'holder_undo'/);
+	assert.doesNotMatch(endpoint, /target_organisation_id|target_export_id|\brelease_reason:|\brelease_source:/);
 	assert.match(endpoint, /\.rpc\(WORKSPACE_TEAM_CHECKOUT_RELEASE_RPC/);
-	assert.match(endpoint, /release_source: 'holder_undo'/);
 	assert.match(endpoint, /logWorkspaceTeamCheckoutReleaseFailure/);
 	assert.match(endpoint, /workspaceTeamCheckoutReleaseErrorCode\(error, stateErrorCode\)/);
 	assert.match(releaseCode, /workspace_team_checkout_release_failed/);
