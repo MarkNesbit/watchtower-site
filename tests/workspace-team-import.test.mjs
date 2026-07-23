@@ -568,7 +568,7 @@ test('Workspace Team page exposes upload validation UI results without direct ap
 	assert.match(page, /No changes are applied/);
 	assert.match(page, /Review proposed changes/);
 	assert.doesNotMatch(page, /Proposed additions/);
-	assert.doesNotMatch(page, /Send invitation|auth\.admin|\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update/);
+	assert.doesNotMatch(page, /auth\.admin|\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update/);
 	assert.match(docs, /Workers-compatible CSV parser/);
 	assert.match(docs, /rejects a released file with a clear message to download a new editable export/);
 	assert.match(docs, /does not approve or apply changes/);

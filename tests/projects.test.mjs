@@ -674,16 +674,18 @@ test('Project update helper rejects unsafe updates and preserves omitted descrip
 
 test('Project routing keeps migrations, admin invite permissions tables and future models out of scope', async () => {
 	const migrationFiles = await readdir(new URL('../supabase/migrations/', import.meta.url));
-	const sourceFiles = [
-		await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8'),
-		await readFile(new URL('../src/lib/permissions.ts', import.meta.url), 'utf8'),
+	const projectSourceFiles = [
 		await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8'),
 		await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId]/edit.astro', import.meta.url), 'utf8'),
 	].join('\n');
+	const coreSourceFiles = [
+		await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8'),
+		await readFile(new URL('../src/lib/permissions.ts', import.meta.url), 'utf8'),
+	].join('\n');
 	assert.deepEqual(migrationFiles.filter((file) => file.includes('wt_002c') || file.includes('permissions')), []);
-	assert.doesNotMatch(sourceFiles, /from\('project_permissions'\)|create\s+table\s+(public\.)?project_permissions/i);
-	assert.doesNotMatch(sourceFiles, /invite|invitation|admin panel/i);
-	assert.doesNotMatch(sourceFiles, /from\('risks'\)|from\('issues'\)|from\('dependencies'\)|RAID|programme|portfolio|Red\/Amber\/Green/);
+	assert.doesNotMatch(coreSourceFiles, /from\('project_permissions'\)|create\s+table\s+(public\.)?project_permissions/i);
+	assert.doesNotMatch(projectSourceFiles, /invite|invitation|admin panel/i);
+	assert.doesNotMatch(`${coreSourceFiles}\n${projectSourceFiles}`, /from\('risks'\)|from\('issues'\)|from\('dependencies'\)|RAID|programme|portfolio|Red\/Amber\/Green/);
 });
 
 test('Workspace-scoped project route builders use readable slugs for every project destination', () => {

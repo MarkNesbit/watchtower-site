@@ -11,6 +11,7 @@ import {
 	buildWorkspaceTeamImportPath,
 	buildWorkspaceTeamImportReviewConfirmPath,
 	buildWorkspaceTeamImportReviewPath,
+	buildWorkspaceTeamInvitationSendPath,
 	getWorkspaceBySlug,
 } from '../../../../lib/projects';
 import { isWorkspaceRole } from '../../../../lib/permissions';
@@ -27,6 +28,14 @@ import {
 	type WorkspaceTeamActiveEditableCheckout,
 	type WorkspaceTeamMember,
 } from '../../../../lib/workspaceTeam';
+import {
+	currentInvitationActionForSubmission,
+	invitationLifecycleCounts,
+	invitationNeedsCancellation,
+	workspaceInvitationActionLabel,
+	workspaceInvitationStatusLabel,
+	workspaceInvitationTone,
+} from '../../../../lib/workspaceInvitations';
 
 Astro.response.headers.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
 Astro.response.headers.set('Pragma', 'no-cache');
@@ -183,7 +192,7 @@ try {
 		const canUseAdminDirectory = workspaceRole === 'owner' || workspaceRole === 'admin';
 		const directoryTable = canUseAdminDirectory ? 'workspace_member_admin_directory' : 'workspace_member_directory';
 		const selectColumns = canUseAdminDirectory
-			? 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, invited_at, invitation_expires_at, accepted_at, deactivated_at, reactivated_at'
+			? 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, invited_at, invitation_expires_at, accepted_at, deactivated_at, reactivated_at, invitation_id, invitation_status, invitation_delivered_at, invitation_opened_at, invitation_accepted_at, invitation_cancelled_at, invitation_superseded_at, invitation_delivery_attempt_count, invitation_last_delivery_attempt_at, invitation_failure_code, invitation_failure_message, invitation_delivery_strategy'
 			: 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, is_deactivated, deactivated_at, reactivated_at';
 		const { data, error } = await serverSupabase
 			.from(directoryTable)
@@ -304,6 +313,7 @@ const displayedMembers = buildWorkspaceTeamDisplayMembers(members, {
 	search,
 });
 const counts = membershipStateCounts(members);
+const invitationCounts = invitationLifecycleCounts(members);
 const filterHref = (filter: TeamFilter) => {
 	const params = new URLSearchParams();
 	if (filter !== 'all') params.set('state', filter);
@@ -320,6 +330,7 @@ const importReviewPath = workspaceSlug && importRun ? buildWorkspaceTeamImportRe
 const importReviewConfirmPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewConfirmPath(workspaceSlug, importRun.id) : '';
 const importReviewDraftPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewDraftPath(workspaceSlug, importRun.id) : '';
 const importApplyPath = workspaceSlug && importRun ? buildWorkspaceTeamImportApplyPath(workspaceSlug, importRun.id) : '';
+const invitationSendAction = workspaceSlug ? buildWorkspaceTeamInvitationSendPath(workspaceSlug) : '';
 const importMaxSizeLabel = `${Math.round(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES / 1024 / 1024)} MB`;
 const checkoutEditorMember = activeCheckout?.requested_by
 	? members.find((member) => member.profile_id === activeCheckout?.requested_by)
@@ -405,6 +416,32 @@ const membershipApplicationMessage = membershipApplicationState === 'success'
 				failed: 'Approved Workspace Team changes could not be applied. No partial membership changes were committed.',
 			} as Record<string, string>)[membershipApplicationError] ?? 'Approved Workspace Team changes could not be applied. No partial membership changes were committed.'
 			: '';
+const invitationDeliveryState = String(Astro.url.searchParams.get('invitation_delivery') ?? '');
+const invitationDeliveryError = String(Astro.url.searchParams.get('invitation_delivery_error') ?? '');
+const invitationDeliverySent = Number(Astro.url.searchParams.get('invitation_delivery_sent') ?? 0);
+const invitationDeliveryFailed = Number(Astro.url.searchParams.get('invitation_delivery_failed') ?? 0);
+const invitationDeliveryMessage = invitationDeliveryState === 'success'
+	? `${invitationDeliverySent} ${invitationDeliverySent === 1 ? 'invitation' : 'invitations'} delivered. Delivery alone does not activate workspace access.`
+	: invitationDeliveryState === 'partial'
+		? `${invitationDeliverySent} ${invitationDeliverySent === 1 ? 'invitation' : 'invitations'} delivered. ${invitationDeliveryFailed} could not be delivered and can be retried.`
+		: invitationDeliveryState === 'cancelled'
+			? 'Invitation cancelled. Membership remains invited and can receive a new invitation later.'
+			: invitationDeliveryState === 'error'
+				? ({
+					signin: 'Sign in before administering invitations.',
+					workspace: 'Workspace access could not be confirmed for invitation administration.',
+					permission: 'Only active Workspace Owners and Admins can administer invitations.',
+					permission_denied: 'Only active Workspace Owners and Admins can administer invitations.',
+					empty_selection: 'No invited memberships are currently eligible for invitation delivery.',
+					missing_invitation: 'The invitation could not be identified. Refresh the Team page and try again.',
+					provider_not_configured: 'Invitation email provider is not configured. Rows remain retryable.',
+					method: 'Invitation administration requires the confirmation form.',
+					failed: 'Invitation delivery could not be completed. Check row status and retry.',
+				} as Record<string, string>)[invitationDeliveryError] ?? `${invitationDeliverySent} delivered. ${invitationDeliveryFailed} could not be delivered and can be retried.`
+				: '';
+const invitationAcceptanceMessage = String(Astro.url.searchParams.get('invitation_acceptance') ?? '') === 'success'
+	? 'Invitation accepted. Membership is active with the approved role.'
+	: '';
 const importSummary = importRun?.validation_summary ?? {};
 const applicationSummary = importRun?.approved_change_set_summary ?? latestApplicationRun?.expected_counts ?? {};
 const approvedApplicationCount = Number(applicationSummary.approved_additions ?? 0)
@@ -490,6 +527,7 @@ const reviewModalInitialSelectedCount = reviewModalIsReconfirmation
 const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 	? selectableReviewItems.filter((item) => item.decision !== 'approved').length
 	: selectableReviewItems.filter((item) => item.review_selected === false).length;
+const invitationOperationKey = crypto.randomUUID();
 ---
 <AuthenticatedLayout title="Workspace Team | WatchTower">
 	<section class="workspace-team-page" data-workspace-team-page>
@@ -643,6 +681,46 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 						<p class={membershipApplicationState === 'success' || membershipApplicationState === 'already_applied' ? 'workspace-team-release-message' : 'workspace-team-release-message workspace-team-release-message--error'} role="status" data-workspace-team-application-message>
 							{membershipApplicationMessage}
 						</p>
+					)}
+					{invitationDeliveryMessage && (
+						<p class={['success', 'cancelled'].includes(invitationDeliveryState) ? 'workspace-team-release-message' : 'workspace-team-release-message workspace-team-release-message--error'} role="status" data-workspace-team-invitation-message>
+							{invitationDeliveryMessage}
+						</p>
+					)}
+					{invitationAcceptanceMessage && (
+						<p class="workspace-team-release-message" role="status" data-workspace-team-invitation-acceptance-message>
+							{invitationAcceptanceMessage}
+						</p>
+					)}
+
+					{canAdministerLater && (
+						<section class="workspace-team-invitations" aria-labelledby="workspace-team-invitations-heading" data-workspace-team-invitations>
+							<div class="workspace-team-invitations__heading">
+								<div>
+									<p class="eyebrow">Invitations</p>
+									<h3 id="workspace-team-invitations-heading">Invitation delivery</h3>
+									<p>Sending prepares secure, expiring links. Membership remains invited until the recipient accepts.</p>
+								</div>
+								{invitationSendAction && invitationCounts.eligibleToSend > 0 ? (
+									<button class="button button--primary" type="button" aria-haspopup="dialog" data-workspace-team-invitation-open="workspace-team-invitation-bulk-dialog">
+										Send {invitationCounts.eligibleToSend} {invitationCounts.eligibleToSend === 1 ? 'invitation' : 'invitations'}
+									</button>
+								) : (
+									<button class="button button--primary" type="button" disabled>
+										No invitations to send
+									</button>
+								)}
+							</div>
+							<div class="workspace-team-invitation-counts" aria-label="Invitation lifecycle counts">
+								<span><strong>{invitationCounts.invited}</strong> invited</span>
+								<span><strong>{invitationCounts.pendingDelivery}</strong> pending delivery</span>
+								<span><strong>{invitationCounts.delivered}</strong> delivered</span>
+								<span><strong>{invitationCounts.awaitingAcceptance}</strong> awaiting acceptance</span>
+								<span><strong>{invitationCounts.failed}</strong> failed</span>
+								<span><strong>{invitationCounts.expired}</strong> expired</span>
+								<span><strong>{invitationCounts.accepted}</strong> active</span>
+							</div>
+						</section>
 					)}
 
 					{canAdministerLater && importLoadError && (
@@ -871,6 +949,24 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 						</dialog>
 					)}
 
+					{canAdministerLater && invitationSendAction && invitationCounts.eligibleToSend > 0 && (
+						<dialog class="workspace-team-export-dialog" id="workspace-team-invitation-bulk-dialog" aria-labelledby="workspace-team-invitation-bulk-title" aria-describedby="workspace-team-invitation-bulk-description" data-workspace-team-invitation-dialog>
+							<form method="post" action={invitationSendAction}>
+								<input type="hidden" name="scope" value="eligible" />
+								<input type="hidden" name="operation_key" value={invitationOperationKey} />
+								<div class="workspace-team-export-dialog__body">
+									<h3 id="workspace-team-invitation-bulk-title" tabindex="-1" data-workspace-team-dialog-focus>Send workspace invitations?</h3>
+									<p id="workspace-team-invitation-bulk-description">{invitationCounts.eligibleToSend} invitations will be prepared. Recipients receive access only after completing account setup and acceptance.</p>
+									<p>Each invitation is linked to one person, expires after the configured period and preserves the approved role.</p>
+								</div>
+								<div class="workspace-team-export-dialog__actions">
+									<button class="button button--secondary" type="button" data-workspace-team-dialog-cancel>Cancel</button>
+									<button class="button button--primary" type="submit">Send {invitationCounts.eligibleToSend} {invitationCounts.eligibleToSend === 1 ? 'invitation' : 'invitations'}</button>
+								</div>
+							</form>
+						</dialog>
+					)}
+
 					{canAdministerLater && importAction && (
 						<dialog class="workspace-team-export-dialog" id="workspace-team-import-dialog" aria-labelledby="workspace-team-import-title" data-workspace-team-import-dialog>
 							<form method="post" action={importAction} enctype="multipart/form-data">
@@ -1009,6 +1105,7 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 										<th scope="col">Login</th>
 										<th scope="col">Role</th>
 										<th scope="col">Status</th>
+										<th scope="col">Invitation</th>
 										<th scope="col">Joined / invited</th>
 										<th scope="col">Actions</th>
 									</tr>
@@ -1029,12 +1126,38 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 													{member.displayStatus}
 												</span>
 											</td>
+											<td data-label="Invitation">
+												<span class={`workspace-team-status workspace-team-status--${workspaceInvitationTone(member.invitation_status)}`} aria-label={workspaceInvitationStatusLabel(member.invitation_status)}>
+													{member.membership_status === 'active' ? 'Accepted' : workspaceInvitationStatusLabel(member.invitation_status)}
+												</span>
+												{member.invitation_failure_message && <small class="workspace-team-invitation-failure">{member.invitation_failure_message}</small>}
+											</td>
 											<td data-label={member.lifecycleDateLabel}>
 												<span class="workspace-team-date-label">{member.lifecycleDateLabel}</span>
-												<span>{formatDate(member.lifecycleDateValue)}</span>
+												<span>{formatDate(member.invitation_expires_at ?? member.lifecycleDateValue)}</span>
 											</td>
 											<td data-label="Actions">
-												<span class="workspace-team-row-action" aria-disabled="true">No actions in this release</span>
+												{canAdministerLater && invitationSendAction && (member.membership_status === 'invited' || member.membership_status === 'invite_expired') ? (
+													<div class="workspace-team-row-actions">
+														<form method="post" action={invitationSendAction}>
+															<input type="hidden" name="membership_id" value={member.organisation_membership_id} />
+															<input type="hidden" name="operation_key" value={crypto.randomUUID()} />
+															<input type="hidden" name="invitation_action" value={currentInvitationActionForSubmission(member.invitation_status)} />
+															<button class="button button--secondary" type="submit">{workspaceInvitationActionLabel(member)}</button>
+														</form>
+														{member.invitation_id && invitationNeedsCancellation(member.invitation_status) && (
+															<form method="post" action={invitationSendAction}>
+																<input type="hidden" name="invitation_id" value={member.invitation_id} />
+																<input type="hidden" name="invitation_action" value="cancel" />
+																<button class="button button--secondary" type="submit">Cancel invitation</button>
+															</form>
+														)}
+													</div>
+												) : member.membership_status === 'active' ? (
+													<span class="workspace-team-row-action" aria-disabled="true">Invitation accepted</span>
+												) : (
+													<span class="workspace-team-row-action" aria-disabled="true">No action available</span>
+												)}
 											</td>
 										</tr>
 									))}
@@ -1112,7 +1235,20 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 		});
 	});
 
-	document.querySelectorAll('[data-workspace-team-export-dialog], [data-workspace-team-import-dialog], [data-workspace-team-checkout-release-dialog], [data-workspace-team-review-dialog], [data-workspace-team-application-dialog]').forEach((dialog) => {
+	document.querySelectorAll('[data-workspace-team-invitation-open]').forEach((trigger) => {
+		trigger.addEventListener('click', (event) => {
+			event.preventDefault();
+			const dialogId = trigger.getAttribute('data-workspace-team-invitation-open');
+			const dialog = dialogId ? document.getElementById(dialogId) : null;
+			if (!(dialog instanceof HTMLDialogElement)) return;
+			lastTriggerByDialog.set(dialog, trigger);
+			if (!dialog.open) dialog.showModal();
+			const focusTarget = dialog.querySelector('[data-workspace-team-dialog-focus], button, input');
+			if (focusTarget instanceof HTMLElement) focusTarget.focus();
+		});
+	});
+
+	document.querySelectorAll('[data-workspace-team-export-dialog], [data-workspace-team-import-dialog], [data-workspace-team-checkout-release-dialog], [data-workspace-team-review-dialog], [data-workspace-team-application-dialog], [data-workspace-team-invitation-dialog]').forEach((dialog) => {
 		if (!(dialog instanceof HTMLDialogElement)) return;
 		dialog.addEventListener('close', () => {
 			const trigger = lastTriggerByDialog.get(dialog);
@@ -1502,6 +1638,56 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 	.workspace-team-admin-actions button:disabled {
 		opacity: 0.62;
 		cursor: not-allowed;
+	}
+
+	.workspace-team-invitations {
+		display: grid;
+		gap: 0.85rem;
+		margin-top: 1rem;
+		border: 1px solid rgba(110, 181, 224, 0.22);
+		border-radius: 0.5rem;
+		padding: 0.95rem;
+		background: rgba(4, 14, 26, 0.5);
+	}
+
+	.workspace-team-invitations__heading {
+		display: flex;
+		align-items: start;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.workspace-team-invitations__heading h3 {
+		margin: 0.1rem 0 0.25rem;
+		font-size: 1.2rem;
+		letter-spacing: 0;
+	}
+
+	.workspace-team-invitations__heading p {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-invitation-counts {
+		display: grid;
+		grid-template-columns: repeat(7, minmax(0, 1fr));
+		gap: 0.45rem;
+	}
+
+	.workspace-team-invitation-counts span {
+		display: grid;
+		gap: 0.1rem;
+		border: 1px solid rgba(110, 181, 224, 0.18);
+		border-radius: 0.5rem;
+		padding: 0.55rem;
+		background: rgba(18, 31, 42, 0.58);
+		color: var(--muted-strong);
+		font-size: 0.85rem;
+	}
+
+	.workspace-team-invitation-counts strong {
+		color: var(--text);
+		font-size: 1.15rem;
 	}
 
 	.workspace-team-checkout {
@@ -2155,6 +2341,29 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 		color: var(--muted);
 	}
 
+	.workspace-team-row-actions {
+		display: grid;
+		gap: 0.45rem;
+		min-width: 11rem;
+	}
+
+	.workspace-team-row-actions form {
+		margin: 0;
+	}
+
+	.workspace-team-row-actions .button {
+		width: 100%;
+		justify-content: center;
+	}
+
+	.workspace-team-invitation-failure {
+		display: block;
+		max-width: 18rem;
+		margin-top: 0.35rem;
+		color: #ffd28a;
+		font-size: 0.8rem;
+	}
+
 	@media (max-width: 900px) {
 		.workspace-team-hero,
 		.workspace-team-controls {
@@ -2188,6 +2397,14 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 		}
 
 		.workspace-team-application__counts {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.workspace-team-invitations__heading {
+			display: grid;
+		}
+
+		.workspace-team-invitation-counts {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 
