@@ -54,10 +54,10 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 	);
 
 	const { error } = await serverSupabase.rpc(WORKSPACE_TEAM_CHECKOUT_RELEASE_RPC, {
-		target_organisation_id: organisation.id,
-		target_export_id: exportId,
-		release_reason: 'Current holder selected Undo from Team administration.',
-		release_source: 'holder_undo',
+		p_organisation_id: organisation.id,
+		p_export_id: exportId,
+		p_release_reason: 'Current holder selected Undo from Team administration.',
+		p_release_source: 'holder_undo',
 	});
 	if (error) {
 		logWorkspaceTeamCheckoutReleaseFailure({
