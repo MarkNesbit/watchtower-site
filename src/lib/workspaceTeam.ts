@@ -31,7 +31,7 @@ export type WorkspaceTeamActiveEditableCheckout = {
 	editing_mode: string;
 	status: string;
 	checkout_expires_at: string;
-	membership_snapshot_version: number;
+	membership_snapshot_version: number | string;
 	superseded_at: string | null;
 	released_at: string | null;
 };

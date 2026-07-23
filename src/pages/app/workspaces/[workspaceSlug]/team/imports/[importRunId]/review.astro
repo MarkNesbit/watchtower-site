@@ -29,7 +29,7 @@ type ReviewItem = {
 	live_recalculation_status: string;
 	live_recalculation_messages: Array<{ message?: string }>;
 	impact_counts: JsonRecord;
-	live_snapshot_version: number | null;
+	live_snapshot_version: number | string | null;
 	decision: string;
 	decision_version: number;
 	decision_history: JsonRecord[];
@@ -57,8 +57,8 @@ let importRun: {
 	uploaded_at: string;
 	original_filename: string | null;
 	source_export_id: string | null;
-	source_snapshot_version: number | null;
-	live_snapshot_version: number | null;
+	source_snapshot_version: number | string | null;
+	live_snapshot_version: number | string | null;
 	source_export_mode: string | null;
 	checkout_expired: boolean;
 	source_stale: boolean;
@@ -66,7 +66,7 @@ let importRun: {
 	validation_summary: JsonRecord;
 	invalid_row_count: number;
 	approved_change_set_version: number;
-	approved_change_set_snapshot_version: number | null;
+	approved_change_set_snapshot_version: number | string | null;
 	approved_change_set: JsonRecord[];
 	approved_change_set_summary: JsonRecord;
 	review_completed_at: string | null;
