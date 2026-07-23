@@ -554,7 +554,7 @@ test('Workspace Team import source snapshot migration returns source and live ve
 	assert.doesNotMatch(sql, /delete from public\.workspace_membership_export_runs|delete from public\.workspace_membership_export_rows|delete from public\.workspace_membership_import_runs|delete from public\.workspace_membership_import_rows|delete from public\.workspace_membership_change_decisions/i);
 });
 
-test('Workspace Team page exposes upload validation UI results and no apply controls', async () => {
+test('Workspace Team page exposes upload validation UI results without direct application mutation', async () => {
 	const page = await readFile(pageUrl, 'utf8');
 	const docs = await readFile(docsUrl, 'utf8');
 
@@ -568,7 +568,7 @@ test('Workspace Team page exposes upload validation UI results and no apply cont
 	assert.match(page, /No changes are applied/);
 	assert.match(page, /Review proposed changes/);
 	assert.doesNotMatch(page, /Proposed additions/);
-	assert.doesNotMatch(page, /Apply changes|Send invitation/);
+	assert.doesNotMatch(page, /Send invitation|auth\.admin|\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update/);
 	assert.match(docs, /Workers-compatible CSV parser/);
 	assert.match(docs, /rejects a released file with a clear message to download a new editable export/);
 	assert.match(docs, /does not approve or apply changes/);
