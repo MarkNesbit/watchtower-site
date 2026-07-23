@@ -14,6 +14,7 @@ import {
 	buildWorkspaceTeamCheckoutReleasePath,
 	buildWorkspaceTeamExportPath,
 	buildWorkspaceTeamImportPath,
+	buildWorkspaceTeamImportReviewConfirmPath,
 	buildWorkspaceTeamImportReviewPath,
 	buildWorkspaceTeamPath,
 } from './projectRoutes.ts';
@@ -73,6 +74,7 @@ export {
 	buildWorkspaceTeamCheckoutReleasePath,
 	buildWorkspaceTeamExportPath,
 	buildWorkspaceTeamImportPath,
+	buildWorkspaceTeamImportReviewConfirmPath,
 	buildWorkspaceTeamImportReviewPath,
 	buildWorkspaceTeamPath,
 	buildUniqueProjectRef,

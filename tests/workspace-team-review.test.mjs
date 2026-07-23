@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { access, readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { buildWorkspaceTeamImportReviewPath } from '../src/lib/projectRoutes.ts';
+import { buildWorkspaceTeamImportReviewConfirmPath, buildWorkspaceTeamImportReviewPath } from '../src/lib/projectRoutes.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260722000500_workspace_membership_change_review_approval.sql', import.meta.url);
+const bulkReviewMigrationUrl = new URL('../supabase/migrations/20260723000400_workspace_membership_bulk_review_confirmation.sql', import.meta.url);
 const reviewPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/imports/[importRunId]/review.astro', import.meta.url);
+const confirmRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/imports/[importRunId]/review/confirm.ts', import.meta.url);
 const teamPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
 const schemaDocsUrl = new URL('../docs/architecture/database-schema-v1.md', import.meta.url);
@@ -13,6 +15,10 @@ test('Workspace Team import review route helper is workspace scoped', () => {
 	assert.equal(
 		buildWorkspaceTeamImportReviewPath('alpha workspace', '22222222-2222-4222-8222-222222222222'),
 		'/app/workspaces/alpha%20workspace/team/imports/22222222-2222-4222-8222-222222222222/review',
+	);
+	assert.equal(
+		buildWorkspaceTeamImportReviewConfirmPath('alpha workspace', '22222222-2222-4222-8222-222222222222'),
+		'/app/workspaces/alpha%20workspace/team/imports/22222222-2222-4222-8222-222222222222/review/confirm',
 	);
 });
 
@@ -79,6 +85,29 @@ test('Workspace Team review migration stores preliminary responsibility impacts 
 	}
 });
 
+test('Workspace Team bulk review migration records selected and excluded decisions without applying changes', async () => {
+	const sql = await readFile(bulkReviewMigrationUrl, 'utf8');
+
+	assert.match(sql, /workspace_membership_change_selection_confirmed/);
+	assert.match(sql, /create or replace function public\.confirm_workspace_membership_selected_change_set/);
+	assert.match(sql, /workspace_membership_require_admin_actor\(import_run\.organisation_id\)/);
+	assert.match(sql, /ensure_workspace_membership_change_decisions\(target_import_run_id\)/);
+	assert.match(sql, /recalculate_workspace_membership_change_proposals\(target_import_run_id\)/);
+	assert.match(sql, /record_workspace_membership_change_decision/);
+	assert.match(sql, /when decision_row\.import_row_id = any\(coalesce\(selected_import_row_ids, array\[\]::uuid\[\]\)\) then 'approved'/);
+	assert.match(sql, /when decision_row\.proposed_change_type = 'deactivation' then 'keep_active'/);
+	assert.match(sql, /else 'excluded'/);
+	assert.match(sql, /WT_MEMBERSHIP_BULK_CONFIRM_EMPTY/);
+	assert.match(sql, /confirm_workspace_membership_change_set\(target_import_run_id\)/);
+	assert.match(sql, /batch_correlation_id/);
+	assert.match(sql, /'audit_scope', 'proposal'/);
+	assert.match(sql, /'audit_scope', 'batch'/);
+	assert.match(sql, /'selected', requested_decision = 'approved'/);
+	assert.match(sql, /applies_changes', false/);
+	assert.match(sql, /grant execute on function public\.confirm_workspace_membership_selected_change_set/);
+	assert.doesNotMatch(sql, /insert into public\.organisation_members|update public\.organisation_members|insert into public\.profiles|update public\.profiles|auth\.admin|insert into auth\.users|delete from public\.project_people/i);
+});
+
 test('Workspace Team review page groups proposals and saves decisions through controlled RPCs', async () => {
 	const page = await readFile(reviewPageUrl, 'utf8');
 
@@ -137,11 +166,34 @@ test('Workspace Team review page relative imports resolve from the nested route 
 test('Workspace Team page links validated imports into review without apply controls', async () => {
 	const page = await readFile(teamPageUrl, 'utf8');
 
+	assert.match(page, /buildWorkspaceTeamImportReviewConfirmPath/);
 	assert.match(page, /buildWorkspaceTeamImportReviewPath/);
 	assert.match(page, /normaliseWorkspaceTeamSnapshotVersion/);
 	assert.match(page, /data-workspace-team-import-review-link/);
 	assert.match(page, /Review proposed changes/);
+	assert.match(page, /data-workspace-team-review-dialog/);
+	assert.match(page, /Review the proposed team changes below\. Switch off anything that should not proceed, then accept the selected changes\./);
+	assert.match(page, /data-review-switch/);
+	assert.match(page, /data-review-select-all/);
+	assert.match(page, /data-review-clear-all/);
+	assert.match(page, /Accept \{reviewModalInitialSelectedCount\} selected changes/);
+	assert.match(page, /Confirm selected changes/);
+	assert.match(page, /recalculate_workspace_membership_change_proposals/);
+	assert.doesNotMatch(page, /Proposed additions', importGroups|Row \{row\.source_row_number\}: \{importRowIdentity\(row\)\}/);
 	assert.doesNotMatch(page, /Apply changes|Send invitation|auth\.admin|\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update/);
+});
+
+test('Workspace Team bulk review confirmation route is scoped and delegates to the controlled RPC', async () => {
+	const route = await readFile(confirmRouteUrl, 'utf8');
+
+	assert.match(route, /export const POST/);
+	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
+	assert.match(route, /workspace\.role !== 'owner' && workspace\.role !== 'admin'/);
+	assert.match(route, /selected_import_row_id/);
+	assert.match(route, /confirm_workspace_membership_selected_change_set/);
+	assert.match(route, /review_confirmation=success|review_confirmation/);
+	assert.match(route, /workspace_team_bulk_review_confirmation_failed/);
+	assert.doesNotMatch(route, /auth\.admin|auth\.users|\.from\('profiles'\)\.update|\.from\('organisation_members'\)\.update|\.delete\(/);
 });
 
 test('Workspace Team review documentation states the decision boundary and WT-007 handoff', async () => {

@@ -43,7 +43,7 @@ test('Workspace Team route selects the correct membership directory by role', as
 	assert.match(route, /organisation_membership_id/);
 	assert.match(route, /profile_id/);
 	assert.match(route, /\{member\.loginLabel\}/);
-	assert.doesNotMatch(route, /contact_email|auth_email|data-email|email as/i);
+	assert.doesNotMatch(route, /auth_email|data-email|email as/i);
 });
 
 test('Workspace Team route exposes CSV export controls without membership mutation UI', async () => {
@@ -57,7 +57,8 @@ test('Workspace Team route exposes CSV export controls without membership mutati
 	assert.match(route, /data-membership-history/);
 	assert.match(route, /Owner or Admin access is required for future team CSV administration/);
 	assert.match(route, /No actions in this release/);
-	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\(/);
+	assert.match(route, /recalculate_workspace_membership_change_proposals/);
+	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\('confirm_workspace_membership_selected_change_set'/);
 });
 
 test('Workspace Team route renders roles states filters search and accessible responsive table', async () => {

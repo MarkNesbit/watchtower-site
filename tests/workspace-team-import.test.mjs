@@ -564,10 +564,10 @@ test('Workspace Team page exposes upload validation UI results and no apply cont
 	assert.match(page, /name="team_csv"/);
 	assert.match(page, /Upload and validate/);
 	assert.match(page, /data-workspace-team-import-result/);
-	assert.match(page, /Proposed additions/);
-	assert.match(page, /Invalid rows/);
+	assert.match(page, /importSummary\.invalid_rows \?\? 0/);
 	assert.match(page, /No changes are applied/);
 	assert.match(page, /Review proposed changes/);
+	assert.doesNotMatch(page, /Proposed additions/);
 	assert.doesNotMatch(page, /Apply changes|Send invitation/);
 	assert.match(docs, /Workers-compatible CSV parser/);
 	assert.match(docs, /rejects a released file with a clear message to download a new editable export/);

@@ -7,6 +7,7 @@ import {
 	buildWorkspaceTeamCheckoutReleasePath,
 	buildWorkspaceTeamExportPath,
 	buildWorkspaceTeamImportPath,
+	buildWorkspaceTeamImportReviewConfirmPath,
 	buildWorkspaceTeamImportReviewPath,
 	getWorkspaceBySlug,
 } from '../../../../lib/projects';
@@ -70,8 +71,44 @@ let importRows: Array<{
 	field_differences: Array<{ field?: string; from?: unknown; to?: unknown }> | null;
 	is_unchanged: boolean;
 }> = [];
+type JsonRecord = Record<string, unknown>;
+type ReviewModalItem = {
+	row_id: string;
+	decision_id: string | null;
+	source_row_number: number;
+	proposed_change_type: string;
+	validation_state: string;
+	validation_messages: Array<{ field?: string; message?: string }>;
+	source_export_values: JsonRecord;
+	current_live_values: JsonRecord;
+	proposed_values: JsonRecord;
+	field_differences: Array<{ field?: string; from?: unknown; to?: unknown }>;
+	live_recalculation_status: string;
+	live_recalculation_messages: Array<{ message?: string }>;
+	impact_counts: JsonRecord;
+	decision: string;
+};
+let reviewModalItems: ReviewModalItem[] = [];
 let activeCheckout: WorkspaceTeamActiveEditableCheckout | null = null;
 
+const asRecord = (value: unknown): JsonRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
+const asArray = <T,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
+const textValue = (value: unknown, fallback = 'Not set') => {
+	const text = value === null || value === undefined ? '' : String(value).trim();
+	return text || fallback;
+};
+const labelFromToken = (value: unknown, fallback = 'Not set') => {
+	const text = textValue(value, fallback);
+	if (text === fallback) return text;
+	return text.split('_').filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+};
+const fieldLabel = (value: unknown) => ({
+	first_name: 'First name',
+	last_name: 'Last name',
+	email: 'Contact email',
+	workspace_role: 'Workspace role',
+	membership_status: 'Membership status',
+}[String(value)] ?? labelFromToken(value));
 const formatDate = (value: string | null) => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value))
 	: 'Not available';
@@ -138,6 +175,23 @@ try {
 						.order('source_row_number', { ascending: true });
 					if (rowError) throw rowError;
 					importRows = rowData ?? [];
+
+					if (['validated', 'stale_review_required', 'approval_pending'].includes(importRun.status) && !importRun.source_superseded) {
+						const { data: proposalData, error: proposalError } = await serverSupabase.rpc('recalculate_workspace_membership_change_proposals', {
+							target_import_run_id: importRun.id,
+						});
+						if (proposalError) throw proposalError;
+						reviewModalItems = asArray<ReviewModalItem>(proposalData).map((item) => ({
+							...item,
+							validation_messages: asArray<{ field?: string; message?: string }>(item.validation_messages),
+							source_export_values: asRecord(item.source_export_values),
+							current_live_values: asRecord(item.current_live_values),
+							proposed_values: asRecord(item.proposed_values),
+							field_differences: asArray<{ field?: string; from?: unknown; to?: unknown }>(item.field_differences),
+							live_recalculation_messages: asArray<{ message?: string }>(item.live_recalculation_messages),
+							impact_counts: asRecord(item.impact_counts),
+						}));
+					}
 				}
 			}
 		}
@@ -165,6 +219,7 @@ const exportAction = workspaceSlug ? buildWorkspaceTeamExportPath(workspaceSlug)
 const checkoutReleaseAction = workspaceSlug ? buildWorkspaceTeamCheckoutReleasePath(workspaceSlug) : '';
 const importAction = workspaceSlug ? buildWorkspaceTeamImportPath(workspaceSlug) : '';
 const importReviewPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewPath(workspaceSlug, importRun.id) : '';
+const importReviewConfirmPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewConfirmPath(workspaceSlug, importRun.id) : '';
 const importMaxSizeLabel = `${Math.round(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES / 1024 / 1024)} MB`;
 const checkoutEditorMember = activeCheckout?.requested_by
 	? members.find((member) => member.profile_id === activeCheckout?.requested_by)
@@ -218,30 +273,56 @@ const checkoutReleaseMessage = checkoutReleaseState === 'success'
 			failed: 'Editable team-file checkout could not be released. Refresh the page and try again.',
 		} as Record<string, string>)[checkoutReleaseError] ?? 'Editable team-file checkout could not be released. Refresh the page and try again.'
 		: '';
+const reviewConfirmationState = String(Astro.url.searchParams.get('review_confirmation') ?? '');
+const reviewConfirmationMessage = ({
+	success: 'Selected team changes approved for later application. No workspace access changes were made.',
+	error: 'Selected team changes could not be confirmed. Open review again to check any blocked or changed rows.',
+	permission: 'Only active Workspace Owners and Admins can confirm team changes.',
+	signin: 'Sign in before confirming team changes.',
+	workspace: 'Workspace access could not be confirmed for team change review.',
+	method: 'Team change confirmation requires the review form.',
+} as Record<string, string>)[reviewConfirmationState] ?? '';
 const importSummary = importRun?.validation_summary ?? {};
-const importGroups = {
-	additions: importRows.filter((row) => row.proposed_change_type === 'addition'),
-	corrections: importRows.filter((row) => row.proposed_change_type === 'identity_correction'),
-	deactivations: importRows.filter((row) => row.proposed_change_type === 'deactivation'),
-	reactivations: importRows.filter((row) => row.proposed_change_type === 'reactivation'),
-	warnings: importRows.filter((row) => row.validation_state === 'warning'),
-	invalid: importRows.filter((row) => row.validation_state === 'error' || row.proposed_change_type === 'invalid'),
-};
 const importStatusLabel = (status: string) => status
 	.split('_')
 	.filter(Boolean)
 	.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
 	.join(' ');
-const importRowIdentity = (row: typeof importRows[number]) => row.supplied_membership_id || row.supplied_user_id || 'New workspace person';
 const fieldDifferenceLabel = (difference: { field?: string; from?: unknown; to?: unknown }) => {
-	const field = difference.field ?? 'field';
+	const field = fieldLabel(difference.field ?? 'field');
 	const fromValue = difference.from === null || difference.from === undefined || difference.from === '' ? 'blank' : String(difference.from);
 	const toValue = difference.to === null || difference.to === undefined || difference.to === '' ? 'blank' : String(difference.to);
 	return `${field}: ${fromValue} -> ${toValue}`;
 };
 const validationMessageLabel = (entry: { field?: string; message?: string }) => entry.field
-	? `${entry.field}: ${entry.message ?? 'Validation issue'}`
+	? `${fieldLabel(entry.field)}: ${entry.message ?? 'Validation issue'}`
 	: entry.message ?? 'Validation issue';
+const reviewItemName = (item: ReviewModalItem) => {
+	const proposed = asRecord(item.proposed_values);
+	const current = asRecord(item.current_live_values);
+	const source = asRecord(item.source_export_values);
+	const first = textValue(proposed.first_name ?? current.first_name ?? source.first_name, '');
+	const last = textValue(proposed.last_name ?? current.last_name ?? source.last_name, '');
+	return `${first} ${last}`.trim() || textValue(current.email ?? proposed.email ?? source.email ?? current.login_name ?? source.login_name, 'Workspace person');
+};
+const reviewItemEmail = (item: ReviewModalItem) => textValue(item.proposed_values.email ?? item.current_live_values.email ?? item.source_export_values.email, 'Contact email not set');
+const reviewItemRole = (item: ReviewModalItem) => labelFromToken(item.proposed_values.workspace_role ?? item.current_live_values.workspace_role ?? item.source_export_values.workspace_role ?? 'viewer');
+const reviewItemTypeLabel = (item: ReviewModalItem) => ({
+	addition: 'Addition',
+	identity_correction: 'Correction',
+	deactivation: 'Deactivation',
+	reactivation: 'Reactivation',
+	invalid: 'Invalid row',
+}[item.proposed_change_type] ?? labelFromToken(item.proposed_change_type));
+const reviewItemIsBlocked = (item: ReviewModalItem) => (
+	item.validation_state === 'error'
+	|| item.proposed_change_type === 'invalid'
+	|| ['blocked', 'superseded', 'requires_revalidation', 'no_longer_required'].includes(item.live_recalculation_status)
+);
+const selectableReviewItems = reviewModalItems.filter((item) => !reviewItemIsBlocked(item));
+const blockedReviewItems = reviewModalItems.filter(reviewItemIsBlocked);
+const reviewModalCanOpen = Boolean(importRun && importReviewConfirmPath && selectableReviewItems.length > 0 && ['validated', 'stale_review_required', 'approval_pending'].includes(importRun.status) && !importRun.source_superseded);
+const reviewModalInitialSelectedCount = selectableReviewItems.length;
 ---
 <AuthenticatedLayout title="Workspace Team | WatchTower">
 	<section class="workspace-team-page" data-workspace-team-page>
@@ -381,6 +462,11 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 							{checkoutReleaseMessage}
 						</p>
 					)}
+					{reviewConfirmationMessage && (
+						<p class={reviewConfirmationState === 'success' ? 'workspace-team-release-message' : 'workspace-team-release-message workspace-team-release-message--error'} role="status" data-workspace-team-review-confirmation-message>
+							{reviewConfirmationMessage}
+						</p>
+					)}
 
 					{canAdministerLater && importRun && (
 						<section class="workspace-team-import-result" aria-labelledby="workspace-team-import-result-heading" data-workspace-team-import-result>
@@ -411,39 +497,114 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 								<span><strong>{importSummary.unchanged ?? 0}</strong> unchanged</span>
 								<span><strong>{importSummary.invalid_rows ?? 0}</strong> invalid</span>
 							</div>
-							{importReviewPath && ['validated', 'stale_review_required', 'approved_for_application'].includes(importRun.status) && !importRun.source_superseded && (
+							{reviewModalCanOpen ? (
 								<p class="workspace-team-import-review-link">
-									<a class="button button--primary" href={importReviewPath} data-workspace-team-import-review-link>
+									<button class="button button--primary" type="button" aria-haspopup="dialog" data-workspace-team-review-open="workspace-team-review-modal" data-workspace-team-import-review-link>
 										Review proposed changes
-									</a>
+									</button>
+								</p>
+							) : importReviewPath && importRun.status === 'approved_for_application' ? (
+								<p class="workspace-team-import-review-link">
+									<a class="button button--secondary" href={importReviewPath}>View approved change set</a>
+								</p>
+							) : (
+								<p class="workspace-team-import-review-link">
+									<button class="button button--primary" type="button" disabled data-workspace-team-review-disabled>
+										Review proposed changes
+									</button>
 								</p>
 							)}
-							{([
-								['Proposed additions', importGroups.additions],
-								['Proposed corrections', importGroups.corrections],
-								['Proposed deactivations', importGroups.deactivations],
-								['Proposed reactivations', importGroups.reactivations],
-								['Warnings', importGroups.warnings],
-								['Invalid rows', importGroups.invalid],
-							] as const).map(([title, rows]) => rows.length > 0 && (
-								<div class="workspace-team-import-group">
-									<h4>{title}</h4>
-									<ul>
-										{rows.map((row) => (
-											<li>
-												<strong>Row {row.source_row_number}: {importRowIdentity(row)}</strong>
-												{row.field_differences && row.field_differences.length > 0 && (
-													<p>{row.field_differences.map(fieldDifferenceLabel).join('; ')}</p>
-												)}
-												{row.validation_messages && row.validation_messages.length > 0 && (
-													<p>{row.validation_messages.map(validationMessageLabel).join('; ')}</p>
-												)}
-											</li>
-										))}
-									</ul>
-								</div>
-							))}
 						</section>
+					)}
+
+					{canAdministerLater && importRun && importReviewConfirmPath && (
+						<dialog class="workspace-team-review-modal" id="workspace-team-review-modal" aria-labelledby="workspace-team-review-modal-title" aria-describedby="workspace-team-review-modal-description" data-workspace-team-review-dialog>
+							<form method="post" action={importReviewConfirmPath} data-workspace-team-review-form>
+								<div class="workspace-team-review-modal__header">
+									<div>
+										<h3 id="workspace-team-review-modal-title" tabindex="-1" data-workspace-team-dialog-focus>Review proposed changes</h3>
+										<p id="workspace-team-review-modal-description">Review the proposed team changes below. Switch off anything that should not proceed, then accept the selected changes.</p>
+									</div>
+									<div class="workspace-team-review-modal__counts" aria-label="Review selection counts" data-workspace-team-review-counts>
+										<span><strong>{reviewModalItems.length}</strong> total proposals</span>
+										<span><strong data-review-selected-count>{reviewModalInitialSelectedCount}</strong> selected</span>
+										<span><strong data-review-excluded-count>{0}</strong> excluded</span>
+										<span><strong>{blockedReviewItems.length}</strong> invalid or blocked</span>
+									</div>
+								</div>
+								<div class="workspace-team-review-modal__tools">
+									<label>
+										<span>Find proposals</span>
+										<input type="search" placeholder="Name, email or change type" data-review-search />
+									</label>
+									<div>
+										<button class="button button--secondary" type="button" data-review-select-all>Select all</button>
+										<button class="button button--secondary" type="button" data-review-clear-all>Clear all</button>
+									</div>
+								</div>
+								<p class="workspace-team-review-modal__live" aria-live="polite" data-review-live-count>{reviewModalInitialSelectedCount} selected · 0 excluded</p>
+								<div class="workspace-team-review-modal__list" data-review-list>
+									{reviewModalItems.map((item) => {
+										const blocked = reviewItemIsBlocked(item);
+										const messages = [
+											...item.validation_messages.map(validationMessageLabel),
+											...item.live_recalculation_messages.map((entry) => entry.message ?? 'Live recalculation issue'),
+										].filter(Boolean);
+										const impact = asRecord(item.impact_counts);
+										return (
+											<article class={blocked ? 'workspace-team-review-row workspace-team-review-row--blocked' : 'workspace-team-review-row'} data-review-row data-review-search-text={`${reviewItemName(item)} ${reviewItemEmail(item)} ${reviewItemTypeLabel(item)}`.toLowerCase()} data-review-blocked={blocked ? 'true' : 'false'}>
+												<div class="workspace-team-review-row__switch">
+													{blocked ? (
+														<span class="workspace-team-review-row__blocked">Excluded</span>
+													) : (
+														<label>
+															<input type="checkbox" name="selected_import_row_id" value={item.row_id} checked data-review-switch aria-describedby={`review-row-${item.row_id}-details`} />
+															<span>Include</span>
+														</label>
+													)}
+												</div>
+												<div class="workspace-team-review-row__person" id={`review-row-${item.row_id}-details`}>
+													<strong>{reviewItemName(item)}</strong>
+													<span>{reviewItemEmail(item)}</span>
+													<small>CSV row {item.source_row_number}</small>
+												</div>
+												<div class="workspace-team-review-row__change">
+													<span>{reviewItemRole(item)} · {reviewItemTypeLabel(item)}</span>
+													{item.proposed_change_type === 'identity_correction' && item.field_differences.length > 0 && (
+														<small>{item.field_differences.map(fieldDifferenceLabel).join('; ')}</small>
+													)}
+													{item.proposed_change_type === 'deactivation' && (
+														<small>{Number(impact.active_risks_owned ?? 0)} risks, {Number(impact.non_terminal_actions_assigned ?? 0)} actions, {Number(impact.non_terminal_approvals_held ?? 0)} approvals, {Number(impact.active_project_roles ?? 0)} project roles</small>
+													)}
+													{item.proposed_change_type === 'reactivation' && (
+														<small>Current state {labelFromToken(item.current_live_values.membership_status)}.</small>
+													)}
+													{messages.length > 0 && <small>{messages.join('; ')}</small>}
+												</div>
+											</article>
+										);
+									})}
+								</div>
+								<div class="workspace-team-review-modal__confirm" hidden data-review-confirmation>
+									<h4>Confirm selected team changes?</h4>
+									<p><strong data-review-confirm-selected>{reviewModalInitialSelectedCount}</strong> changes will be approved for application.</p>
+									<p><strong data-review-confirm-excluded>{0}</strong> changes will be excluded. No workspace access changes will be made until the application stage.</p>
+									<label>
+										<span>Optional batch note</span>
+										<input type="text" name="batch_reason" placeholder="Optional audit note" />
+									</label>
+								</div>
+								<div class="workspace-team-review-modal__footer">
+									<span data-review-footer-count>{reviewModalInitialSelectedCount} selected · 0 excluded</span>
+									<div>
+										<button class="button button--secondary" type="button" data-workspace-team-dialog-cancel>Cancel</button>
+										<button class="button button--secondary" type="button" hidden data-review-back>Back to review</button>
+										<button class="button button--primary" type="button" data-review-accept>Accept {reviewModalInitialSelectedCount} selected changes</button>
+										<button class="button button--primary" type="submit" hidden data-review-confirm>Confirm selected changes</button>
+									</div>
+								</div>
+							</form>
+						</dialog>
 					)}
 
 					{canAdministerLater && importAction && (
@@ -642,16 +803,123 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 		});
 	});
 
-	document.querySelectorAll('[data-workspace-team-export-dialog], [data-workspace-team-import-dialog], [data-workspace-team-checkout-release-dialog]').forEach((dialog) => {
+	document.querySelectorAll('[data-workspace-team-review-open]').forEach((trigger) => {
+		trigger.addEventListener('click', (event) => {
+			event.preventDefault();
+			const dialogId = trigger.getAttribute('data-workspace-team-review-open');
+			const dialog = dialogId ? document.getElementById(dialogId) : null;
+			if (!(dialog instanceof HTMLDialogElement)) return;
+			lastTriggerByDialog.set(dialog, trigger);
+			if (!dialog.open) dialog.showModal();
+			const focusTarget = dialog.querySelector('[data-workspace-team-dialog-focus], [data-review-search], button, input');
+			if (focusTarget instanceof HTMLElement) focusTarget.focus();
+		});
+	});
+
+	document.querySelectorAll('[data-workspace-team-export-dialog], [data-workspace-team-import-dialog], [data-workspace-team-checkout-release-dialog], [data-workspace-team-review-dialog]').forEach((dialog) => {
 		if (!(dialog instanceof HTMLDialogElement)) return;
 		dialog.addEventListener('close', () => {
 			const trigger = lastTriggerByDialog.get(dialog);
 			if (trigger instanceof HTMLElement) trigger.focus();
 		});
+		dialog.addEventListener('keydown', (event) => {
+			if (event.key !== 'Tab') return;
+			const focusable = Array.from(dialog.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+				.filter((element) => element instanceof HTMLElement && !element.hidden);
+			const first = focusable[0];
+			const last = focusable[focusable.length - 1];
+			if (!(first instanceof HTMLElement) || !(last instanceof HTMLElement)) return;
+			if (event.shiftKey && document.activeElement === first) {
+				event.preventDefault();
+				last.focus();
+			} else if (!event.shiftKey && document.activeElement === last) {
+				event.preventDefault();
+				first.focus();
+			}
+		});
 		dialog.querySelectorAll('[data-workspace-team-dialog-cancel]').forEach((button) => {
 			button.addEventListener('click', () => dialog.close());
 		});
 	});
+
+	function setupReviewModal(dialog) {
+		if (!(dialog instanceof HTMLDialogElement)) return;
+		const rows = Array.from(dialog.querySelectorAll('[data-review-row]'));
+		const selectableSwitches = () => Array.from(dialog.querySelectorAll('[data-review-switch]')).filter((input) => input instanceof HTMLInputElement);
+		const selectedCountTarget = dialog.querySelector('[data-review-selected-count]');
+		const excludedCountTarget = dialog.querySelector('[data-review-excluded-count]');
+		const liveTarget = dialog.querySelector('[data-review-live-count]');
+		const footerCount = dialog.querySelector('[data-review-footer-count]');
+		const acceptButton = dialog.querySelector('[data-review-accept]');
+		const confirmButton = dialog.querySelector('[data-review-confirm]');
+		const backButton = dialog.querySelector('[data-review-back]');
+		const list = dialog.querySelector('[data-review-list]');
+		const confirmation = dialog.querySelector('[data-review-confirmation]');
+		const confirmSelected = dialog.querySelector('[data-review-confirm-selected]');
+		const confirmExcluded = dialog.querySelector('[data-review-confirm-excluded]');
+		const search = dialog.querySelector('[data-review-search]');
+
+		function counts() {
+			const switches = selectableSwitches();
+			const selected = switches.filter((input) => input.checked).length;
+			return { selected, excluded: switches.length - selected };
+		}
+
+		function updateCounts() {
+			const { selected, excluded } = counts();
+			const label = `${selected} selected · ${excluded} excluded`;
+			if (selectedCountTarget) selectedCountTarget.textContent = String(selected);
+			if (excludedCountTarget) excludedCountTarget.textContent = String(excluded);
+			if (liveTarget) liveTarget.textContent = label;
+			if (footerCount) footerCount.textContent = label;
+			if (confirmSelected) confirmSelected.textContent = String(selected);
+			if (confirmExcluded) confirmExcluded.textContent = String(excluded);
+			if (acceptButton instanceof HTMLButtonElement) {
+				acceptButton.disabled = selected === 0;
+				acceptButton.textContent = `Accept ${selected} selected ${selected === 1 ? 'change' : 'changes'}`;
+			}
+			if (confirmButton instanceof HTMLButtonElement) confirmButton.disabled = selected === 0;
+			selectableSwitches().forEach((input) => {
+				input.closest('[data-review-row]')?.classList.toggle('workspace-team-review-row--excluded', !input.checked);
+			});
+		}
+
+		function setConfirming(confirming) {
+			if (list instanceof HTMLElement) list.hidden = confirming;
+			if (confirmation instanceof HTMLElement) confirmation.hidden = !confirming;
+			if (acceptButton instanceof HTMLButtonElement) acceptButton.hidden = confirming;
+			if (confirmButton instanceof HTMLButtonElement) confirmButton.hidden = !confirming;
+			if (backButton instanceof HTMLButtonElement) backButton.hidden = !confirming;
+			updateCounts();
+			const focusTarget = confirming ? confirmButton : search;
+			if (focusTarget instanceof HTMLElement) focusTarget.focus();
+		}
+
+		selectableSwitches().forEach((input) => input.addEventListener('change', updateCounts));
+		dialog.querySelector('[data-review-select-all]')?.addEventListener('click', () => {
+			selectableSwitches().forEach((input) => { input.checked = true; });
+			updateCounts();
+		});
+		dialog.querySelector('[data-review-clear-all]')?.addEventListener('click', () => {
+			selectableSwitches().forEach((input) => { input.checked = false; });
+			updateCounts();
+		});
+		if (acceptButton instanceof HTMLButtonElement) acceptButton.addEventListener('click', () => setConfirming(true));
+		if (backButton instanceof HTMLButtonElement) backButton.addEventListener('click', () => setConfirming(false));
+		if (search instanceof HTMLInputElement) {
+			search.addEventListener('input', () => {
+				const query = search.value.trim().toLowerCase();
+				rows.forEach((row) => {
+					if (!(row instanceof HTMLElement)) return;
+					row.hidden = Boolean(query) && !String(row.dataset.reviewSearchText || '').includes(query);
+				});
+			});
+		}
+		dialog.addEventListener('close', () => setConfirming(false));
+		updateCounts();
+	}
+
+	setupReviewModal(document.querySelector('[data-workspace-team-review-dialog]'));
 
 	document.querySelectorAll('[data-workspace-team-checkout-release-form]').forEach((form) => {
 		if (!(form instanceof HTMLFormElement)) return;
@@ -954,34 +1222,6 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 		margin: 0;
 	}
 
-	.workspace-team-import-group {
-		display: grid;
-		gap: 0.45rem;
-	}
-
-	.workspace-team-import-group h4 {
-		margin: 0;
-		font-size: 1rem;
-		letter-spacing: 0;
-	}
-
-	.workspace-team-import-group ul {
-		display: grid;
-		gap: 0.4rem;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.workspace-team-import-group li {
-		display: grid;
-		gap: 0.2rem;
-		border: 1px solid rgba(110, 181, 224, 0.16);
-		border-radius: 0.5rem;
-		padding: 0.65rem 0.75rem;
-		background: rgba(3, 12, 24, 0.46);
-	}
-
 	.workspace-team-import-file {
 		display: grid;
 		gap: 0.35rem;
@@ -1048,6 +1288,231 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 
 	.workspace-team-export-dialog__actions form {
 		margin: 0;
+	}
+
+	.workspace-team-review-modal {
+		width: min(100% - 1.5rem, 72rem);
+		max-height: min(92vh, 58rem);
+		border: 1px solid rgba(110, 181, 224, 0.34);
+		border-radius: 0.75rem;
+		padding: 0;
+		background: #07111d;
+		color: var(--text);
+		box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+	}
+
+	.workspace-team-review-modal::backdrop {
+		background: rgba(2, 8, 23, 0.72);
+	}
+
+	.workspace-team-review-modal form {
+		display: grid;
+		grid-template-rows: auto auto auto minmax(12rem, 1fr) auto;
+		max-height: min(92vh, 58rem);
+		margin: 0;
+	}
+
+	.workspace-team-review-modal__header,
+	.workspace-team-review-modal__footer {
+		position: sticky;
+		z-index: 1;
+		background: #07111d;
+	}
+
+	.workspace-team-review-modal__header {
+		top: 0;
+		display: grid;
+		gap: 0.75rem;
+		border-bottom: 1px solid rgba(110, 181, 224, 0.2);
+		padding: 1rem;
+	}
+
+	.workspace-team-review-modal__header h3 {
+		margin-bottom: 0.35rem;
+		font-size: 1.35rem;
+		letter-spacing: 0;
+	}
+
+	.workspace-team-review-modal__header p,
+	.workspace-team-review-modal__live,
+	.workspace-team-review-row small,
+	.workspace-team-review-row span {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-review-modal__counts {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		gap: 0.45rem;
+	}
+
+	.workspace-team-review-modal__counts span {
+		display: grid;
+		gap: 0.1rem;
+		border: 1px solid rgba(110, 181, 224, 0.18);
+		border-radius: 0.5rem;
+		padding: 0.5rem;
+		background: rgba(18, 31, 42, 0.58);
+		color: var(--muted-strong);
+		font-size: 0.84rem;
+	}
+
+	.workspace-team-review-modal__counts strong {
+		color: var(--text);
+		font-size: 1.05rem;
+	}
+
+	.workspace-team-review-modal__tools {
+		display: flex;
+		align-items: end;
+		justify-content: space-between;
+		gap: 0.75rem;
+		border-bottom: 1px solid rgba(110, 181, 224, 0.14);
+		padding: 0.75rem 1rem;
+	}
+
+	.workspace-team-review-modal__tools label,
+	.workspace-team-review-modal__confirm label {
+		display: grid;
+		gap: 0.3rem;
+		color: var(--muted-strong);
+		font-weight: 800;
+	}
+
+	.workspace-team-review-modal__tools input,
+	.workspace-team-review-modal__confirm input {
+		width: min(100%, 24rem);
+		border: 1px solid rgba(110, 181, 224, 0.3);
+		border-radius: 0.5rem;
+		padding: 0.58rem 0.7rem;
+		background: rgba(3, 12, 24, 0.7);
+		color: var(--text);
+		font: inherit;
+	}
+
+	.workspace-team-review-modal__tools div,
+	.workspace-team-review-modal__footer div {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+
+	.workspace-team-review-modal__live {
+		padding: 0.65rem 1rem 0;
+		font-weight: 850;
+	}
+
+	.workspace-team-review-modal__list {
+		display: grid;
+		gap: 0.35rem;
+		overflow: auto;
+		padding: 0.75rem 1rem 1rem;
+	}
+
+	.workspace-team-review-row {
+		display: grid;
+		grid-template-columns: 5.5rem minmax(13rem, 1fr) minmax(14rem, 1.2fr);
+		gap: 0.75rem;
+		align-items: center;
+		border: 1px solid rgba(110, 181, 224, 0.16);
+		border-radius: 0.5rem;
+		padding: 0.6rem 0.7rem;
+		background: rgba(3, 12, 24, 0.46);
+	}
+
+	.workspace-team-review-row--excluded {
+		border-color: rgba(245, 171, 53, 0.28);
+		background: rgba(245, 171, 53, 0.08);
+	}
+
+	.workspace-team-review-row--blocked {
+		border-color: rgba(239, 68, 68, 0.32);
+		background: rgba(239, 68, 68, 0.08);
+	}
+
+	.workspace-team-review-row__switch label,
+	.workspace-team-review-row__person,
+	.workspace-team-review-row__change {
+		display: grid;
+		gap: 0.12rem;
+		min-width: 0;
+	}
+
+	.workspace-team-review-row__switch label {
+		grid-template-columns: auto 1fr;
+		align-items: center;
+		font-weight: 850;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-review-row__switch input {
+		width: 1.2rem;
+		height: 1.2rem;
+		accent-color: #6eb5e0;
+	}
+
+	.workspace-team-review-row__blocked {
+		display: inline-flex;
+		width: fit-content;
+		border: 1px solid rgba(239, 68, 68, 0.34);
+		border-radius: 999px;
+		padding: 0.22rem 0.48rem;
+		color: #fecaca;
+		font-size: 0.82rem;
+		font-weight: 850;
+	}
+
+	.workspace-team-review-row strong,
+	.workspace-team-review-row span,
+	.workspace-team-review-row small {
+		overflow-wrap: anywhere;
+	}
+
+	.workspace-team-review-row strong {
+		color: var(--text);
+	}
+
+	.workspace-team-review-modal__confirm {
+		display: grid;
+		gap: 0.55rem;
+		padding: 1rem;
+	}
+
+	.workspace-team-review-modal__confirm[hidden],
+	.workspace-team-review-modal__list[hidden] {
+		display: none;
+	}
+
+	.workspace-team-review-modal__confirm h4 {
+		margin: 0;
+		font-size: 1.15rem;
+		letter-spacing: 0;
+	}
+
+	.workspace-team-review-modal__confirm p {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-review-modal__footer {
+		bottom: 0;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		border-top: 1px solid rgba(110, 181, 224, 0.2);
+		padding: 0.75rem 1rem;
+	}
+
+	.workspace-team-review-modal__footer > span {
+		color: var(--muted-strong);
+		font-weight: 850;
+	}
+
+	.workspace-team-review-modal button:disabled {
+		opacity: 0.62;
+		cursor: not-allowed;
 	}
 
 	.workspace-team-controls {
@@ -1216,6 +1681,17 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 
 		.workspace-team-import-summary {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.workspace-team-review-modal__counts,
+		.workspace-team-review-row {
+			grid-template-columns: 1fr;
+		}
+
+		.workspace-team-review-modal__tools,
+		.workspace-team-review-modal__footer {
+			display: grid;
+			align-items: stretch;
 		}
 
 		.workspace-team-export-dialog__actions {
