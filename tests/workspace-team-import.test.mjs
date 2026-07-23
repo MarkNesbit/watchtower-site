@@ -215,9 +215,7 @@ test('Workspace Team import rejects invalid snapshot version formats without num
 	const rejected = ['', '0', '-1', '1.5', '1e18', '+123', 'abc', '12 34'];
 
 	for (const snapshotVersion of rejected) {
-		const text = csv([{ ...sourceRows()[0] }], {
-			membership_snapshot_version: snapshotVersion,
-		});
+		const text = csv([{ ...sourceRows()[0] }]).replace(',12345,', `,${snapshotVersion},`);
 		const result = validate(text);
 
 		assert.equal(result.status, 'validation_failed', snapshotVersion || 'blank');

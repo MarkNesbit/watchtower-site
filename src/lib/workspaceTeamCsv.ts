@@ -53,6 +53,27 @@ export type WorkspaceTeamCsvExport = {
 };
 
 const FORMULA_PREFIX_PATTERN = /^[=+\-@]/;
+const SNAPSHOT_VERSION_PATTERN = /^[1-9][0-9]*$/;
+const MAX_EXACT_NUMBER_SNAPSHOT_VERSION = 9007199254740991;
+
+export function normaliseWorkspaceTeamSnapshotVersion(value: unknown): string | null {
+	if (typeof value === 'bigint') return value > 0n ? value.toString() : null;
+	if (typeof value === 'number') {
+		if (!globalThis.isFinite(value) || Math.trunc(value) !== value || value <= 0 || value > MAX_EXACT_NUMBER_SNAPSHOT_VERSION) return null;
+		return String(value);
+	}
+	const text = value === null || value === undefined ? '' : String(value).trim();
+	return SNAPSHOT_VERSION_PATTERN.test(text) ? text : null;
+}
+
+export function normaliseWorkspaceTeamCsvExport(exportRun: WorkspaceTeamCsvExport): WorkspaceTeamCsvExport {
+	const snapshotVersion = normaliseWorkspaceTeamSnapshotVersion(exportRun.membership_snapshot_version);
+	if (!snapshotVersion) throw new Error('Workspace Team CSV export returned an unsafe membership snapshot version.');
+	return {
+		...exportRun,
+		membership_snapshot_version: snapshotVersion,
+	};
+}
 
 function normaliseCsvValue(value: unknown): string {
 	if (value === null || value === undefined) return '';
@@ -68,7 +89,11 @@ export function encodeCsvCell(value: unknown): string {
 
 function rowValue(exportRun: WorkspaceTeamCsvExport, row: WorkspaceTeamCsvRow, column: WorkspaceTeamCsvColumn): unknown {
 	if (column === 'export_id') return exportRun.export_id;
-	if (column === 'membership_snapshot_version') return exportRun.membership_snapshot_version;
+	if (column === 'membership_snapshot_version') {
+		const snapshotVersion = normaliseWorkspaceTeamSnapshotVersion(exportRun.membership_snapshot_version);
+		if (!snapshotVersion) throw new Error('Workspace Team CSV export returned an unsafe membership snapshot version.');
+		return snapshotVersion;
+	}
 	if (column === 'exported_at') return exportRun.exported_at;
 	if (column === 'export_mode') return exportRun.export_mode;
 	return row[column];

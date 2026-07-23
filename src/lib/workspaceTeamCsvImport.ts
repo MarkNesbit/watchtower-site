@@ -1,5 +1,6 @@
 import { WORKSPACE_ROLES, isWorkspaceRole, type WorkspaceRole } from './permissions.ts';
-import { WORKSPACE_TEAM_CSV_COLUMNS, type WorkspaceTeamCsvColumn } from './workspaceTeamCsv.ts';
+import { WORKSPACE_TEAM_CSV_COLUMNS, normaliseWorkspaceTeamSnapshotVersion, type WorkspaceTeamCsvColumn } from './workspaceTeamCsv.ts';
+export { normaliseWorkspaceTeamSnapshotVersion } from './workspaceTeamCsv.ts';
 
 export const WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES = 1024 * 1024;
 export const WORKSPACE_TEAM_IMPORT_FILE_FIELD = 'team_csv';
@@ -15,8 +16,6 @@ export const WORKSPACE_TEAM_IMPORT_ACCEPTED_CONTENT_TYPES = new Set([
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FORMULA_TRIGGER_PATTERN = /^[=+\-@]/;
-const SNAPSHOT_VERSION_PATTERN = /^[1-9][0-9]*$/;
-const MAX_EXACT_NUMBER_SNAPSHOT_VERSION = 9007199254740991;
 const METADATA_COLUMNS = ['export_id', 'membership_snapshot_version', 'exported_at', 'export_mode'] as const;
 const PROTECTED_EXISTING_COLUMNS = [
 	'login_name',
@@ -312,16 +311,6 @@ function rowIdentity(row: Record<string, string | null>): string {
 
 function message(field: string, text: string) {
 	return { field, message: text };
-}
-
-export function normaliseWorkspaceTeamSnapshotVersion(value: unknown): string | null {
-	if (typeof value === 'bigint') return value > 0n ? value.toString() : null;
-	if (typeof value === 'number') {
-		if (!globalThis.isFinite(value) || Math.trunc(value) !== value || value <= 0 || value > MAX_EXACT_NUMBER_SNAPSHOT_VERSION) return null;
-		return String(value);
-	}
-	const text = value === null || value === undefined ? '' : String(value).trim();
-	return SNAPSHOT_VERSION_PATTERN.test(text) ? text : null;
 }
 
 export function parseWorkspaceTeamCsvText(csvText: string): ParsedCsv {

@@ -9,6 +9,7 @@ import {
 } from '../../../../../../../lib/projects';
 import { isWorkspaceRole } from '../../../../../../../lib/permissions';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../../lib/supabaseServer';
+import { normaliseWorkspaceTeamSnapshotVersion } from '../../../../../../../lib/workspaceTeamCsv';
 
 type JsonRecord = Record<string, unknown>;
 type ReviewItem = {
@@ -91,6 +92,7 @@ const labelFromToken = (value: unknown, fallback = 'Not set') => {
 	if (text === fallback) return text;
 	return text.split('_').filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 };
+const snapshotLabel = (value: unknown) => normaliseWorkspaceTeamSnapshotVersion(value) ?? 'not recorded';
 const proposalLabel = (value: string) => ({
 	addition: 'Addition',
 	identity_correction: 'Identity correction',
@@ -293,7 +295,12 @@ const excludedCount = decisionItems.filter((item) => item.decision === 'excluded
 const blockedCount = blockedItems.length;
 const canConfirm = Boolean(importRun && importRun.status !== 'approved_for_application' && totalDecisionRequired > 0 && remainingCount === 0 && !decisionItems.some((item) => item.decision === 'approved' && ['blocked', 'superseded', 'requires_revalidation', 'no_longer_required'].includes(item.live_recalculation_status)));
 const finalSummary = importRun?.approved_change_set_summary ?? {};
-const latestSnapshot = reviewItems.find((item) => item.live_snapshot_version)?.live_snapshot_version ?? importRun?.approved_change_set_snapshot_version ?? importRun?.live_snapshot_version ?? null;
+const latestSnapshot = reviewItems
+	.map((item) => normaliseWorkspaceTeamSnapshotVersion(item.live_snapshot_version))
+	.find((value): value is string => Boolean(value))
+	?? normaliseWorkspaceTeamSnapshotVersion(importRun?.approved_change_set_snapshot_version)
+	?? normaliseWorkspaceTeamSnapshotVersion(importRun?.live_snapshot_version)
+	?? null;
 ---
 
 <AuthenticatedLayout title="Workspace Team Import Review | WatchTower">
@@ -362,7 +369,7 @@ const latestSnapshot = reviewItems.find((item) => item.live_snapshot_version)?.l
 							<span><strong>{finalSummary.kept_active ?? 0}</strong> kept active</span>
 							<span><strong>{finalSummary.invalid_rows_not_included ?? 0}</strong> invalid not included</span>
 						</div>
-						<p>Approved set version {importRun.approved_change_set_version}. Live snapshot {importRun.approved_change_set_snapshot_version ?? 'not recorded'}. Confirmed {formatDateTime(importRun.review_completed_at)}.</p>
+						<p>Approved set version {importRun.approved_change_set_version}. Live snapshot {snapshotLabel(importRun.approved_change_set_snapshot_version)}. Confirmed {formatDateTime(importRun.review_completed_at)}.</p>
 					</ProjectContentPanel>
 				) : (
 					<>
@@ -412,7 +419,7 @@ const latestSnapshot = reviewItems.find((item) => item.live_snapshot_version)?.l
 														{messagesForItem(item).map((message) => <li>{message}</li>)}
 													</ul>
 												)}
-												<p class="team-review-live">Live recalculation: {labelFromToken(item.live_recalculation_status)}. Snapshot {item.live_snapshot_version ?? latestSnapshot ?? 'not recorded'}.</p>
+												<p class="team-review-live">Live recalculation: {labelFromToken(item.live_recalculation_status)}. Snapshot {snapshotLabel(item.live_snapshot_version ?? latestSnapshot)}.</p>
 												{item.decided_at && (
 													<p class="team-review-decision-meta">Decision version {item.decision_version}, saved {formatDateTime(item.decided_at)}{item.decision_reason ? `: ${item.decision_reason}` : ''}</p>
 												)}
@@ -465,7 +472,7 @@ const latestSnapshot = reviewItems.find((item) => item.live_snapshot_version)?.l
 								<span><strong>{excludedCount}</strong> excluded or kept active</span>
 								<span><strong>{remainingCount}</strong> pending</span>
 								<span><strong>{blockedCount}</strong> blocked or invalid</span>
-								<span><strong>{latestSnapshot ?? 'Not recorded'}</strong> live snapshot</span>
+								<span><strong>{snapshotLabel(latestSnapshot)}</strong> live snapshot</span>
 							</div>
 							<form method="post" action={reviewPath} class="team-review-confirm-form">
 								<input type="hidden" name="intent" value="confirm_change_set" />

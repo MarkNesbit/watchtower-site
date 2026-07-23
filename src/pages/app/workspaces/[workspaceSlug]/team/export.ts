@@ -1,7 +1,7 @@
 import type { APIRoute } from 'astro';
 import { getWorkspaceBySlug } from '../../../../../lib/projects.ts';
 import { isWorkspaceRole } from '../../../../../lib/permissions.ts';
-import { buildWorkspaceTeamCsv, safeWorkspaceTeamCsvFilename, type WorkspaceTeamCsvExport, type WorkspaceTeamCsvMode } from '../../../../../lib/workspaceTeamCsv.ts';
+import { buildWorkspaceTeamCsv, normaliseWorkspaceTeamCsvExport, safeWorkspaceTeamCsvFilename, type WorkspaceTeamCsvExport, type WorkspaceTeamCsvMode } from '../../../../../lib/workspaceTeamCsv.ts';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../lib/supabaseServer.ts';
 
 function csvError(message: string, status = 400) {
@@ -52,7 +52,12 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 		return csvError(message, error.message?.includes('WT_MEMBERSHIP_EXPORT_ACTIVE_CHECKOUT') ? 409 : 400);
 	}
 
-	const exportRun = data as WorkspaceTeamCsvExport;
+	let exportRun: WorkspaceTeamCsvExport;
+	try {
+		exportRun = normaliseWorkspaceTeamCsvExport(data as WorkspaceTeamCsvExport);
+	} catch {
+		return csvError('Workspace Team CSV export returned an unsafe snapshot version. Download a fresh export after the service is updated.', 500);
+	}
 	const csv = buildWorkspaceTeamCsv(exportRun);
 	const filename = safeWorkspaceTeamCsvFilename(workspaceSlug, exportRun.exported_at, exportRun.export_mode);
 
