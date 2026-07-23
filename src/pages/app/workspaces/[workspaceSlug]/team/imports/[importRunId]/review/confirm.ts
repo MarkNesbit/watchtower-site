@@ -31,9 +31,12 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 	}
 
 	const formData = await request.formData();
-	const selectedImportRowIds = formData.getAll('selected_import_row_id')
-		.map((value) => String(value).trim())
-		.filter(Boolean);
+	const selectionSource = String(formData.get('selection_source') ?? '').trim();
+	const selectedImportRowIds = selectionSource === 'persisted_draft'
+		? null
+		: formData.getAll('selected_import_row_id')
+			.map((value) => String(value).trim())
+			.filter(Boolean);
 	const batchReason = String(formData.get('batch_reason') ?? '').trim() || null;
 
 	const { error } = await serverSupabase.rpc('confirm_workspace_membership_selected_change_set', {
@@ -47,7 +50,8 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 			routeName: 'workspace_team_bulk_review_confirmation',
 			workspaceId: organisation.id,
 			importRunId,
-			selectedCount: selectedImportRowIds.length,
+			selectedCount: selectedImportRowIds?.length ?? null,
+			selectionSource,
 			code: error.code,
 			message: error.message,
 			details: error.details,

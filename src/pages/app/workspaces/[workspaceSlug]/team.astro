@@ -7,6 +7,7 @@ import {
 	buildWorkspaceTeamCheckoutReleasePath,
 	buildWorkspaceTeamExportPath,
 	buildWorkspaceTeamImportApplyPath,
+	buildWorkspaceTeamImportReviewDraftPath,
 	buildWorkspaceTeamImportPath,
 	buildWorkspaceTeamImportReviewConfirmPath,
 	buildWorkspaceTeamImportReviewPath,
@@ -95,6 +96,9 @@ type ReviewModalItem = {
 	live_recalculation_messages: Array<{ message?: string }>;
 	impact_counts: JsonRecord;
 	decision: string;
+	review_selected: boolean | null;
+	review_draft_reason: string | null;
+	review_draft_updated_at: string | null;
 };
 let reviewModalItems: ReviewModalItem[] = [];
 let activeCheckout: WorkspaceTeamActiveEditableCheckout | null = null;
@@ -110,6 +114,10 @@ let latestApplicationRun: {
 	invitation_handoff_count: number;
 } | null = null;
 let applicationLiveSnapshotVersion: string | null = null;
+let checkoutLoadError = '';
+let importLoadError = '';
+let reviewLoadError = '';
+let applicationLoadError = '';
 
 const asRecord = (value: unknown): JsonRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
 const asArray = <T,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
@@ -135,6 +143,23 @@ const formatDate = (value: string | null) => value
 const formatDateTime = (value: string | null) => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
 	: 'Not available';
+const logWorkspaceTeamLoadFailure = (
+	queryName: string,
+	error: unknown,
+	context: { workspaceId?: string | null; importRunId?: string | null } = {},
+) => {
+	const supabaseError = error as { code?: string; message?: string; details?: string; hint?: string };
+	console.error('workspace_team_page_section_load_failed', {
+		routeName: 'workspace_team_page',
+		workspaceId: context.workspaceId ?? null,
+		importRunId: context.importRunId ?? null,
+		queryName,
+		code: supabaseError?.code,
+		message: supabaseError?.message ?? (error instanceof Error ? error.message : 'Unknown Team page load failure'),
+		details: supabaseError?.details,
+		hint: supabaseError?.hint,
+	});
+};
 
 try {
 	const serverSupabase = createSupabaseServerClient(accessToken);
@@ -168,74 +193,108 @@ try {
 		members = data ?? [];
 
 		if (canUseAdminDirectory) {
-			const { data: checkoutData, error: checkoutError } = await applyWorkspaceTeamActiveEditableCheckoutFilters(
-				serverSupabase.from('workspace_membership_export_runs'),
-				organisation.id,
-			).maybeSingle();
-			if (checkoutError) throw checkoutError;
-			activeCheckout = isWorkspaceTeamActiveEditableCheckout(checkoutData, organisation.id) ? checkoutData : null;
+			try {
+				const { data: checkoutData, error: checkoutError } = await applyWorkspaceTeamActiveEditableCheckoutFilters(
+					serverSupabase.from('workspace_membership_export_runs'),
+					organisation.id,
+				).maybeSingle();
+				if (checkoutError) throw checkoutError;
+				activeCheckout = isWorkspaceTeamActiveEditableCheckout(checkoutData, organisation.id) ? checkoutData : null;
+			} catch (error) {
+				logWorkspaceTeamLoadFailure('active_editable_checkout', error, { workspaceId: organisation.id });
+				checkoutLoadError = 'The team directory loaded, but the editable checkout status could not be retrieved. Refresh this section before downloading an editable CSV.';
+			}
 
 			if (requestedImportRunId) {
-				const { data: importData, error: importError } = await serverSupabase
-					.from('workspace_membership_import_runs')
-					.select('id, status, uploaded_at, original_filename, file_hash, source_snapshot_version, live_snapshot_version, approved_live_snapshot_version, approved_change_set_version, approved_change_set_snapshot_version, approved_change_set_summary, approved_at, approved_by, applied_at, checkout_expired, source_stale, source_superseded, validation_summary, failure_message')
-					.eq('organisation_id', organisation.id)
-					.eq('id', requestedImportRunId)
-					.maybeSingle();
-				if (importError) throw importError;
-				importRun = importData ?? null;
+				try {
+					const { data: importData, error: importError } = await serverSupabase
+						.from('workspace_membership_import_runs')
+						.select('id, status, uploaded_at, original_filename, file_hash, source_snapshot_version, live_snapshot_version, approved_live_snapshot_version, approved_change_set_version, approved_change_set_snapshot_version, approved_change_set_summary, approved_at, approved_by, applied_at, checkout_expired, source_stale, source_superseded, validation_summary, failure_message')
+						.eq('organisation_id', organisation.id)
+						.eq('id', requestedImportRunId)
+						.maybeSingle();
+					if (importError) throw importError;
+					importRun = importData ?? null;
+				} catch (error) {
+					logWorkspaceTeamLoadFailure('workspace_membership_import_runs_latest', error, { workspaceId: organisation.id, importRunId: requestedImportRunId });
+					importLoadError = 'The team directory loaded, but the latest import status could not be retrieved. Refresh the Team page to try again.';
+				}
 
 				if (importRun) {
-					const { data: rowData, error: rowError } = await serverSupabase
-						.from('workspace_membership_import_rows')
-						.select('id, source_row_number, supplied_membership_id, supplied_user_id, proposed_change_type, validation_state, validation_messages, proposed_values, field_differences, is_unchanged')
-						.eq('organisation_id', organisation.id)
-						.eq('import_run_id', importRun.id)
-						.or('is_unchanged.eq.false,validation_state.eq.error,validation_state.eq.warning')
-						.order('source_row_number', { ascending: true });
-					if (rowError) throw rowError;
-					importRows = rowData ?? [];
+					try {
+						const { data: rowData, error: rowError } = await serverSupabase
+							.from('workspace_membership_import_rows')
+							.select('id, source_row_number, supplied_membership_id, supplied_user_id, proposed_change_type, validation_state, validation_messages, proposed_values, field_differences, is_unchanged')
+							.eq('organisation_id', organisation.id)
+							.eq('import_run_id', importRun.id)
+							.or('is_unchanged.eq.false,validation_state.eq.error,validation_state.eq.warning')
+							.order('source_row_number', { ascending: true });
+						if (rowError) throw rowError;
+						importRows = rowData ?? [];
+					} catch (error) {
+						logWorkspaceTeamLoadFailure('workspace_membership_import_rows_summary', error, { workspaceId: organisation.id, importRunId: importRun.id });
+						importLoadError = 'The team directory loaded, but the import row summary could not be retrieved. Refresh the Team page to try again.';
+					}
 
 					if (['validated', 'stale_review_required', 'approval_pending', 'approved_for_application', 'application_failed_pending_review'].includes(importRun.status) && !importRun.source_superseded) {
-						const { data: proposalData, error: proposalError } = await serverSupabase.rpc('recalculate_workspace_membership_change_proposals', {
-							target_import_run_id: importRun.id,
-						});
-						if (proposalError) throw proposalError;
-						reviewModalItems = asArray<ReviewModalItem>(proposalData).map((item) => ({
-							...item,
-							validation_messages: asArray<{ field?: string; message?: string }>(item.validation_messages),
-							source_export_values: asRecord(item.source_export_values),
-							current_live_values: asRecord(item.current_live_values),
-							proposed_values: asRecord(item.proposed_values),
-							field_differences: asArray<{ field?: string; from?: unknown; to?: unknown }>(item.field_differences),
-							live_recalculation_messages: asArray<{ message?: string }>(item.live_recalculation_messages),
-							impact_counts: asRecord(item.impact_counts),
-						}));
+						try {
+							const { data: proposalData, error: proposalError } = await serverSupabase.rpc('recalculate_workspace_membership_change_proposals', {
+								target_import_run_id: importRun.id,
+							});
+							if (proposalError) throw proposalError;
+							reviewModalItems = asArray<ReviewModalItem>(proposalData).map((item) => ({
+								...item,
+								validation_messages: asArray<{ field?: string; message?: string }>(item.validation_messages),
+								source_export_values: asRecord(item.source_export_values),
+								current_live_values: asRecord(item.current_live_values),
+								proposed_values: asRecord(item.proposed_values),
+								field_differences: asArray<{ field?: string; from?: unknown; to?: unknown }>(item.field_differences),
+								live_recalculation_messages: asArray<{ message?: string }>(item.live_recalculation_messages),
+								impact_counts: asRecord(item.impact_counts),
+								review_selected: typeof item.review_selected === 'boolean' ? item.review_selected : null,
+								review_draft_reason: typeof item.review_draft_reason === 'string' ? item.review_draft_reason : null,
+								review_draft_updated_at: typeof item.review_draft_updated_at === 'string' ? item.review_draft_updated_at : null,
+							}));
+						} catch (error) {
+							logWorkspaceTeamLoadFailure('recalculate_workspace_membership_change_proposals', error, { workspaceId: organisation.id, importRunId: importRun.id });
+							reviewLoadError = 'The team directory loaded, but review proposals could not be refreshed. Refresh the Team page before continuing the review.';
+						}
 					}
 
 					if (['approved_for_application', 'application_failed_pending_review', 'applied'].includes(importRun.status)) {
-						const { data: snapshotTextData, error: snapshotTextError } = await serverSupabase.rpc('current_workspace_membership_snapshot_version_text', {
-							target_organisation_id: organisation.id,
-						});
-						if (snapshotTextError) throw snapshotTextError;
-						applicationLiveSnapshotVersion = normaliseWorkspaceTeamSnapshotVersion(snapshotTextData);
+						try {
+							const { data: snapshotTextData, error: snapshotTextError } = await serverSupabase.rpc('current_workspace_membership_snapshot_version_text', {
+								target_organisation_id: organisation.id,
+							});
+							if (snapshotTextError) throw snapshotTextError;
+							applicationLiveSnapshotVersion = normaliseWorkspaceTeamSnapshotVersion(snapshotTextData);
+						} catch (error) {
+							logWorkspaceTeamLoadFailure('current_workspace_membership_snapshot_version_text', error, { workspaceId: organisation.id, importRunId: importRun.id });
+							applicationLoadError = 'The team directory loaded, but application eligibility could not be refreshed. Refresh the Team page before applying approved changes.';
+						}
 
-						const { data: applicationRunData, error: applicationRunError } = await serverSupabase
-							.from('workspace_membership_change_application_runs')
-							.select('id, status, requested_at, completed_at, expected_counts, applied_counts, failure_code, failure_message, invitation_handoff_count')
-							.eq('organisation_id', organisation.id)
-							.eq('import_run_id', importRun.id)
-							.order('created_at', { ascending: false })
-							.limit(1)
-							.maybeSingle();
-						if (applicationRunError) throw applicationRunError;
-						latestApplicationRun = applicationRunData ?? null;
+						try {
+							const { data: applicationRunData, error: applicationRunError } = await serverSupabase
+								.from('workspace_membership_change_application_runs')
+								.select('id, status, requested_at, completed_at, expected_counts, applied_counts, failure_code, failure_message, invitation_handoff_count')
+								.eq('organisation_id', organisation.id)
+								.eq('import_run_id', importRun.id)
+								.order('created_at', { ascending: false })
+								.limit(1)
+								.maybeSingle();
+							if (applicationRunError) throw applicationRunError;
+							latestApplicationRun = applicationRunData ?? null;
+						} catch (error) {
+							logWorkspaceTeamLoadFailure('workspace_membership_change_application_runs_latest', error, { workspaceId: organisation.id, importRunId: importRun.id });
+							applicationLoadError = 'The team directory loaded, but the latest application run could not be retrieved. Refresh the Team page before applying approved changes.';
+						}
 					}
 				}
 			}
 		}
 	}
-} catch {
+} catch (error) {
+	logWorkspaceTeamLoadFailure('workspace_membership_directory_critical', error);
 	loadError = 'Workspace Team could not be loaded. Refresh the page, or check that your workspace access is still active.';
 }
 
@@ -259,6 +318,7 @@ const checkoutReleaseAction = workspaceSlug ? buildWorkspaceTeamCheckoutReleaseP
 const importAction = workspaceSlug ? buildWorkspaceTeamImportPath(workspaceSlug) : '';
 const importReviewPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewPath(workspaceSlug, importRun.id) : '';
 const importReviewConfirmPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewConfirmPath(workspaceSlug, importRun.id) : '';
+const importReviewDraftPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewDraftPath(workspaceSlug, importRun.id) : '';
 const importApplyPath = workspaceSlug && importRun ? buildWorkspaceTeamImportApplyPath(workspaceSlug, importRun.id) : '';
 const importMaxSizeLabel = `${Math.round(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES / 1024 / 1024)} MB`;
 const checkoutEditorMember = activeCheckout?.requested_by
@@ -426,10 +486,10 @@ const reviewModalCanOpen = Boolean(importRun && importReviewConfirmPath && selec
 const reviewModalIsReconfirmation = Boolean(importRun && ['approved_for_application', 'application_failed_pending_review'].includes(importRun.status));
 const reviewModalInitialSelectedCount = reviewModalIsReconfirmation
 	? selectableReviewItems.filter((item) => item.decision === 'approved').length
-	: selectableReviewItems.length;
+	: selectableReviewItems.filter((item) => item.review_selected !== false).length;
 const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 	? selectableReviewItems.filter((item) => item.decision !== 'approved').length
-	: 0;
+	: selectableReviewItems.filter((item) => item.review_selected === false).length;
 ---
 <AuthenticatedLayout title="Workspace Team | WatchTower">
 	<section class="workspace-team-page" data-workspace-team-page>
@@ -481,6 +541,11 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 								</button>
 							)}
 						</div>
+					)}
+					{checkoutLoadError && (
+						<p class="workspace-team-release-message workspace-team-release-message--error" role="status" data-workspace-team-checkout-load-error>
+							{checkoutLoadError}
+						</p>
 					)}
 					<div class="workspace-team-admin-actions" data-workspace-team-admin-controls>
 						<div>
@@ -580,6 +645,19 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 						</p>
 					)}
 
+					{canAdministerLater && importLoadError && (
+						<section class="workspace-team-import-result" aria-labelledby="workspace-team-import-load-error-heading" data-workspace-team-import-load-error>
+							<div class="workspace-team-import-result__heading">
+								<div>
+									<p class="eyebrow">CSV validation</p>
+									<h3 id="workspace-team-import-load-error-heading">Import status unavailable</h3>
+									<p>{importLoadError}</p>
+								</div>
+								<strong>Refresh required</strong>
+							</div>
+						</section>
+					)}
+
 					{canAdministerLater && importRun && (
 						<section class="workspace-team-import-result" aria-labelledby="workspace-team-import-result-heading" data-workspace-team-import-result>
 							<div class="workspace-team-import-result__heading">
@@ -609,6 +687,11 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 								<span><strong>{importSummary.unchanged ?? 0}</strong> unchanged</span>
 								<span><strong>{importSummary.invalid_rows ?? 0}</strong> invalid</span>
 							</div>
+							{reviewLoadError && (
+								<div class="workspace-team-import-warnings" role="status" data-workspace-team-review-load-error>
+									<p>{reviewLoadError}</p>
+								</div>
+							)}
 							{reviewModalCanOpen ? (
 								<p class="workspace-team-import-review-link">
 									<button class="button button--primary" type="button" aria-haspopup="dialog" data-workspace-team-review-open="workspace-team-review-modal" data-workspace-team-import-review-link>
@@ -650,6 +733,9 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 									{latestApplicationRun?.failure_message && (
 										<p class="workspace-team-application__warning">{latestApplicationRun.failure_message}</p>
 									)}
+									{applicationLoadError && (
+										<p class="workspace-team-application__warning" data-workspace-team-application-load-error>{applicationLoadError}</p>
+									)}
 									{latestApplicationRun?.status === 'applied' && (
 										<p class="workspace-team-application__handoff">{latestApplicationRun.invitation_handoff_count} invitation {latestApplicationRun.invitation_handoff_count === 1 ? 'handoff' : 'handoffs'} pending delivery.</p>
 									)}
@@ -677,7 +763,8 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 
 					{canAdministerLater && importRun && importReviewConfirmPath && (
 						<dialog class="workspace-team-review-modal" id="workspace-team-review-modal" aria-labelledby="workspace-team-review-modal-title" aria-describedby="workspace-team-review-modal-description" data-workspace-team-review-dialog>
-							<form method="post" action={importReviewConfirmPath} data-workspace-team-review-form>
+							<form method="post" action={importReviewConfirmPath} data-workspace-team-review-form data-workspace-team-review-draft-action={importReviewDraftPath}>
+								<input type="hidden" name="selection_source" value={reviewModalIsReconfirmation ? 'form_selection' : 'persisted_draft'} />
 								<div class="workspace-team-review-modal__header">
 									<div>
 										<h3 id="workspace-team-review-modal-title" tabindex="-1" data-workspace-team-dialog-focus>{reviewModalIsReconfirmation ? 'Re-review approved changes' : 'Review proposed changes'}</h3>
@@ -704,7 +791,7 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 										<button class="button button--secondary" type="button" data-review-clear-all>Clear all</button>
 									</div>
 								</div>
-								<p class="workspace-team-review-modal__live" aria-live="polite" data-review-live-count>{reviewModalInitialSelectedCount} selected · 0 excluded</p>
+								<p class="workspace-team-review-modal__live" aria-live="polite" data-review-live-count>{reviewModalInitialSelectedCount} selected · {reviewModalInitialExcludedCount} excluded</p>
 								<div class="workspace-team-review-modal__list" data-review-list>
 									{reviewModalItems.map((item) => {
 										const blocked = reviewItemIsBlocked(item);
@@ -720,7 +807,7 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 														<span class="workspace-team-review-row__blocked">Excluded</span>
 													) : (
 														<label>
-															<input type="checkbox" name="selected_import_row_id" value={item.row_id} checked={reviewModalIsReconfirmation ? item.decision === 'approved' : true} data-review-switch aria-describedby={`review-row-${item.row_id}-details`} />
+															<input type="checkbox" name="selected_import_row_id" value={item.row_id} checked={reviewModalIsReconfirmation ? item.decision === 'approved' : item.review_selected !== false} data-review-switch aria-describedby={`review-row-${item.row_id}-details`} />
 															<span>Include</span>
 														</label>
 													)}
@@ -742,6 +829,15 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 														<small>Current state {labelFromToken(item.current_live_values.membership_status)}.</small>
 													)}
 													{messages.length > 0 && <small>{messages.join('; ')}</small>}
+													{!blocked && !reviewModalIsReconfirmation && (
+														<label class="workspace-team-review-row__draft-note">
+															<span>Exclusion comment</span>
+															<textarea name={`review_draft_reason_${item.row_id}`} rows="2" placeholder="Optional note for this saved review choice" data-review-draft-reason>{item.review_draft_reason ?? ''}</textarea>
+														</label>
+													)}
+													{!blocked && !reviewModalIsReconfirmation && (
+														<small class="workspace-team-review-row__save-state" data-review-save-state>Saved</small>
+													)}
 												</div>
 											</article>
 										);
@@ -1052,11 +1148,72 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 		const confirmSelected = dialog.querySelector('[data-review-confirm-selected]');
 		const confirmExcluded = dialog.querySelector('[data-review-confirm-excluded]');
 		const search = dialog.querySelector('[data-review-search]');
+		const form = dialog.querySelector('[data-workspace-team-review-form]');
+		const draftAction = form instanceof HTMLFormElement ? form.dataset.workspaceTeamReviewDraftAction || '' : '';
+		const saveTimers = new WeakMap();
+		const pendingSaves = new Set();
+		const failedSaves = new Set();
 
 		function counts() {
 			const switches = selectableSwitches();
 			const selected = switches.filter((input) => input.checked).length;
 			return { selected, excluded: switches.length - selected };
+		}
+
+		function rowSaveState(row) {
+			return row instanceof HTMLElement ? row.querySelector('[data-review-save-state]') : null;
+		}
+
+		function rowDraftReason(row) {
+			const input = row instanceof HTMLElement ? row.querySelector('[data-review-draft-reason]') : null;
+			return input instanceof HTMLTextAreaElement ? input.value : '';
+		}
+
+		function setSaveState(row, state, message) {
+			const target = rowSaveState(row);
+			if (!(target instanceof HTMLElement)) return;
+			target.textContent = message;
+			target.dataset.reviewSaveState = state;
+		}
+
+		async function saveDraft(row) {
+			if (!draftAction || !(row instanceof HTMLElement)) return;
+			const input = row.querySelector('[data-review-switch]');
+			if (!(input instanceof HTMLInputElement)) return;
+			pendingSaves.add(row);
+			failedSaves['delete'](row);
+			setSaveState(row, 'saving', 'Saving...');
+			const body = new FormData();
+			body.set('import_row_id', input.value);
+			body.set('review_selected', input.checked ? 'true' : 'false');
+			body.set('review_draft_reason', rowDraftReason(row));
+			try {
+				const response = await fetch(draftAction, {
+					method: 'POST',
+					body,
+					credentials: 'same-origin',
+				});
+				if (!response.ok) throw new Error('Draft review choice could not be saved.');
+				setSaveState(row, 'saved', 'Saved');
+			} catch {
+				failedSaves.add(row);
+				setSaveState(row, 'error', 'Save failed. Try again before confirming.');
+			} finally {
+				pendingSaves['delete'](row);
+				updateCounts();
+			}
+		}
+
+		function scheduleDraftSave(row, delay = 0) {
+			if (!(row instanceof HTMLElement)) return;
+			const existingTimer = saveTimers.get(row);
+			if (existingTimer) window.clearTimeout(existingTimer);
+			const timer = window.setTimeout(() => {
+				saveTimers['delete'](row);
+				saveDraft(row);
+			}, delay);
+			saveTimers.set(row, timer);
+			setSaveState(row, 'queued', 'Saving...');
 		}
 
 		function updateCounts() {
@@ -1073,6 +1230,7 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 				acceptButton.textContent = `Accept ${selected} selected ${selected === 1 ? 'change' : 'changes'}`;
 			}
 			if (confirmButton instanceof HTMLButtonElement) confirmButton.disabled = selected === 0;
+			if (confirmButton instanceof HTMLButtonElement && (pendingSaves.size > 0 || failedSaves.size > 0)) confirmButton.disabled = true;
 			selectableSwitches().forEach((input) => {
 				input.closest('[data-review-row]')?.classList.toggle('workspace-team-review-row--excluded', !input.checked);
 			});
@@ -1089,17 +1247,41 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 			if (focusTarget instanceof HTMLElement) focusTarget.focus();
 		}
 
-		selectableSwitches().forEach((input) => input.addEventListener('change', updateCounts));
+		selectableSwitches().forEach((input) => input.addEventListener('change', () => {
+			updateCounts();
+			scheduleDraftSave(input.closest('[data-review-row]'));
+		}));
+		dialog.querySelectorAll('[data-review-draft-reason]').forEach((input) => {
+			if (!(input instanceof HTMLTextAreaElement)) return;
+			input.addEventListener('input', () => scheduleDraftSave(input.closest('[data-review-row]'), 650));
+		});
 		dialog.querySelector('[data-review-select-all]')?.addEventListener('click', () => {
-			selectableSwitches().forEach((input) => { input.checked = true; });
+			selectableSwitches().forEach((input) => {
+				input.checked = true;
+				scheduleDraftSave(input.closest('[data-review-row]'));
+			});
 			updateCounts();
 		});
 		dialog.querySelector('[data-review-clear-all]')?.addEventListener('click', () => {
-			selectableSwitches().forEach((input) => { input.checked = false; });
+			selectableSwitches().forEach((input) => {
+				input.checked = false;
+				scheduleDraftSave(input.closest('[data-review-row]'));
+			});
 			updateCounts();
 		});
 		if (acceptButton instanceof HTMLButtonElement) acceptButton.addEventListener('click', () => setConfirming(true));
 		if (backButton instanceof HTMLButtonElement) backButton.addEventListener('click', () => setConfirming(false));
+		if (form instanceof HTMLFormElement) {
+			form.addEventListener('submit', (event) => {
+				if (pendingSaves.size === 0 && failedSaves.size === 0) return;
+				event.preventDefault();
+				if (failedSaves.size > 0) {
+					const firstFailed = Array.from(failedSaves)[0];
+					if (firstFailed instanceof HTMLElement) firstFailed.scrollIntoView({ block: 'center' });
+				}
+				updateCounts();
+			});
+		}
 		if (search instanceof HTMLInputElement) {
 			search.addEventListener('input', () => {
 				const query = search.value.trim().toLowerCase();
@@ -1741,6 +1923,44 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 
 	.workspace-team-review-row strong {
 		color: var(--text);
+	}
+
+	.workspace-team-review-row__draft-note {
+		display: grid;
+		gap: 0.25rem;
+		margin-top: 0.4rem;
+	}
+
+	.workspace-team-review-row__draft-note span {
+		font-size: 0.78rem;
+		font-weight: 800;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-review-row__draft-note textarea {
+		width: 100%;
+		min-height: 3rem;
+		resize: vertical;
+		border: 1px solid rgba(110, 181, 224, 0.22);
+		border-radius: 0.45rem;
+		padding: 0.45rem 0.55rem;
+		background: rgba(3, 12, 24, 0.68);
+		color: var(--text);
+	}
+
+	.workspace-team-review-row__save-state {
+		width: fit-content;
+		margin-top: 0.15rem;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-review-row__save-state[data-review-save-state="saving"],
+	.workspace-team-review-row__save-state[data-review-save-state="queued"] {
+		color: #f6c65b;
+	}
+
+	.workspace-team-review-row__save-state[data-review-save-state="error"] {
+		color: #fecaca;
 	}
 
 	.workspace-team-review-modal__confirm {
