@@ -6,6 +6,7 @@ import ProjectContentPanel from '../../../../components/app/ProjectContentPanel.
 import {
 	buildWorkspaceTeamCheckoutReleasePath,
 	buildWorkspaceTeamExportPath,
+	buildWorkspaceTeamImportApplyPath,
 	buildWorkspaceTeamImportPath,
 	buildWorkspaceTeamImportReviewConfirmPath,
 	buildWorkspaceTeamImportReviewPath,
@@ -53,6 +54,10 @@ let importRun: {
 	file_hash: string | null;
 	source_snapshot_version: number | string | null;
 	live_snapshot_version: number | string | null;
+	approved_change_set_version: number;
+	approved_change_set_snapshot_version: number | string | null;
+	approved_change_set_summary: Record<string, number> | null;
+	applied_at: string | null;
 	checkout_expired: boolean;
 	source_stale: boolean;
 	source_superseded: boolean;
@@ -90,6 +95,18 @@ type ReviewModalItem = {
 };
 let reviewModalItems: ReviewModalItem[] = [];
 let activeCheckout: WorkspaceTeamActiveEditableCheckout | null = null;
+let latestApplicationRun: {
+	id: string;
+	status: string;
+	requested_at: string;
+	completed_at: string | null;
+	expected_counts: Record<string, number> | null;
+	applied_counts: Record<string, number> | null;
+	failure_code: string | null;
+	failure_message: string | null;
+	invitation_handoff_count: number;
+} | null = null;
+let applicationLiveSnapshotVersion: string | null = null;
 
 const asRecord = (value: unknown): JsonRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
 const asArray = <T,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
@@ -158,7 +175,7 @@ try {
 			if (requestedImportRunId) {
 				const { data: importData, error: importError } = await serverSupabase
 					.from('workspace_membership_import_runs')
-					.select('id, status, uploaded_at, original_filename, file_hash, source_snapshot_version, live_snapshot_version, checkout_expired, source_stale, source_superseded, validation_summary, failure_message')
+					.select('id, status, uploaded_at, original_filename, file_hash, source_snapshot_version, live_snapshot_version, approved_change_set_version, approved_change_set_snapshot_version, approved_change_set_summary, applied_at, checkout_expired, source_stale, source_superseded, validation_summary, failure_message')
 					.eq('organisation_id', organisation.id)
 					.eq('id', requestedImportRunId)
 					.maybeSingle();
@@ -192,6 +209,25 @@ try {
 							impact_counts: asRecord(item.impact_counts),
 						}));
 					}
+
+					if (['approved_for_application', 'application_failed_pending_review', 'applied'].includes(importRun.status)) {
+						const { data: snapshotTextData, error: snapshotTextError } = await serverSupabase.rpc('current_workspace_membership_snapshot_version_text', {
+							target_organisation_id: organisation.id,
+						});
+						if (snapshotTextError) throw snapshotTextError;
+						applicationLiveSnapshotVersion = normaliseWorkspaceTeamSnapshotVersion(snapshotTextData);
+
+						const { data: applicationRunData, error: applicationRunError } = await serverSupabase
+							.from('workspace_membership_change_application_runs')
+							.select('id, status, requested_at, completed_at, expected_counts, applied_counts, failure_code, failure_message, invitation_handoff_count')
+							.eq('organisation_id', organisation.id)
+							.eq('import_run_id', importRun.id)
+							.order('created_at', { ascending: false })
+							.limit(1)
+							.maybeSingle();
+						if (applicationRunError) throw applicationRunError;
+						latestApplicationRun = applicationRunData ?? null;
+					}
 				}
 			}
 		}
@@ -220,6 +256,7 @@ const checkoutReleaseAction = workspaceSlug ? buildWorkspaceTeamCheckoutReleaseP
 const importAction = workspaceSlug ? buildWorkspaceTeamImportPath(workspaceSlug) : '';
 const importReviewPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewPath(workspaceSlug, importRun.id) : '';
 const importReviewConfirmPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewConfirmPath(workspaceSlug, importRun.id) : '';
+const importApplyPath = workspaceSlug && importRun ? buildWorkspaceTeamImportApplyPath(workspaceSlug, importRun.id) : '';
 const importMaxSizeLabel = `${Math.round(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES / 1024 / 1024)} MB`;
 const checkoutEditorMember = activeCheckout?.requested_by
 	? members.find((member) => member.profile_id === activeCheckout?.requested_by)
@@ -282,7 +319,49 @@ const reviewConfirmationMessage = ({
 	workspace: 'Workspace access could not be confirmed for team change review.',
 	method: 'Team change confirmation requires the review form.',
 } as Record<string, string>)[reviewConfirmationState] ?? '';
+const membershipApplicationState = String(Astro.url.searchParams.get('membership_application') ?? '');
+const membershipApplicationError = String(Astro.url.searchParams.get('membership_application_error') ?? '');
+const membershipApplicationMessage = membershipApplicationState === 'success'
+	? 'Approved Workspace Team changes applied.'
+	: membershipApplicationState === 'already_applied'
+		? 'This approved Workspace Team change set has already been applied.'
+		: membershipApplicationState === 'error'
+			? ({
+				signin: 'Sign in before applying approved team changes.',
+				workspace: 'Workspace access could not be confirmed for team change application.',
+				permission: 'Only active Workspace Owners and Admins can apply approved team changes.',
+				permission_denied: 'Only active Workspace Owners and Admins can apply approved team changes.',
+				import_not_found: 'The approved import could not be found. Refresh the page and choose the import again.',
+				not_ready: 'This import is not approved for application.',
+				superseded: 'The source export has been superseded. Download and review a fresh editable CSV.',
+				drift_detected: 'Workspace Team data changed after approval. Re-upload or re-review before applying.',
+				decision_drift: 'The approved decisions changed after confirmation. Re-open review before applying.',
+				target_drift: 'A target membership or profile changed after approval. Re-upload or re-review before applying.',
+				result_lookup_failed: 'The application completed but the result could not be reloaded. Refresh the Team page.',
+				method: 'Team change application requires the confirmation form.',
+				failed: 'Approved Workspace Team changes could not be applied. No partial membership changes were committed.',
+			} as Record<string, string>)[membershipApplicationError] ?? 'Approved Workspace Team changes could not be applied. No partial membership changes were committed.'
+			: '';
 const importSummary = importRun?.validation_summary ?? {};
+const applicationSummary = importRun?.approved_change_set_summary ?? latestApplicationRun?.expected_counts ?? {};
+const approvedApplicationCount = Number(applicationSummary.approved_additions ?? 0)
+	+ Number(applicationSummary.approved_identity_corrections ?? 0)
+	+ Number(applicationSummary.approved_deactivations ?? 0)
+	+ Number(applicationSummary.approved_reactivations ?? 0);
+const applicationSnapshotVersion = importRun
+	? normaliseWorkspaceTeamSnapshotVersion(importRun.approved_change_set_snapshot_version)
+	: null;
+const applicationSnapshotMatches = Boolean(applicationSnapshotVersion && applicationLiveSnapshotVersion && applicationSnapshotVersion === applicationLiveSnapshotVersion);
+const canApplyApprovedChangeSet = Boolean(
+	canAdministerLater
+	&& importRun
+	&& importApplyPath
+	&& importRun.status === 'approved_for_application'
+	&& !importRun.source_superseded
+	&& approvedApplicationCount > 0
+	&& applicationSnapshotMatches,
+);
+const applicationOperationKey = crypto.randomUUID();
 const importStatusLabel = (status: string) => status
 	.split('_')
 	.filter(Boolean)
@@ -467,6 +546,11 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 							{reviewConfirmationMessage}
 						</p>
 					)}
+					{membershipApplicationMessage && (
+						<p class={membershipApplicationState === 'success' || membershipApplicationState === 'already_applied' ? 'workspace-team-release-message' : 'workspace-team-release-message workspace-team-release-message--error'} role="status" data-workspace-team-application-message>
+							{membershipApplicationMessage}
+						</p>
+					)}
 
 					{canAdministerLater && importRun && (
 						<section class="workspace-team-import-result" aria-labelledby="workspace-team-import-result-heading" data-workspace-team-import-result>
@@ -479,7 +563,7 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 										{importRun.file_hash && ` File hash ${importRun.file_hash.slice(0, 12)}...`}
 									</p>
 								</div>
-								<strong>{importRun.status === 'validated' ? 'Ready for review' : importRun.status === 'stale_review_required' ? 'Stale review required' : importRun.status === 'approved_for_application' ? 'Approved for application' : 'Needs correction'}</strong>
+								<strong>{importRun.status === 'validated' ? 'Ready for review' : importRun.status === 'stale_review_required' ? 'Stale review required' : importRun.status === 'approved_for_application' ? 'Approved for application' : importRun.status === 'application_failed_pending_review' ? 'Application review required' : importRun.status === 'applied' ? 'Applied' : 'Needs correction'}</strong>
 							</div>
 							{(importRun.checkout_expired || importRun.source_stale || importRun.source_superseded || importRun.failure_message) && (
 								<div class="workspace-team-import-warnings" role="status">
@@ -513,6 +597,48 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 										Review proposed changes
 									</button>
 								</p>
+							)}
+							{['approved_for_application', 'application_failed_pending_review', 'applied'].includes(importRun.status) && (
+								<div class="workspace-team-application" data-workspace-team-application-summary>
+									<div class="workspace-team-application__heading">
+										<div>
+											<p class="eyebrow">Application</p>
+											<h4>{importRun.status === 'applied' ? 'Applied change set' : 'Approved change set'}</h4>
+											<p>
+												Version {importRun.approved_change_set_version}.
+												Approved snapshot {applicationSnapshotVersion ?? 'not recorded'}.
+												Live snapshot {applicationLiveSnapshotVersion ?? 'not available'}.
+											</p>
+										</div>
+										<strong>{importRun.status === 'applied' ? 'Applied' : importRun.status === 'application_failed_pending_review' ? 'Re-review required' : applicationSnapshotMatches ? 'Ready to apply' : 'Re-review required'}</strong>
+									</div>
+									<div class="workspace-team-application__counts" aria-label="Approved change summary">
+										<span><strong>{applicationSummary.approved_additions ?? 0}</strong> additions</span>
+										<span><strong>{applicationSummary.approved_identity_corrections ?? 0}</strong> corrections</span>
+										<span><strong>{applicationSummary.approved_deactivations ?? 0}</strong> deactivations</span>
+										<span><strong>{applicationSummary.approved_reactivations ?? 0}</strong> reactivations</span>
+										<span><strong>{applicationSummary.excluded_changes ?? 0}</strong> excluded</span>
+									</div>
+									{latestApplicationRun?.failure_message && (
+										<p class="workspace-team-application__warning">{latestApplicationRun.failure_message}</p>
+									)}
+									{latestApplicationRun?.status === 'applied' && (
+										<p class="workspace-team-application__handoff">{latestApplicationRun.invitation_handoff_count} invitation {latestApplicationRun.invitation_handoff_count === 1 ? 'handoff' : 'handoffs'} pending delivery.</p>
+									)}
+									{importRun.status === 'approved_for_application' && (
+										<p class="workspace-team-import-review-link">
+											{canApplyApprovedChangeSet ? (
+												<button class="button button--primary" type="button" aria-haspopup="dialog" data-workspace-team-application-open="workspace-team-application-dialog" data-workspace-team-application-cta>
+													Apply approved changes
+												</button>
+											) : (
+												<button class="button button--primary" type="button" disabled data-workspace-team-application-disabled>
+													Apply approved changes
+												</button>
+											)}
+										</p>
+									)}
+								</div>
 							)}
 						</section>
 					)}
@@ -623,6 +749,25 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 								<div class="workspace-team-export-dialog__actions">
 									<button class="button button--secondary" type="button" data-workspace-team-dialog-cancel>Cancel</button>
 									<button class="button button--primary" type="submit">Upload and validate</button>
+								</div>
+							</form>
+						</dialog>
+					)}
+
+					{canAdministerLater && importRun && importApplyPath && importRun.status === 'approved_for_application' && (
+						<dialog class="workspace-team-export-dialog" id="workspace-team-application-dialog" aria-labelledby="workspace-team-application-title" aria-describedby="workspace-team-application-description" data-workspace-team-application-dialog>
+							<form method="post" action={importApplyPath} data-workspace-team-application-form>
+								<input type="hidden" name="operation_key" value={applicationOperationKey} />
+								<div class="workspace-team-export-dialog__body">
+									<h3 id="workspace-team-application-title" tabindex="-1" data-workspace-team-dialog-focus>Apply approved team changes?</h3>
+									<p id="workspace-team-application-description">This will update workspace membership and profile data for the approved changes. The operation will either complete in full or make no changes.</p>
+									{Number(applicationSummary.approved_additions ?? 0) > 0 && (
+										<p>New members will be created in an invited state. Invitation delivery will follow separately.</p>
+									)}
+								</div>
+								<div class="workspace-team-export-dialog__actions">
+									<button class="button button--secondary" type="button" data-workspace-team-dialog-cancel>Cancel</button>
+									<button class="button button--primary" type="submit" data-workspace-team-application-submit>Apply changes</button>
 								</div>
 							</form>
 						</dialog>
@@ -816,7 +961,20 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 		});
 	});
 
-	document.querySelectorAll('[data-workspace-team-export-dialog], [data-workspace-team-import-dialog], [data-workspace-team-checkout-release-dialog], [data-workspace-team-review-dialog]').forEach((dialog) => {
+	document.querySelectorAll('[data-workspace-team-application-open]').forEach((trigger) => {
+		trigger.addEventListener('click', (event) => {
+			event.preventDefault();
+			const dialogId = trigger.getAttribute('data-workspace-team-application-open');
+			const dialog = dialogId ? document.getElementById(dialogId) : null;
+			if (!(dialog instanceof HTMLDialogElement)) return;
+			lastTriggerByDialog.set(dialog, trigger);
+			if (!dialog.open) dialog.showModal();
+			const focusTarget = dialog.querySelector('[data-workspace-team-dialog-focus], button, input');
+			if (focusTarget instanceof HTMLElement) focusTarget.focus();
+		});
+	});
+
+	document.querySelectorAll('[data-workspace-team-export-dialog], [data-workspace-team-import-dialog], [data-workspace-team-checkout-release-dialog], [data-workspace-team-review-dialog], [data-workspace-team-application-dialog]').forEach((dialog) => {
 		if (!(dialog instanceof HTMLDialogElement)) return;
 		dialog.addEventListener('close', () => {
 			const trigger = lastTriggerByDialog.get(dialog);
@@ -935,6 +1093,24 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 				submitButton.disabled = true;
 				submitButton.dataset.originalText = submitButton.textContent || '';
 				submitButton.textContent = 'Undoing...';
+			}
+		});
+	});
+
+	document.querySelectorAll('[data-workspace-team-application-form]').forEach((form) => {
+		if (!(form instanceof HTMLFormElement)) return;
+		form.addEventListener('submit', (event) => {
+			const submitButton = event.submitter instanceof HTMLButtonElement
+				? event.submitter
+				: form.querySelector('button[type="submit"]');
+			if (submitButton?.disabled) {
+				event.preventDefault();
+				return;
+			}
+			if (submitButton instanceof HTMLButtonElement) {
+				submitButton.disabled = true;
+				submitButton.dataset.originalText = submitButton.textContent || '';
+				submitButton.textContent = 'Applying...';
 			}
 		});
 	});
@@ -1216,6 +1392,64 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 	.workspace-team-import-summary strong {
 		color: var(--text);
 		font-size: 1.2rem;
+	}
+
+	.workspace-team-application {
+		display: grid;
+		gap: 0.75rem;
+		border: 1px solid rgba(34, 197, 94, 0.26);
+		border-radius: 0.5rem;
+		padding: 0.85rem;
+		background: rgba(12, 32, 28, 0.46);
+	}
+
+	.workspace-team-application__heading {
+		display: flex;
+		align-items: start;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+
+	.workspace-team-application__heading h4 {
+		margin: 0.1rem 0 0.25rem;
+		font-size: 1.05rem;
+		letter-spacing: 0;
+	}
+
+	.workspace-team-application__heading p,
+	.workspace-team-application__warning,
+	.workspace-team-application__handoff {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-application__heading strong {
+		border: 1px solid rgba(34, 197, 94, 0.32);
+		border-radius: 999px;
+		padding: 0.3rem 0.55rem;
+		white-space: nowrap;
+	}
+
+	.workspace-team-application__counts {
+		display: grid;
+		grid-template-columns: repeat(5, minmax(0, 1fr));
+		gap: 0.45rem;
+	}
+
+	.workspace-team-application__counts span {
+		display: grid;
+		gap: 0.1rem;
+		border: 1px solid rgba(34, 197, 94, 0.18);
+		border-radius: 0.5rem;
+		padding: 0.55rem;
+		background: rgba(2, 18, 17, 0.48);
+		color: var(--muted-strong);
+		font-size: 0.85rem;
+	}
+
+	.workspace-team-application__counts strong {
+		color: var(--text);
+		font-size: 1.15rem;
 	}
 
 	.workspace-team-import-review-link {
@@ -1680,6 +1914,18 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 		}
 
 		.workspace-team-import-summary {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+
+		.workspace-team-application__heading {
+			display: grid;
+		}
+
+		.workspace-team-application__heading strong {
+			width: fit-content;
+		}
+
+		.workspace-team-application__counts {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 

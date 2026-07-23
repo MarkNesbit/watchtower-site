@@ -155,6 +155,16 @@ Live recalculation runs before rendering review cards and again before final con
 
 Final confirmation calls `confirm_workspace_membership_change_set(import_run_id)`. It requires every valid proposal to be decided, reruns live recalculation, blocks approved stale/protected/no-longer-required proposals, stores `approved_change_set`, `approved_change_set_summary`, `approved_change_set_version`, `approved_change_set_snapshot_version`, `approval_locked_at` and sets the import to `approved_for_application`. This is the WT-007 handoff state only: no profile, auth, invitation, membership lifecycle, role or reassignment mutation is applied by WT-WORKSPACE-TEAM-006.
 
+## Workspace Team CSV transactional application
+
+WT-WORKSPACE-TEAM-007 adds the controlled apply step for a confirmed import. The Team page shows an application summary only for imports in `approved_for_application`, compares the locked approval snapshot with the current live snapshot and posts to `/app/workspaces/{workspaceSlug}/team/imports/{importRunId}/apply`. The confirmation says that the operation will either complete in full or make no changes; if the approved set includes additions, it also states that new members will be created in an invited state and invitation delivery will follow separately.
+
+The route delegates to `apply_workspace_membership_change_set(p_organisation_id, p_import_run_id, p_operation_key)`. The function requires the actor's real active Owner/Admin membership, serialises concurrent attempts, uses the frozen `approved_change_set` stored by WT-006 and ignores any client-supplied proposal list. It revalidates the import state, source export, approved decision versions, live snapshot and target membership/profile values before any membership or profile row is changed.
+
+Application is all-or-nothing inside the database transaction. Approved additions create a minimal pending Supabase Auth identity with a synthetic `@pending.watchtower.invalid` auth email, create the profile/contact-email record, create an invited workspace membership and write a pending invitation handoff marker. Invitation delivery remains separate: WT-007 does not send emails, create password links or expose tokens. Profile corrections update only `first_name`, `last_name` and `contact_email`; `profiles.email`, auth email, login name, UUIDs and role remain unchanged. Deactivation and reactivation reuse the existing membership row, preserve evidence and write lifecycle audit events.
+
+Excluded proposals remain untouched. Snapshot drift, superseded source exports, changed decisions, changed targets, duplicate additions, protected roles, self-deactivation and known responsibility impact stop the apply before membership/profile/auth mutation and record application-run/audit evidence. Successful application sets the import to `applied`, records `workspace_membership_change_application_runs`, writes per-change and batch audit events and leaves export rows, import rows, snapshots and decisions available as historical evidence.
+
 ## Future concepts not implemented in MVP
 
 The following concepts are recognised as possible future needs but are explicitly not implemented by WT-US-0105:

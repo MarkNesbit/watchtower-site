@@ -26,6 +26,10 @@ export function buildWorkspaceTeamImportReviewConfirmPath(workspaceSlug: string,
 	return `${buildWorkspaceTeamImportReviewPath(workspaceSlug, importRunId)}/confirm`;
 }
 
+export function buildWorkspaceTeamImportApplyPath(workspaceSlug: string, importRunId: string): string {
+	return `${buildWorkspaceTeamPath(workspaceSlug)}/imports/${encodeURIComponent(importRunId)}/apply`;
+}
+
 export function buildProjectEditPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/edit`;
 }

@@ -243,11 +243,12 @@ test('Workspace Team review page relative imports resolve from the nested route 
 	}
 });
 
-test('Workspace Team page links validated imports into review without apply controls', async () => {
+test('Workspace Team page links validated imports into review and delegates application to WT-007', async () => {
 	const page = await readFile(teamPageUrl, 'utf8');
 
 	assert.match(page, /buildWorkspaceTeamImportReviewConfirmPath/);
 	assert.match(page, /buildWorkspaceTeamImportReviewPath/);
+	assert.match(page, /buildWorkspaceTeamImportApplyPath/);
 	assert.match(page, /normaliseWorkspaceTeamSnapshotVersion/);
 	assert.match(page, /data-workspace-team-import-review-link/);
 	assert.match(page, /Review proposed changes/);
@@ -259,8 +260,10 @@ test('Workspace Team page links validated imports into review without apply cont
 	assert.match(page, /Accept \{reviewModalInitialSelectedCount\} selected changes/);
 	assert.match(page, /Confirm selected changes/);
 	assert.match(page, /recalculate_workspace_membership_change_proposals/);
+	assert.match(page, /data-workspace-team-application-cta/);
+	assert.match(page, /importApplyPath/);
 	assert.doesNotMatch(page, /Proposed additions', importGroups|Row \{row\.source_row_number\}: \{importRowIdentity\(row\)\}/);
-	assert.doesNotMatch(page, /Apply changes|Send invitation|auth\.admin|\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update/);
+	assert.doesNotMatch(page, /Send invitation|auth\.admin|\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update/);
 });
 
 test('Workspace Team bulk review confirmation route is scoped and delegates to the controlled RPC', async () => {
