@@ -15,6 +15,8 @@ export const WORKSPACE_TEAM_IMPORT_ACCEPTED_CONTENT_TYPES = new Set([
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const FORMULA_TRIGGER_PATTERN = /^[=+\-@]/;
+const SNAPSHOT_VERSION_PATTERN = /^[1-9][0-9]*$/;
+const MAX_EXACT_NUMBER_SNAPSHOT_VERSION = 9007199254740991;
 const METADATA_COLUMNS = ['export_id', 'membership_snapshot_version', 'exported_at', 'export_mode'] as const;
 const PROTECTED_EXISTING_COLUMNS = [
 	'login_name',
@@ -115,8 +117,8 @@ export type WorkspaceTeamImportValidationResult = {
 	fileErrors: Array<{ field: string; message: string }>;
 	warnings: Array<{ field: string; message: string }>;
 	sourceExportId: string | null;
-	sourceSnapshotVersion: number | null;
-	liveSnapshotVersion: number | null;
+	sourceSnapshotVersion: string | null;
+	liveSnapshotVersion: string | null;
 	checkoutExpired: boolean;
 	sourceStale: boolean;
 	sourceSuperseded: boolean;
@@ -312,6 +314,16 @@ function message(field: string, text: string) {
 	return { field, message: text };
 }
 
+export function normaliseWorkspaceTeamSnapshotVersion(value: unknown): string | null {
+	if (typeof value === 'bigint') return value > 0n ? value.toString() : null;
+	if (typeof value === 'number') {
+		if (!globalThis.isFinite(value) || Math.trunc(value) !== value || value <= 0 || value > MAX_EXACT_NUMBER_SNAPSHOT_VERSION) return null;
+		return String(value);
+	}
+	const text = value === null || value === undefined ? '' : String(value).trim();
+	return SNAPSHOT_VERSION_PATTERN.test(text) ? text : null;
+}
+
 export function parseWorkspaceTeamCsvText(csvText: string): ParsedCsv {
 	try {
 		const records = parseWorkspaceTeamCsvRecords(csvText);
@@ -458,17 +470,18 @@ export function validateWorkspaceTeamCsvImport(csvText: string, context: Workspa
 	const now = context.now ?? new Date();
 	const sourceExport = context.sourceExport ?? null;
 	const sourceExportId = sourceExport?.id ?? null;
-	const sourceSnapshotVersion = Number(sourceExport?.membership_snapshot_version ?? NaN);
+	const sourceSnapshotVersion = normaliseWorkspaceTeamSnapshotVersion(sourceExport?.membership_snapshot_version);
 	const liveSnapshotVersion = context.liveSnapshotVersion === null || context.liveSnapshotVersion === undefined
 		? null
-		: Number(context.liveSnapshotVersion);
+		: normaliseWorkspaceTeamSnapshotVersion(context.liveSnapshotVersion);
 	const checkoutExpired = Boolean(sourceExport?.checkout_expires_at && new Date(sourceExport.checkout_expires_at).getTime() < now.getTime());
 	const sourceSuperseded = Boolean(sourceExport?.superseded_at || sourceExport?.status === 'superseded');
 	const sourceReleased = Boolean(sourceExport?.released_at || sourceExport?.status === 'released');
 	const sourceStale = Boolean(
 		sourceExport
+		&& sourceSnapshotVersion
 		&& liveSnapshotVersion
-		&& Number(sourceExport.membership_snapshot_version) !== liveSnapshotVersion
+		&& sourceSnapshotVersion !== liveSnapshotVersion
 	);
 	const warnings = checkoutExpired
 		? [message('checkout_expires_at', 'The editable checkout window has expired. Validation continues against current live workspace data.')]
@@ -492,11 +505,11 @@ export function validateWorkspaceTeamCsvImport(csvText: string, context: Workspa
 
 		const uploadedExportId = records[0]?.export_id.trim() || null;
 		const uploadedMode = records[0]?.export_mode.trim() || null;
-		const uploadedSnapshot = Number(records[0]?.membership_snapshot_version.trim() || NaN);
+		const uploadedSnapshot = normaliseWorkspaceTeamSnapshotVersion(records[0]?.membership_snapshot_version);
 		const uploadedExportedAt = records[0]?.exported_at.trim() || null;
 
 		if (!uploadedExportId || !UUID_PATTERN.test(uploadedExportId)) fileErrors.push(message('export_id', 'CSV export_id must be a valid UUID.'));
-		if (!Number.isSafeInteger(uploadedSnapshot) || uploadedSnapshot <= 0) fileErrors.push(message('membership_snapshot_version', 'CSV membership_snapshot_version must be a positive integer.'));
+		if (!uploadedSnapshot) fileErrors.push(message('membership_snapshot_version', 'CSV membership_snapshot_version must be a positive integer.'));
 		if (!uploadedExportedAt || !isIsoTimestampOrBlank(uploadedExportedAt)) fileErrors.push(message('exported_at', 'CSV exported_at must be a valid timestamp.'));
 		if (uploadedMode !== 'editable' && uploadedMode !== 'read_only') fileErrors.push(message('export_mode', 'CSV export_mode must be editable or read_only.'));
 		if (!sourceExport) {
@@ -505,7 +518,7 @@ export function validateWorkspaceTeamCsvImport(csvText: string, context: Workspa
 			if (sourceExport.organisation_id !== context.organisationId) fileErrors.push(message('export_id', 'The source export belongs to a different workspace.'));
 			if (uploadedExportId && uploadedExportId !== sourceExport.id) fileErrors.push(message('export_id', 'CSV export_id does not match the stored source export.'));
 			if (uploadedMode !== sourceExport.export_mode) fileErrors.push(message('export_mode', 'CSV export_mode does not match the stored source export.'));
-			if (uploadedSnapshot !== Number(sourceExport.membership_snapshot_version)) fileErrors.push(message('membership_snapshot_version', 'CSV snapshot version does not match the stored source export.'));
+			if (!sourceSnapshotVersion || uploadedSnapshot !== sourceSnapshotVersion) fileErrors.push(message('membership_snapshot_version', 'CSV snapshot version does not match the stored source export.'));
 			if (uploadedExportedAt && uploadedExportedAt !== sourceExport.exported_at) fileErrors.push(message('exported_at', 'CSV exported_at does not match the stored source export.'));
 			if (sourceExport.export_mode === 'read_only') fileErrors.push(message('export_mode', 'Read-only Workspace Team exports cannot be used for membership administration.'));
 			if (sourceReleased) fileErrors.push(message('source_export_id', 'This editable Workspace Team file checkout was released by its holder. Download a new editable export before uploading changes.'));
@@ -702,8 +715,8 @@ export function validateWorkspaceTeamCsvImport(csvText: string, context: Workspa
 		fileErrors,
 		warnings,
 		sourceExportId,
-		sourceSnapshotVersion: Number.isSafeInteger(sourceSnapshotVersion) ? sourceSnapshotVersion : null,
-		liveSnapshotVersion: liveSnapshotVersion && Number.isSafeInteger(liveSnapshotVersion) ? liveSnapshotVersion : null,
+		sourceSnapshotVersion,
+		liveSnapshotVersion,
 		checkoutExpired,
 		sourceStale,
 		sourceSuperseded,

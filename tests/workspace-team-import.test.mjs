@@ -6,6 +6,7 @@ import {
 	WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES,
 	decodeWorkspaceTeamCsvBytes,
 	extractWorkspaceTeamCsvMetadata,
+	normaliseWorkspaceTeamSnapshotVersion,
 	parseWorkspaceTeamCsvText,
 	sha256HexFromWorkspaceTeamBytes,
 	validateWorkspaceTeamCsvImport,
@@ -28,6 +29,9 @@ const MEMBERSHIP_ID = '33333333-3333-4333-8333-333333333333';
 const USER_ID = '44444444-4444-4444-8444-444444444444';
 const DEACTIVATED_MEMBERSHIP_ID = '55555555-5555-4555-8555-555555555555';
 const DEACTIVATED_USER_ID = '66666666-6666-4666-8666-666666666666';
+const LARGE_SNAPSHOT_VERSION = '894187232527702000';
+const OTHER_LARGE_SNAPSHOT_VERSION = '894187232527702001';
+const ROUNDED_LARGE_SNAPSHOT_VERSION = '894187232527702016';
 
 function sourceExport(overrides = {}) {
 	return {
@@ -178,6 +182,130 @@ test('Workspace Team import parser preserves existing CSV behaviour without Node
 	const malformed = parseWorkspaceTeamCsvText('name,note\n"unterminated,value\n');
 	assert.deepEqual(malformed.header, []);
 	assert.match(malformed.errors[0].message, /CSV could not be parsed/);
+});
+
+test('Workspace Team import accepts snapshot versions as exact decimal strings', () => {
+	const accepted = [
+		'1',
+		'123456',
+		String(Number.MAX_SAFE_INTEGER),
+		'9007199254740992',
+		'788635894721686700',
+		LARGE_SNAPSHOT_VERSION,
+		'999999999999999999999999999999',
+	];
+
+	for (const snapshotVersion of accepted) {
+		const text = csv([{ ...sourceRows()[0] }, { ...sourceRows()[1] }], {
+			membership_snapshot_version: snapshotVersion,
+		});
+		const result = validate(text, {
+			sourceExport: sourceExport({ membership_snapshot_version: snapshotVersion }),
+			liveSnapshotVersion: snapshotVersion,
+		});
+
+		assert.equal(result.fileErrors.some((entry) => entry.message.includes('positive integer')), false, snapshotVersion);
+		assert.equal(result.sourceSnapshotVersion, snapshotVersion);
+		assert.equal(result.liveSnapshotVersion, snapshotVersion);
+		assert.equal(JSON.stringify(result).includes(snapshotVersion), true);
+	}
+});
+
+test('Workspace Team import rejects invalid snapshot version formats without number coercion', () => {
+	const rejected = ['', '0', '-1', '1.5', '1e18', '+123', 'abc', '12 34'];
+
+	for (const snapshotVersion of rejected) {
+		const text = csv([{ ...sourceRows()[0] }], {
+			membership_snapshot_version: snapshotVersion,
+		});
+		const result = validate(text);
+
+		assert.equal(result.status, 'validation_failed', snapshotVersion || 'blank');
+		assert.match(result.fileErrors.map((entry) => entry.message).join(' '), /membership_snapshot_version/, snapshotVersion || 'blank');
+	}
+
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion(` ${LARGE_SNAPSHOT_VERSION} `), LARGE_SNAPSHOT_VERSION);
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion(123456), '123456');
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion(9007199254740992), null);
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion('1e18'), null);
+});
+
+test('Workspace Team import preserves large snapshot equality stale detection and mismatch evidence', () => {
+	const fresh = validate(csv([{ ...sourceRows()[0] }, { ...sourceRows()[1] }], {
+		membership_snapshot_version: LARGE_SNAPSHOT_VERSION,
+	}), {
+		sourceExport: sourceExport({ membership_snapshot_version: LARGE_SNAPSHOT_VERSION }),
+		liveSnapshotVersion: LARGE_SNAPSHOT_VERSION,
+	});
+	assert.equal(fresh.status, 'validated');
+	assert.equal(fresh.sourceSnapshotVersion, LARGE_SNAPSHOT_VERSION);
+	assert.equal(fresh.liveSnapshotVersion, LARGE_SNAPSHOT_VERSION);
+	assert.equal(JSON.stringify(fresh).includes(ROUNDED_LARGE_SNAPSHOT_VERSION), false);
+
+	const stale = validate(csv([{ ...sourceRows()[0] }, { ...sourceRows()[1] }], {
+		membership_snapshot_version: LARGE_SNAPSHOT_VERSION,
+	}), {
+		sourceExport: sourceExport({ membership_snapshot_version: LARGE_SNAPSHOT_VERSION }),
+		liveSnapshotVersion: OTHER_LARGE_SNAPSHOT_VERSION,
+	});
+	assert.equal(stale.status, 'stale_review_required');
+	assert.equal(stale.sourceStale, true);
+	assert.equal(stale.fileErrors.some((entry) => entry.message.includes('positive integer')), false);
+	assert.equal(stale.liveSnapshotVersion, OTHER_LARGE_SNAPSHOT_VERSION);
+
+	const roundedMismatch = validate(csv([{ ...sourceRows()[0] }], {
+		membership_snapshot_version: ROUNDED_LARGE_SNAPSHOT_VERSION,
+	}), {
+		sourceExport: sourceExport({ membership_snapshot_version: LARGE_SNAPSHOT_VERSION }),
+		liveSnapshotVersion: LARGE_SNAPSHOT_VERSION,
+	});
+	assert.equal(roundedMismatch.status, 'validation_failed');
+	assert.match(roundedMismatch.fileErrors.map((entry) => entry.message).join(' '), /does not match the stored source export/);
+});
+
+test('Workspace Team import rejects inconsistent snapshot strings across rows', () => {
+	const text = csv([{ ...sourceRows()[0] }, { ...sourceRows()[1] }], {
+		membership_snapshot_version: LARGE_SNAPSHOT_VERSION,
+	});
+	const lines = text.split('\r\n');
+	lines[2] = lines[2].replace(`,${LARGE_SNAPSHOT_VERSION},`, `,${OTHER_LARGE_SNAPSHOT_VERSION},`);
+
+	const result = validate(lines.join('\r\n'), {
+		sourceExport: sourceExport({ membership_snapshot_version: LARGE_SNAPSHOT_VERSION }),
+		liveSnapshotVersion: LARGE_SNAPSHOT_VERSION,
+	});
+
+	assert.equal(result.status, 'validation_failed');
+	assert.match(result.fileErrors.map((entry) => entry.message).join(' '), /one consistent membership_snapshot_version/);
+});
+
+test('Workspace Team import large snapshot fixture reaches addition validation for thirty new rows', () => {
+	const existing = sourceRows()[0];
+	const newRows = Array.from({ length: 30 }, (_, index) => ({
+		first_name: `New${index + 1}`,
+		last_name: 'Person',
+		email: `new${index + 1}@example.com`,
+		workspace_role: index % 2 === 0 ? '' : 'viewer',
+		proposed_membership_action: '',
+	}));
+	const text = csv([{ ...existing }, ...newRows], {
+		membership_snapshot_version: LARGE_SNAPSHOT_VERSION,
+	});
+	const result = validate(text, {
+		sourceExport: sourceExport({ membership_snapshot_version: LARGE_SNAPSHOT_VERSION }),
+		sourceRows: [existing],
+		liveRows: [existing],
+		liveSnapshotVersion: LARGE_SNAPSHOT_VERSION,
+	});
+
+	assert.equal(result.status, 'validated');
+	assert.deepEqual(result.fileErrors, []);
+	assert.equal(result.summary.unchanged, 1);
+	assert.equal(result.summary.additions, 30);
+	assert.equal(result.summary.invalid_rows, 0);
+	assert.equal(result.rows.filter((row) => row.proposed_change_type === 'addition').length, 30);
+	assert.equal(text.includes(`,${LARGE_SNAPSHOT_VERSION},`), true);
+	assert.equal(text.includes('e+'), false);
 });
 
 test('Workspace Team page can import CSV limits without upload-time byte handling', async () => {
