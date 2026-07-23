@@ -16,6 +16,7 @@ import {
 import { buildWorkspaceTeamImportPath } from '../src/lib/projectRoutes.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260722000400_workspace_membership_csv_import_validation.sql', import.meta.url);
+const sourceSnapshotTextMigrationUrl = new URL('../supabase/migrations/20260723000300_workspace_membership_import_source_snapshot_text.sql', import.meta.url);
 const importModuleUrl = new URL('../src/lib/workspaceTeamCsvImport.ts', import.meta.url);
 const permissionsModuleUrl = new URL('../src/lib/permissions.ts', import.meta.url);
 const csvExportModuleUrl = new URL('../src/lib/workspaceTeamCsv.ts', import.meta.url);
@@ -32,6 +33,9 @@ const DEACTIVATED_USER_ID = '66666666-6666-4666-8666-666666666666';
 const LARGE_SNAPSHOT_VERSION = '894187232527702000';
 const OTHER_LARGE_SNAPSHOT_VERSION = '894187232527702001';
 const ROUNDED_LARGE_SNAPSHOT_VERSION = '894187232527702016';
+const PRODUCTION_EXPORT_ID = '9e31dcf2-6b7c-4b3c-92bc-00641f041840';
+const PRODUCTION_SNAPSHOT_VERSION = '894187232527701972';
+const PRODUCTION_ROUNDED_SNAPSHOT_VERSION = '894187232527702000';
 
 function sourceExport(overrides = {}) {
 	return {
@@ -110,6 +114,7 @@ test('Workspace Team import path and CSV contract include explicit reactivation 
 	const text = csv([{ ...sourceRows()[0], proposed_membership_action: '' }]);
 	assert.match(text.split(/\r\n/)[0], /proposed_membership_action$/);
 	assert.equal(extractWorkspaceTeamCsvMetadata(text).exportId, EXPORT_ID);
+	assert.equal(extractWorkspaceTeamCsvMetadata(text).membershipSnapshotVersion, '12345');
 });
 
 test('Workspace Team import module stays Cloudflare-compatible without Buffer references', async () => {
@@ -306,6 +311,66 @@ test('Workspace Team import large snapshot fixture reaches addition validation f
 	assert.equal(text.includes('e+'), false);
 });
 
+test('Workspace Team import production source metadata round trip reaches row classification exactly', () => {
+	const existing = sourceRows()[0];
+	const newRows = Array.from({ length: 30 }, (_, index) => ({
+		first_name: `Amended${index + 1}`,
+		last_name: 'Member',
+		email: `amended${index + 1}@example.com`,
+		workspace_role: index % 3 === 0 ? 'member' : '',
+		proposed_membership_action: '',
+	}));
+	const text = csv([{ ...existing }, ...newRows], {
+		export_id: PRODUCTION_EXPORT_ID,
+		membership_snapshot_version: PRODUCTION_SNAPSHOT_VERSION,
+	});
+	const metadata = extractWorkspaceTeamCsvMetadata(text);
+	const result = validate(text, {
+		sourceExport: sourceExport({
+			id: PRODUCTION_EXPORT_ID,
+			membership_snapshot_version: PRODUCTION_SNAPSHOT_VERSION,
+		}),
+		sourceRows: [existing],
+		liveRows: [existing],
+		liveSnapshotVersion: PRODUCTION_SNAPSHOT_VERSION,
+	});
+
+	assert.equal(metadata.exportId, PRODUCTION_EXPORT_ID);
+	assert.equal(metadata.membershipSnapshotVersion, PRODUCTION_SNAPSHOT_VERSION);
+	assert.equal(result.status, 'validated');
+	assert.deepEqual(result.fileErrors, []);
+	assert.equal(result.sourceSnapshotVersion, PRODUCTION_SNAPSHOT_VERSION);
+	assert.equal(result.liveSnapshotVersion, PRODUCTION_SNAPSHOT_VERSION);
+	assert.equal(result.summary.unchanged, 1);
+	assert.equal(result.summary.additions, 30);
+	assert.equal(result.summary.invalid_rows, 0);
+	assert.equal(result.rows.length, 31);
+	assert.equal(result.rows.filter((row) => row.proposed_change_type === 'addition').length, 30);
+	assert.equal(text.includes(`,${PRODUCTION_SNAPSHOT_VERSION},`), true);
+	assert.equal(text.includes(PRODUCTION_ROUNDED_SNAPSHOT_VERSION), false);
+	assert.equal(JSON.stringify(result).includes(PRODUCTION_SNAPSHOT_VERSION), true);
+	assert.equal(JSON.stringify(result).includes(PRODUCTION_ROUNDED_SNAPSHOT_VERSION), false);
+});
+
+test('Workspace Team import rejects unsafe numeric source snapshot transport', () => {
+	const text = csv([{ ...sourceRows()[0] }], {
+		export_id: PRODUCTION_EXPORT_ID,
+		membership_snapshot_version: PRODUCTION_SNAPSHOT_VERSION,
+	});
+	const result = validate(text, {
+		sourceExport: sourceExport({
+			id: PRODUCTION_EXPORT_ID,
+			membership_snapshot_version: Number(PRODUCTION_SNAPSHOT_VERSION),
+		}),
+		liveSnapshotVersion: PRODUCTION_SNAPSHOT_VERSION,
+	});
+
+	assert.equal(result.status, 'validation_failed');
+	assert.equal(result.sourceSnapshotVersion, null);
+	assert.match(result.fileErrors.map((entry) => entry.message).join(' '), /does not match the stored source export/);
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion(Number(PRODUCTION_SNAPSHOT_VERSION)), null);
+});
+
 test('Workspace Team page can import CSV limits without upload-time byte handling', async () => {
 	const page = await readFile(pageUrl, 'utf8');
 
@@ -462,9 +527,31 @@ test('Workspace Team import route is POST-only scoped and does not mutate member
 	assert.match(route, /WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES/);
 	assert.match(route, /decodeWorkspaceTeamCsvBytes\(fileBytes\)/);
 	assert.match(route, /sha256HexFromWorkspaceTeamBytes\(fileBytes\)/);
-	assert.match(route, /released_at, released_by, release_source/);
+	assert.match(route, /type WorkspaceTeamImportSourceExport/);
+	assert.match(route, /\.rpc\('get_workspace_membership_csv_import_source_export'/);
+	assert.match(route, /\.rpc\('current_workspace_membership_snapshot_version_text'/);
+	assert.match(route, /workspace_team_import_snapshot_mismatch/);
+	assert.match(route, /csvSnapshot: metadata\.membershipSnapshotVersion/);
+	assert.match(route, /sourceSnapshotRuntimeType: typeof sourceExport\?\.membership_snapshot_version/);
 	assert.match(route, /\.rpc\('record_workspace_membership_import_validation'/);
+	assert.doesNotMatch(route, /\.from\('workspace_membership_export_runs'\)/);
+	assert.doesNotMatch(route, /\.rpc\('current_workspace_membership_snapshot_version'/);
 	assert.doesNotMatch(route, /auth\.admin|auth\.users|\.from\('profiles'\)\.update|\.from\('organisation_members'\)\.update|\.delete\(/);
+});
+
+test('Workspace Team import source snapshot migration returns source and live versions as text', async () => {
+	const sql = await readFile(sourceSnapshotTextMigrationUrl, 'utf8');
+
+	assert.match(sql, /create or replace function public\.get_workspace_membership_csv_import_source_export/);
+	assert.match(sql, /workspace_membership_require_admin_actor\(target_organisation_id\)/);
+	assert.match(sql, /from public\.workspace_membership_export_runs as e[\s\S]*where e\.id = target_export_id[\s\S]*and e\.organisation_id = target_organisation_id/);
+	assert.match(sql, /'membership_snapshot_version', source_export\.membership_snapshot_version::text/);
+	assert.match(sql, /create or replace function public\.current_workspace_membership_snapshot_version_text/);
+	assert.match(sql, /current_workspace_membership_snapshot_version\(target_organisation_id\)::text/);
+	assert.match(sql, /grant execute on function public\.get_workspace_membership_csv_import_source_export\(uuid, uuid\) to authenticated, service_role/);
+	assert.match(sql, /grant execute on function public\.current_workspace_membership_snapshot_version_text\(uuid\) to authenticated, service_role/);
+	assert.doesNotMatch(sql, /'membership_snapshot_version', source_export\.membership_snapshot_version(?!::text)/);
+	assert.doesNotMatch(sql, /delete from public\.workspace_membership_export_runs|delete from public\.workspace_membership_export_rows|delete from public\.workspace_membership_import_runs|delete from public\.workspace_membership_import_rows|delete from public\.workspace_membership_change_decisions/i);
 });
 
 test('Workspace Team page exposes upload validation UI results and no apply controls', async () => {

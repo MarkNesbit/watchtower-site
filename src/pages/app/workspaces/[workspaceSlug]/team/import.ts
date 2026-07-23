@@ -8,9 +8,11 @@ import {
 	WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES,
 	decodeWorkspaceTeamCsvBytes,
 	extractWorkspaceTeamCsvMetadata,
+	normaliseWorkspaceTeamSnapshotVersion,
 	sha256HexFromWorkspaceTeamBytes,
 	validateWorkspaceTeamCsvImport,
 	type WorkspaceTeamImportMemberSnapshot,
+	type WorkspaceTeamImportSourceExport,
 } from '../../../../../lib/workspaceTeamCsvImport.ts';
 
 function importError(message: string, status = 400) {
@@ -78,6 +80,13 @@ function asLiveRows(rows: Array<Record<string, unknown>>): WorkspaceTeamImportMe
 	}));
 }
 
+function hasSourceSnapshotMismatch(validation: ReturnType<typeof validateWorkspaceTeamCsvImport>) {
+	return validation.fileErrors.some((entry) => (
+		entry.field === 'membership_snapshot_version'
+		&& entry.message.includes('does not match the stored source export')
+	));
+}
+
 export const POST: APIRoute = async ({ cookies, params, request }) => {
 	const accessToken = getServerAccessToken(cookies);
 	if (!accessToken) return importError('Sign in before uploading Workspace Team CSV files.', 401);
@@ -112,18 +121,18 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 	const fileHash = await sha256HexFromWorkspaceTeamBytes(fileBytes);
 	const metadata = extractWorkspaceTeamCsvMetadata(csvText);
 	const sourceExportId = metadata.exportId;
-	let sourceExport = null;
+	let sourceExport: WorkspaceTeamImportSourceExport | null = null;
 	let sourceRows: WorkspaceTeamImportMemberSnapshot[] = [];
 	let liveRows: WorkspaceTeamImportMemberSnapshot[] = [];
-	let liveSnapshotVersion: number | string | null = null;
+	let liveSnapshotVersion: string | null = null;
 
 	if (sourceExportId) {
 		const { data: exportData } = await serverSupabase
-			.from('workspace_membership_export_runs')
-			.select('id, organisation_id, export_mode, status, exported_at, membership_snapshot_version, checkout_expires_at, superseded_at, superseded_by_export_id, released_at, released_by, release_source')
-			.eq('id', sourceExportId)
-			.maybeSingle();
-		sourceExport = exportData ?? null;
+			.rpc('get_workspace_membership_csv_import_source_export', {
+				target_organisation_id: organisation.id,
+				target_export_id: sourceExportId,
+			});
+		sourceExport = (exportData ?? null) as WorkspaceTeamImportSourceExport | null;
 		if (sourceExport?.organisation_id === organisation.id) {
 			const { data: exportRows } = await serverSupabase
 				.from('workspace_membership_export_rows')
@@ -141,12 +150,11 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 		.eq('organisation_id', organisation.id);
 	liveRows = asLiveRows(liveData ?? []);
 
-	const { data: snapshotData } = await serverSupabase.rpc('current_workspace_membership_snapshot_version', {
+	const { data: snapshotTextData } = await serverSupabase.rpc('current_workspace_membership_snapshot_version_text', {
 		target_organisation_id: organisation.id,
 	});
-	liveSnapshotVersion = typeof snapshotData === 'number' || typeof snapshotData === 'string'
-		? snapshotData
-		: sourceExport?.membership_snapshot_version ?? null;
+	liveSnapshotVersion = normaliseWorkspaceTeamSnapshotVersion(snapshotTextData)
+		?? normaliseWorkspaceTeamSnapshotVersion(sourceExport?.membership_snapshot_version);
 
 	const validation = validateWorkspaceTeamCsvImport(csvText, {
 		organisationId: organisation.id,
@@ -156,6 +164,17 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 		liveSnapshotVersion,
 		allowSharedContactEmail: workspaceSlug === 'mark-nesbit-professional-workspace',
 	});
+
+	if (hasSourceSnapshotMismatch(validation)) {
+		console.error('workspace_team_import_snapshot_mismatch', {
+			routeName: 'workspace_team_csv_import',
+			workspaceId: organisation.id,
+			exportId: sourceExportId,
+			csvSnapshot: metadata.membershipSnapshotVersion,
+			sourceSnapshot: normaliseWorkspaceTeamSnapshotVersion(sourceExport?.membership_snapshot_version),
+			sourceSnapshotRuntimeType: typeof sourceExport?.membership_snapshot_version,
+		});
+	}
 
 	const failureMessage = validation.fileErrors[0]?.message
 		?? validation.rows.find((row) => row.validation_state === 'error')?.validation_messages[0]?.message

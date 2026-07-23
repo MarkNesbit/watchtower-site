@@ -54,7 +54,7 @@ export type WorkspaceTeamImportSourceExport = {
 	export_mode: string;
 	status: string;
 	exported_at: string;
-	membership_snapshot_version: number | string;
+	membership_snapshot_version: bigint | number | string;
 	checkout_expires_at?: string | null;
 	superseded_at?: string | null;
 	superseded_by_export_id?: string | null;
@@ -371,14 +371,15 @@ export function extractWorkspaceTeamCsvMetadata(csvText: string) {
 	const parsed = parseWorkspaceTeamCsvText(csvText);
 	const headerErrors = validateWorkspaceTeamCsvHeader(parsed.header);
 	if (parsed.errors.length > 0 || headerErrors.length > 0 || parsed.rows.length === 0) {
-		return { exportId: null, errors: [...parsed.errors, ...headerErrors] };
+		return { exportId: null, membershipSnapshotVersion: null, errors: [...parsed.errors, ...headerErrors] };
 	}
 	const record = recordFromRow(parsed.header, parsed.rows[0]);
 	const exportId = record.export_id.trim() || null;
+	const membershipSnapshotVersion = record.membership_snapshot_version.trim() || null;
 	if (!exportId || !UUID_PATTERN.test(exportId)) {
-		return { exportId: null, errors: [message('export_id', 'CSV export_id must be a valid UUID.')] };
+		return { exportId: null, membershipSnapshotVersion, errors: [message('export_id', 'CSV export_id must be a valid UUID.')] };
 	}
-	return { exportId, errors: [] };
+	return { exportId, membershipSnapshotVersion, errors: [] };
 }
 
 function normaliseUploadedValue(rawValue: string, sourceValue: string | null | undefined) {
