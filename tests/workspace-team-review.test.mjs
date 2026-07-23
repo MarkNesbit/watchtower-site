@@ -90,6 +90,8 @@ test('Workspace Team review page groups proposals and saves decisions through co
 	assert.match(page, /recalculate_workspace_membership_change_proposals/);
 	assert.match(page, /record_workspace_membership_change_decision/);
 	assert.match(page, /confirm_workspace_membership_change_set/);
+	assert.match(page, /normaliseWorkspaceTeamSnapshotVersion/);
+	assert.match(page, /snapshotLabel/);
 	assert.match(page, /Additions/);
 	assert.match(page, /Corrections/);
 	assert.match(page, /Deactivations/);
@@ -117,6 +119,7 @@ test('Workspace Team review page relative imports resolve from the nested route 
 		'../../../../../../../lib/projects',
 		'../../../../../../../lib/permissions',
 		'../../../../../../../lib/supabaseServer',
+		'../../../../../../../lib/workspaceTeamCsv',
 	]);
 
 	for (const importPath of importPaths) {
@@ -135,6 +138,7 @@ test('Workspace Team page links validated imports into review without apply cont
 	const page = await readFile(teamPageUrl, 'utf8');
 
 	assert.match(page, /buildWorkspaceTeamImportReviewPath/);
+	assert.match(page, /normaliseWorkspaceTeamSnapshotVersion/);
 	assert.match(page, /data-workspace-team-import-review-link/);
 	assert.match(page, /Review proposed changes/);
 	assert.doesNotMatch(page, /Apply changes|Send invitation|auth\.admin|\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update/);

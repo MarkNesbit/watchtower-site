@@ -13,6 +13,7 @@ import {
 import { isWorkspaceRole } from '../../../../lib/permissions';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../lib/supabaseServer';
 import { WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES } from '../../../../lib/workspaceTeamCsvImport';
+import { normaliseWorkspaceTeamSnapshotVersion } from '../../../../lib/workspaceTeamCsv';
 import {
 	applyWorkspaceTeamActiveEditableCheckoutFilters,
 	buildWorkspaceTeamDisplayMembers,
@@ -174,6 +175,9 @@ const checkoutEditorName = activeCheckout?.requested_by === currentUserId
 		? workspaceTeamPersonName(checkoutEditorMember)
 		: 'Another Workspace administrator';
 const checkoutHeldByCurrentUser = Boolean(activeCheckout?.requested_by && activeCheckout.requested_by === currentUserId);
+const activeCheckoutSnapshotVersion = activeCheckout
+	? normaliseWorkspaceTeamSnapshotVersion(activeCheckout.membership_snapshot_version)
+	: null;
 const editableExportDialogId = activeCheckout && !checkoutHeldByCurrentUser
 	? 'workspace-team-export-conflict-dialog'
 	: 'workspace-team-editable-export-dialog';
@@ -275,7 +279,7 @@ const validationMessageLabel = (entry: { field?: string; message?: string }) => 
 							<strong>{checkoutHeldByCurrentUser ? 'You have the current editable team file.' : `${checkoutEditorName} downloaded the current team file for update.`}</strong>
 							<p>
 								Exported {formatDateTime(activeCheckout.exported_at)}. Editing window expires {formatDateTime(activeCheckout.checkout_expires_at)}.
-								Snapshot version {activeCheckout.membership_snapshot_version}.
+								Snapshot version {activeCheckoutSnapshotVersion ?? 'not recorded'}.
 							</p>
 							{checkoutHeldByCurrentUser && checkoutReleaseAction && (
 								<button

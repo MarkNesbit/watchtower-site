@@ -5,8 +5,11 @@ import {
 	WORKSPACE_TEAM_CSV_COLUMNS,
 	buildWorkspaceTeamCsv,
 	encodeCsvCell,
+	normaliseWorkspaceTeamCsvExport,
+	normaliseWorkspaceTeamSnapshotVersion,
 	safeWorkspaceTeamCsvFilename,
 } from '../src/lib/workspaceTeamCsv.ts';
+import { validateWorkspaceTeamCsvImport } from '../src/lib/workspaceTeamCsvImport.ts';
 import {
 	WORKSPACE_TEAM_ACTIVE_EDITABLE_CHECKOUT_SELECT,
 	applyWorkspaceTeamActiveEditableCheckoutFilters,
@@ -23,11 +26,18 @@ const migrationUrl = new URL('../supabase/migrations/20260722000200_workspace_me
 const checkoutReleaseMigrationUrl = new URL('../supabase/migrations/20260722000600_workspace_membership_csv_checkout_release.sql', import.meta.url);
 const checkoutReleaseDiagnosticsMigrationUrl = new URL('../supabase/migrations/20260722000700_workspace_membership_csv_checkout_release_diagnostics.sql', import.meta.url);
 const checkoutReleaseAmbiguityMigrationUrl = new URL('../supabase/migrations/20260723000100_workspace_membership_csv_checkout_release_ambiguity_fix.sql', import.meta.url);
+const exportSnapshotTextMigrationUrl = new URL('../supabase/migrations/20260723000200_workspace_membership_csv_export_snapshot_text.sql', import.meta.url);
 const endpointUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/export.ts', import.meta.url);
 const releaseEndpointUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/export/release.ts', import.meta.url);
 const checkoutReleaseHelperUrl = new URL('../src/lib/workspaceTeamCheckoutRelease.ts', import.meta.url);
 const pageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
+const ORG_ID = '11111111-1111-4111-8111-111111111111';
+const EXPORT_ID = '22222222-2222-4222-8222-222222222222';
+const MEMBERSHIP_ID = '33333333-3333-4333-8333-333333333333';
+const USER_ID = '44444444-4444-4444-8444-444444444444';
+const LARGE_SNAPSHOT_VERSION = '894187232527702000';
+const ROUNDED_LARGE_SNAPSHOT_VERSION = '894187232527702016';
 
 async function migrationSql() {
 	return readFile(migrationUrl, 'utf8');
@@ -168,6 +178,126 @@ test('Workspace Team CSV repeats metadata and exports all lifecycle states deter
 	assert.match(lines[2], /'\=formula/);
 });
 
+test('Workspace Team CSV preserves exact snapshot versions during serialization', () => {
+	const snapshotVersions = [
+		'1',
+		String(Number.MAX_SAFE_INTEGER),
+		'9007199254740992',
+		'788635894721686700',
+		LARGE_SNAPSHOT_VERSION,
+		999999n,
+	];
+
+	for (const snapshotVersion of snapshotVersions) {
+		const expectedSnapshot = String(snapshotVersion);
+		const csv = buildWorkspaceTeamCsv({
+			export_id: EXPORT_ID,
+			membership_snapshot_version: snapshotVersion,
+			exported_at: '2026-07-22T09:42:30.000Z',
+			export_mode: 'editable',
+			rows: [
+				{ workspace_membership_id: MEMBERSHIP_ID, user_id: USER_ID, first_name: 'Mark', last_name: 'Nesbit', email: 'mark@example.com', workspace_role: 'owner', membership_status: 'active' },
+				{ first_name: 'New', last_name: 'Person', email: 'new@example.com', workspace_role: 'viewer' },
+			],
+		});
+		const lines = csv.replace(/^\uFEFF/, '').trim().split(/\r\n/);
+
+		assert.equal(lines.length, 3);
+		assert.equal(lines[1].split(',')[1], expectedSnapshot);
+		assert.equal(lines[2].split(',')[1], expectedSnapshot);
+		assert.equal(csv.includes(ROUNDED_LARGE_SNAPSHOT_VERSION), false);
+		assert.equal(/e\+|E\+/.test(csv), false);
+	}
+
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion(' 894187232527702000 '), LARGE_SNAPSHOT_VERSION);
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion(12345), '12345');
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion(12345n), '12345');
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion(Number.MAX_SAFE_INTEGER), String(Number.MAX_SAFE_INTEGER));
+	assert.equal(normaliseWorkspaceTeamSnapshotVersion(9007199254740992), null);
+	assert.throws(() => buildWorkspaceTeamCsv({
+		export_id: EXPORT_ID,
+		membership_snapshot_version: 9007199254740992,
+		exported_at: '2026-07-22T09:42:30.000Z',
+		export_mode: 'editable',
+		rows: [{ workspace_membership_id: MEMBERSHIP_ID, user_id: USER_ID }],
+	}), /unsafe membership snapshot version/);
+});
+
+test('Workspace Team CSV normalises RPC export payload snapshot version before download', () => {
+	const exportRun = normaliseWorkspaceTeamCsvExport({
+		export_id: EXPORT_ID,
+		membership_snapshot_version: LARGE_SNAPSHOT_VERSION,
+		exported_at: '2026-07-22T09:42:30.000Z',
+		export_mode: 'editable',
+		rows: [{ workspace_membership_id: MEMBERSHIP_ID, user_id: USER_ID }],
+	});
+
+	assert.equal(exportRun.membership_snapshot_version, LARGE_SNAPSHOT_VERSION);
+	assert.equal(normaliseWorkspaceTeamCsvExport({
+		...exportRun,
+		membership_snapshot_version: 12345,
+	}).membership_snapshot_version, '12345');
+	assert.equal(normaliseWorkspaceTeamCsvExport({
+		...exportRun,
+		membership_snapshot_version: 12345n,
+	}).membership_snapshot_version, '12345');
+	assert.throws(() => normaliseWorkspaceTeamCsvExport({
+		...exportRun,
+		membership_snapshot_version: 9007199254740992,
+	}), /unsafe membership snapshot version/);
+});
+
+test('Workspace Team exported CSV round trips large snapshot comparison exactly', () => {
+	const sourceRow = {
+		source_row_number: 1,
+		workspace_membership_id: MEMBERSHIP_ID,
+		user_id: USER_ID,
+		login_name: 'mark.nesbit',
+		first_name: 'Mark',
+		last_name: 'Nesbit',
+		email: 'mark@example.com',
+		workspace_role: 'owner',
+		membership_status: 'active',
+		accepted_at: '2026-07-01T00:00:00.000Z',
+		added_at: '2026-07-01T00:00:00.000Z',
+	};
+	const csv = buildWorkspaceTeamCsv({
+		export_id: EXPORT_ID,
+		membership_snapshot_version: LARGE_SNAPSHOT_VERSION,
+		exported_at: '2026-07-22T09:42:30.000Z',
+		export_mode: 'editable',
+		rows: [
+			sourceRow,
+			{ first_name: 'New', last_name: 'Person', email: 'new@example.com', workspace_role: 'viewer', proposed_membership_action: '' },
+		],
+	});
+	const result = validateWorkspaceTeamCsvImport(csv, {
+		organisationId: ORG_ID,
+		sourceExport: {
+			id: EXPORT_ID,
+			organisation_id: ORG_ID,
+			export_mode: 'editable',
+			status: 'checked_out',
+			exported_at: '2026-07-22T09:42:30.000Z',
+			membership_snapshot_version: LARGE_SNAPSHOT_VERSION,
+			checkout_expires_at: '2026-07-23T09:42:30.000Z',
+			superseded_at: null,
+		},
+		sourceRows: [sourceRow],
+		liveRows: [sourceRow],
+		liveSnapshotVersion: LARGE_SNAPSHOT_VERSION,
+		now: new Date('2026-07-22T12:00:00.000Z'),
+	});
+
+	assert.equal(result.status, 'validated');
+	assert.equal(result.sourceSnapshotVersion, LARGE_SNAPSHOT_VERSION);
+	assert.equal(result.liveSnapshotVersion, LARGE_SNAPSHOT_VERSION);
+	assert.equal(result.summary.unchanged, 1);
+	assert.equal(result.summary.additions, 1);
+	assert.deepEqual(result.fileErrors, []);
+	assert.equal(JSON.stringify(result).includes(ROUNDED_LARGE_SNAPSHOT_VERSION), false);
+});
+
 test('CSV export migration completes schema with snapshot rows mode and audit events', async () => {
 	const sql = await migrationSql();
 
@@ -212,6 +342,23 @@ test('CSV export migration computes durable snapshots from membership and profil
 	}
 	assert.match(sql, /md5\(coalesce\(snapshot_text, 'empty-workspace-membership-snapshot'\)\)/);
 	assert.doesNotMatch(sql, /exported_at as membership_snapshot_version|now\(\)::bigint/);
+});
+
+test('CSV export snapshot precision migration returns and audits snapshot text', async () => {
+	const sql = await readFile(exportSnapshotTextMigrationUrl, 'utf8');
+
+	assert.match(sql, /create or replace function public\.create_workspace_membership_csv_export/);
+	assert.match(sql, /returns jsonb[\s\S]*security definer[\s\S]*set search_path = public/);
+	assert.match(sql, /snapshot_version bigint/);
+	assert.match(sql, /membership_snapshot_version,\s*[\s\S]*snapshot_version,\s*[\s\S]*requested_export_mode/);
+	assert.match(sql, /'snapshot_version', prior_export\.membership_snapshot_version::text/);
+	assert.match(sql, /'membership_snapshot_version', new_export\.membership_snapshot_version::text/);
+	assert.match(sql, /'membership_snapshot_version', new_export\.membership_snapshot_version::text,\s*[\s\S]*'exported_at'/);
+	assert.match(sql, /grant execute on function public\.create_workspace_membership_csv_export\(uuid, text, uuid\) to authenticated, service_role/);
+	assert.doesNotMatch(sql, /'membership_snapshot_version', new_export\.membership_snapshot_version(?!::text)/);
+	assert.doesNotMatch(sql, /'snapshot_version', prior_export\.membership_snapshot_version(?!::text)/);
+	assert.doesNotMatch(sql, /insert into public\.organisation_members|update public\.organisation_members|insert into public\.profiles|update public\.profiles|auth\.admin|insert into auth\.users/i);
+	assert.doesNotMatch(sql, /delete from public\.workspace_membership_export_runs|delete from public\.workspace_membership_export_rows|delete from public\.workspace_membership_import_runs|delete from public\.workspace_membership_import_rows|delete from public\.workspace_membership_change_decisions/i);
 });
 
 test('CSV export migration enforces one active editable checkout transactionally', async () => {
@@ -379,7 +526,9 @@ test('CSV export endpoint authenticates scopes authorises and returns download h
 	assert.match(endpoint, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
 	assert.match(endpoint, /workspace\.role !== 'owner' && workspace\.role !== 'admin'/);
 	assert.match(endpoint, /\.rpc\('create_workspace_membership_csv_export'/);
+	assert.match(endpoint, /normaliseWorkspaceTeamCsvExport\(data as WorkspaceTeamCsvExport\)/);
 	assert.match(endpoint, /buildWorkspaceTeamCsv\(exportRun\)/);
+	assert.match(endpoint, /unsafe snapshot version/);
 	assert.match(endpoint, /content-type': 'text\/csv; charset=utf-8'/);
 	assert.match(endpoint, /content-disposition': `attachment; filename="\$\{filename\}"`/);
 	assert.match(endpoint, /x-watchtower-export-id/);
@@ -427,6 +576,8 @@ test('Workspace Team page displays checkout warning and confirmation dialog flow
 	assert.match(page, /data-active-editable-checkout/);
 	assert.match(page, /data-workspace-team-export-open/);
 	assert.match(page, /data-workspace-team-export-download-form/);
+	assert.match(page, /normaliseWorkspaceTeamSnapshotVersion/);
+	assert.match(page, /activeCheckoutSnapshotVersion/);
 	assert.match(page, /workspace-team-editable-export-dialog/);
 	assert.match(page, /workspace-team-export-conflict-dialog/);
 	assert.match(page, /This creates a versioned export and starts a 24-hour advisory editing window/);
