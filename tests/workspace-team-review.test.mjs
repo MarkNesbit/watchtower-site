@@ -5,11 +5,94 @@ import { buildWorkspaceTeamImportReviewConfirmPath, buildWorkspaceTeamImportRevi
 
 const migrationUrl = new URL('../supabase/migrations/20260722000500_workspace_membership_change_review_approval.sql', import.meta.url);
 const bulkReviewMigrationUrl = new URL('../supabase/migrations/20260723000400_workspace_membership_bulk_review_confirmation.sql', import.meta.url);
+const deployedWorkspaceTeamMigrationUrls = [
+	new URL('../supabase/migrations/20260722000100_workspace_membership_lifecycle_audit_schema.sql', import.meta.url),
+	new URL('../supabase/migrations/20260722000200_workspace_membership_csv_export_checkout.sql', import.meta.url),
+	new URL('../supabase/migrations/20260722000300_workspace_profile_identity_backfill.sql', import.meta.url),
+	new URL('../supabase/migrations/20260722000400_workspace_membership_csv_import_validation.sql', import.meta.url),
+	new URL('../supabase/migrations/20260722000500_workspace_membership_change_review_approval.sql', import.meta.url),
+	new URL('../supabase/migrations/20260722000600_workspace_membership_csv_checkout_release.sql', import.meta.url),
+	new URL('../supabase/migrations/20260722000700_workspace_membership_csv_checkout_release_diagnostics.sql', import.meta.url),
+	new URL('../supabase/migrations/20260723000100_workspace_membership_csv_checkout_release_ambiguity_fix.sql', import.meta.url),
+	new URL('../supabase/migrations/20260723000200_workspace_membership_csv_export_snapshot_text.sql', import.meta.url),
+	new URL('../supabase/migrations/20260723000300_workspace_membership_import_source_snapshot_text.sql', import.meta.url),
+];
 const reviewPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/imports/[importRunId]/review.astro', import.meta.url);
 const confirmRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/imports/[importRunId]/review/confirm.ts', import.meta.url);
 const teamPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
 const schemaDocsUrl = new URL('../docs/architecture/database-schema-v1.md', import.meta.url);
+
+function quotedValues(sql) {
+	return [...sql.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+}
+
+function isAuditEventName(value) {
+	return value.startsWith('membership_')
+		|| value.startsWith('workspace_membership_')
+		|| value === 'invitation_expired'
+		|| value === 'profile_identity_corrected';
+}
+
+function eventConstraintValues(sql) {
+	return [...sql.matchAll(/workspace_membership_audit_events_event_type_check[\s\S]*?check \(event_type in \(([\s\S]*?)\)\s*[,;]/g)]
+		.flatMap((match) => quotedValues(match[1]));
+}
+
+function auditEventCallValues(sql) {
+	const events = [];
+	let startIndex = 0;
+	while (true) {
+		const callIndex = sql.indexOf('record_workspace_membership_audit_event(', startIndex);
+		if (callIndex === -1) break;
+		let depth = 0;
+		let inString = false;
+		let argument = '';
+		const args = [];
+		for (let index = callIndex + 'record_workspace_membership_audit_event'.length; index < sql.length; index += 1) {
+			const char = sql[index];
+			const next = sql[index + 1];
+			if (inString) {
+				argument += char;
+				if (char === "'" && next === "'") {
+					argument += next;
+					index += 1;
+				} else if (char === "'") {
+					inString = false;
+				}
+				continue;
+			}
+			if (char === "'") {
+				inString = true;
+				argument += char;
+				continue;
+			}
+			if (char === '(') {
+				depth += 1;
+				if (depth > 1) argument += char;
+				continue;
+			}
+			if (char === ')') {
+				depth -= 1;
+				if (depth === 0) {
+					args.push(argument.trim());
+					startIndex = index + 1;
+					break;
+				}
+				argument += char;
+				continue;
+			}
+			if (char === ',' && depth === 1) {
+				args.push(argument.trim());
+				argument = '';
+				continue;
+			}
+			argument += char;
+		}
+		events.push(...quotedValues(args[4] ?? '').filter(isAuditEventName));
+	}
+	return events;
+}
 
 test('Workspace Team import review route helper is workspace scoped', () => {
 	assert.equal(
@@ -106,6 +189,27 @@ test('Workspace Team bulk review migration records selected and excluded decisio
 	assert.match(sql, /applies_changes', false/);
 	assert.match(sql, /grant execute on function public\.confirm_workspace_membership_selected_change_set/);
 	assert.doesNotMatch(sql, /insert into public\.organisation_members|update public\.organisation_members|insert into public\.profiles|update public\.profiles|auth\.admin|insert into auth\.users|delete from public\.project_people/i);
+});
+
+test('Workspace Team bulk review migration preserves the deployed audit event catalogue', async () => {
+	const bulkReviewSql = await readFile(bulkReviewMigrationUrl, 'utf8');
+	const finalConstraintEvents = new Set(eventConstraintValues(bulkReviewSql));
+	const previouslyValidEvents = new Set();
+
+	for (const migrationUrl of deployedWorkspaceTeamMigrationUrls) {
+		const sql = await readFile(migrationUrl, 'utf8');
+		for (const eventType of eventConstraintValues(sql)) previouslyValidEvents.add(eventType);
+		for (const eventType of auditEventCallValues(sql)) previouslyValidEvents.add(eventType);
+	}
+
+	previouslyValidEvents.add('workspace_membership_change_selection_confirmed');
+	for (const eventType of previouslyValidEvents) {
+		assert.ok(finalConstraintEvents.has(eventType), `Missing audit event type from final constraint: ${eventType}`);
+	}
+	assert.ok(finalConstraintEvents.has('workspace_membership_csv_checkout_released'));
+	assert.ok(finalConstraintEvents.has('workspace_membership_change_selection_confirmed'));
+	assert.equal(finalConstraintEvents.size, previouslyValidEvents.size);
+	assert.doesNotMatch(bulkReviewSql, /delete from public\.workspace_membership_audit_events|update public\.workspace_membership_audit_events/i);
 });
 
 test('Workspace Team review page groups proposals and saves decisions through controlled RPCs', async () => {
