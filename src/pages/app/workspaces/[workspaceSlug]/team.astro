@@ -197,9 +197,17 @@ const checkoutReleaseMessage = checkoutReleaseState === 'success'
 	: checkoutReleaseState === 'error'
 		? ({
 			holder_only: 'Only the current checkout holder can undo this editable file checkout.',
+			not_holder: 'Only the current checkout holder can undo this editable file checkout.',
+			already_released: 'That editable checkout has already been undone. Refresh the page and download a new editable copy if needed.',
+			expired: 'That editable checkout has expired. Refresh the page and download a new editable copy if needed.',
+			superseded: 'That editable checkout has been superseded. Refresh the page and check the current notice.',
+			no_active_checkout: 'That editable checkout is no longer active. Refresh the page and check the current notice.',
 			not_active: 'That editable checkout is no longer active. Refresh the page and check the current notice.',
 			stale: 'The editable checkout changed before Undo completed. Refresh the page and try again if needed.',
 			permission: 'Only active Workspace Owners and Admins can undo an editable team-file checkout.',
+			permission_denied: 'Only active Workspace Owners and Admins can undo an editable team-file checkout.',
+			audit_failed: 'The checkout could not be released because its audit event could not be recorded. Try again, or contact support if this continues.',
+			rpc_failed: 'Checkout Undo is temporarily unavailable. Refresh the page and try again.',
 			signin: 'Sign in before undoing an editable team-file checkout.',
 			workspace: 'Workspace access could not be confirmed for checkout Undo.',
 			missing_export: 'The checkout could not be identified. Refresh the page and try again.',

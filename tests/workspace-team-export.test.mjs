@@ -12,12 +12,19 @@ import {
 	applyWorkspaceTeamActiveEditableCheckoutFilters,
 	isWorkspaceTeamActiveEditableCheckout,
 } from '../src/lib/workspaceTeam.ts';
+import {
+	WORKSPACE_TEAM_CHECKOUT_RELEASE_RPC,
+	workspaceTeamCheckoutReleaseErrorCode,
+	workspaceTeamCheckoutReleaseStateErrorCode,
+} from '../src/lib/workspaceTeamCheckoutRelease.ts';
 import { buildWorkspaceTeamCheckoutReleasePath, buildWorkspaceTeamExportPath } from '../src/lib/projectRoutes.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260722000200_workspace_membership_csv_export_checkout.sql', import.meta.url);
 const checkoutReleaseMigrationUrl = new URL('../supabase/migrations/20260722000600_workspace_membership_csv_checkout_release.sql', import.meta.url);
+const checkoutReleaseDiagnosticsMigrationUrl = new URL('../supabase/migrations/20260722000700_workspace_membership_csv_checkout_release_diagnostics.sql', import.meta.url);
 const endpointUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/export.ts', import.meta.url);
 const releaseEndpointUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/export/release.ts', import.meta.url);
+const checkoutReleaseHelperUrl = new URL('../src/lib/workspaceTeamCheckoutRelease.ts', import.meta.url);
 const pageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
 
@@ -251,6 +258,32 @@ test('Workspace Team active checkout filter excludes released superseded expired
 	assert.equal(isWorkspaceTeamActiveEditableCheckout(checkoutRecord({ organisation_id: 'workspace-2' }), 'workspace-1', now), false);
 });
 
+test('Workspace Team checkout release helper maps active state and RPC failures specifically', () => {
+	const now = new Date('2026-07-22T10:00:00.000Z');
+
+	assert.equal(workspaceTeamCheckoutReleaseStateErrorCode(checkoutRecord(), 'user-1', now), null);
+	assert.equal(workspaceTeamCheckoutReleaseStateErrorCode(null, 'user-1', now), 'no_active_checkout');
+	assert.equal(workspaceTeamCheckoutReleaseStateErrorCode(checkoutRecord({ requested_by: 'user-2' }), 'user-1', now), 'not_holder');
+	assert.equal(workspaceTeamCheckoutReleaseStateErrorCode(checkoutRecord({ released_at: '2026-07-22T10:01:00.000Z', status: 'released' }), 'user-1', now), 'already_released');
+	assert.equal(workspaceTeamCheckoutReleaseStateErrorCode(checkoutRecord({ checkout_expires_at: '2026-07-22T09:59:59.000Z' }), 'user-1', now), 'expired');
+	assert.equal(workspaceTeamCheckoutReleaseStateErrorCode(checkoutRecord({ checkout_expires_at: null }), 'user-1', now), 'no_active_checkout');
+	assert.equal(workspaceTeamCheckoutReleaseStateErrorCode(checkoutRecord({ checkout_expires_at: 'not-a-date' }), 'user-1', now), 'no_active_checkout');
+	assert.equal(workspaceTeamCheckoutReleaseStateErrorCode(checkoutRecord({ superseded_at: '2026-07-22T10:01:00.000Z' }), 'user-1', now), 'superseded');
+	assert.equal(workspaceTeamCheckoutReleaseStateErrorCode(checkoutRecord({ status: 'generated', editing_mode: 'none' }), 'user-1', now), 'no_active_checkout');
+
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ message: 'WT_MEMBERSHIP_EXPORT_RELEASE_HOLDER_ONLY' }), 'not_holder');
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ message: 'WT_MEMBERSHIP_EXPORT_RELEASE_ALREADY_RELEASED' }), 'already_released');
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ message: 'WT_MEMBERSHIP_EXPORT_RELEASE_EXPIRED' }), 'expired');
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ message: 'WT_MEMBERSHIP_EXPORT_RELEASE_SUPERSEDED' }), 'superseded');
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ message: 'WT_MEMBERSHIP_EXPORT_RELEASE_NOT_FOUND' }), 'no_active_checkout');
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ message: 'WT_MEMBERSHIP_PERMISSION_DENIED' }), 'permission_denied');
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ message: 'workspace_membership_audit_events_previous_status_check' }), 'audit_failed');
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ code: 'PGRST202', message: 'Could not find function in schema cache' }), 'rpc_failed');
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ message: 'unexpected' }, 'expired'), 'expired');
+	assert.equal(workspaceTeamCheckoutReleaseErrorCode({ message: 'unexpected' }), 'failed');
+	assert.equal(WORKSPACE_TEAM_CHECKOUT_RELEASE_RPC, 'release_workspace_membership_csv_checkout');
+});
+
 test('CSV checkout release migration adds holder-only release without evidence deletion', async () => {
 	const sql = await readFile(checkoutReleaseMigrationUrl, 'utf8');
 
@@ -279,6 +312,31 @@ test('CSV checkout release migration adds holder-only release without evidence d
 	assert.doesNotMatch(sql, /insert into public\.organisation_members|update public\.organisation_members|insert into public\.profiles|update public\.profiles|auth\.admin|insert into auth\.users/i);
 });
 
+test('CSV checkout release diagnostics migration fixes audit status compatibility and controlled errors', async () => {
+	const sql = await readFile(checkoutReleaseDiagnosticsMigrationUrl, 'utf8');
+
+	assert.match(sql, /drop constraint if exists workspace_membership_audit_events_previous_status_check/);
+	assert.match(sql, /drop constraint if exists workspace_membership_audit_events_new_status_check/);
+	assert.match(sql, /previous_status in \([\s\S]*'checked_out'[\s\S]*'released'[\s\S]*'superseded'[\s\S]*'expired'[\s\S]*'cancelled'[\s\S]*\)/);
+	assert.match(sql, /new_status in \([\s\S]*'checked_out'[\s\S]*'released'[\s\S]*'superseded'[\s\S]*'expired'[\s\S]*'cancelled'[\s\S]*\)/);
+	assert.match(sql, /create or replace function public\.release_workspace_membership_csv_checkout\(\s*target_organisation_id uuid,\s*target_export_id uuid,\s*release_reason text default null,\s*release_source text default 'holder_undo'\s*\)/);
+	assert.match(sql, /returns uuid[\s\S]*security definer[\s\S]*set search_path = public/);
+	assert.match(sql, /workspace_membership_require_admin_actor\(target_organisation_id\)/);
+	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_NOT_FOUND/);
+	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_ALREADY_RELEASED/);
+	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_SUPERSEDED/);
+	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_EXPIRED/);
+	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_NO_ACTIVE_CHECKOUT/);
+	assert.match(sql, /checkout_export\.checkout_expires_at is null/);
+	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_HOLDER_ONLY/);
+	assert.match(sql, /WT_MEMBERSHIP_EXPORT_RELEASE_AUDIT_FAILED/);
+	assert.match(sql, /and requested_by = actor\.actor_user_id[\s\S]*and released_at is null[\s\S]*and superseded_at is null[\s\S]*and status = 'checked_out'[\s\S]*and editing_mode = 'checked_out'/);
+	assert.match(sql, /record_workspace_membership_audit_event\([\s\S]*'workspace_membership_csv_checkout_released'[\s\S]*'checked_out'[\s\S]*'released'/);
+	assert.match(sql, /grant execute on function public\.release_workspace_membership_csv_checkout\(uuid, uuid, text, text\) to authenticated, service_role/);
+	assert.doesNotMatch(sql, /delete from public\.workspace_membership_export_runs|delete from public\.workspace_membership_export_rows|delete from public\.workspace_membership_import_runs|delete from public\.workspace_membership_import_rows|delete from public\.workspace_membership_change_decisions/i);
+	assert.doesNotMatch(sql, /insert into public\.organisation_members|update public\.organisation_members|insert into public\.profiles|update public\.profiles|auth\.admin|insert into auth\.users/i);
+});
+
 test('CSV export endpoint authenticates scopes authorises and returns download headers', async () => {
 	const endpoint = await readFile(endpointUrl, 'utf8');
 
@@ -297,6 +355,8 @@ test('CSV export endpoint authenticates scopes authorises and returns download h
 
 test('CSV checkout release endpoint is POST-only scoped and delegates to the release RPC', async () => {
 	const endpoint = await readFile(releaseEndpointUrl, 'utf8');
+	const helper = await readFile(checkoutReleaseHelperUrl, 'utf8');
+	const releaseCode = `${endpoint}\n${helper}`;
 
 	assert.match(endpoint, /export const POST/);
 	assert.match(endpoint, /export const GET/);
@@ -305,9 +365,20 @@ test('CSV checkout release endpoint is POST-only scoped and delegates to the rel
 	assert.match(endpoint, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
 	assert.match(endpoint, /workspace\.role !== 'owner' && workspace\.role !== 'admin'/);
 	assert.match(endpoint, /request\.formData\(\)/);
+	assert.match(endpoint, /serverSupabase\.auth\.getUser\(accessToken\)/);
+	assert.match(endpoint, /\.select\('requested_by, export_mode, status, editing_mode, checkout_expires_at, superseded_at, released_at'\)/);
+	assert.match(endpoint, /workspaceTeamCheckoutReleaseStateErrorCode/);
 	assert.match(endpoint, /target_export_id: exportId/);
-	assert.match(endpoint, /\.rpc\('release_workspace_membership_csv_checkout'/);
+	assert.match(endpoint, /\.rpc\(WORKSPACE_TEAM_CHECKOUT_RELEASE_RPC/);
 	assert.match(endpoint, /release_source: 'holder_undo'/);
+	assert.match(endpoint, /logWorkspaceTeamCheckoutReleaseFailure/);
+	assert.match(endpoint, /workspaceTeamCheckoutReleaseErrorCode\(error, stateErrorCode\)/);
+	assert.match(releaseCode, /workspace_team_checkout_release_failed/);
+	for (const field of ['routeName', 'workspaceId', 'workspaceSlug', 'exportId', 'actorId', 'rpcName', 'code', 'message', 'details', 'hint']) {
+		assert.match(releaseCode, new RegExp(field));
+	}
+	assert.doesNotMatch(helper, /cookie|token|contact_email|team_csv|csvText/i);
+	assert.doesNotMatch(endpoint, /contact_email|team_csv|csvText/i);
 	assert.match(endpoint, /303/);
 	assert.match(endpoint, /checkout_release=success|checkout_release/);
 	assert.doesNotMatch(endpoint, /auth\.users|service_role|\.from\('profiles'\)|\.from\('organisation_members'\)|\.from\('workspace_membership_change_decisions'\)|\.insert\(|\.update\(|\.delete\(/);
@@ -352,6 +423,9 @@ test('Workspace Team page shows holder-only Undo checkout confirmation', async (
 	assert.match(page, /data-workspace-team-checkout-release-form/);
 	assert.match(page, /data-workspace-team-checkout-release-message/);
 	assert.match(page, /Editable team-file checkout undone\./);
+	for (const code of ['not_holder', 'already_released', 'expired', 'superseded', 'no_active_checkout', 'permission_denied', 'audit_failed', 'rpc_failed']) {
+		assert.match(page, new RegExp(`${code}:`));
+	}
 	assert.match(page, /canAdministerLater && exportAction && !checkoutHeldByCurrentUser/);
 	assert.match(page, /submitButton\.disabled = true/);
 	assert.match(page, /lastTriggerByDialog/);
