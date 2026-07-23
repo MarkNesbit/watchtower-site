@@ -330,8 +330,10 @@ declare
   v_reactivations integer := 0;
   v_handoffs integer := 0;
   v_correlation_id uuid := gen_random_uuid();
+  v_operation_key uuid := coalesce(p_operation_key, gen_random_uuid());
 begin
   select * into v_actor from public.workspace_membership_require_admin_actor(p_organisation_id);
+  perform set_config('watchtower.membership_lifecycle_rpc', 'true', true);
 
   perform pg_advisory_xact_lock(hashtextextended(p_import_run_id::text, 7007));
 
@@ -340,7 +342,7 @@ begin
   from public.workspace_membership_change_application_runs as ar
   where ar.organisation_id = p_organisation_id
     and ar.import_run_id = p_import_run_id
-    and ar.operation_key = p_operation_key
+    and ar.operation_key = v_operation_key
   order by ar.created_at desc
   limit 1;
 
@@ -391,7 +393,7 @@ begin
       p_organisation_id,
       p_import_run_id,
       greatest(v_import.approved_change_set_version, 1),
-      p_operation_key,
+      v_operation_key,
       v_actor.actor_user_id,
       now(),
       now(),
@@ -430,7 +432,7 @@ begin
     p_organisation_id,
     p_import_run_id,
     v_import.approved_change_set_version,
-    p_operation_key,
+    v_operation_key,
     v_actor.actor_user_id,
     now(),
     'applying',
@@ -1019,7 +1021,8 @@ begin
             reactivated_by = v_actor.actor_user_id,
             reactivation_reason = 'Applied from approved Workspace Team CSV change set.',
             updated_by = v_actor.actor_user_id,
-            joined_at = coalesce(om.joined_at, now())
+            joined_at = coalesce(om.joined_at, now()),
+            accepted_at = coalesce(om.accepted_at, now())
       where om.id = v_membership.id
       returning * into v_updated_membership;
 
@@ -1100,6 +1103,81 @@ begin
   );
 
   return v_application.id;
+exception
+  when others then
+    if v_application.id is null then
+      raise;
+    end if;
+
+    insert into public.workspace_membership_change_application_runs (
+      id,
+      organisation_id,
+      import_run_id,
+      approved_change_set_version,
+      operation_key,
+      requested_by,
+      started_at,
+      completed_at,
+      status,
+      expected_counts,
+      applied_counts,
+      live_snapshot_before,
+      failure_code,
+      failure_message
+    )
+    values (
+      v_application.id,
+      p_organisation_id,
+      p_import_run_id,
+      greatest(coalesce(v_import.approved_change_set_version, 0), 1),
+      v_operation_key,
+      v_actor.actor_user_id,
+      coalesce(v_application.started_at, now()),
+      now(),
+      'rolled_back',
+      coalesce(v_import.approved_change_set_summary, '{}'::jsonb),
+      '{}'::jsonb,
+      v_current_snapshot,
+      'transaction_rolled_back',
+      'The membership application rolled back after an unexpected database error. No partial membership changes were committed.'
+    )
+    on conflict (id) do update
+      set completed_at = excluded.completed_at,
+          status = 'rolled_back',
+          failure_code = excluded.failure_code,
+          failure_message = excluded.failure_message;
+
+    update public.workspace_membership_import_runs as ir
+      set status = 'application_failed_pending_review',
+          failure_code = 'transaction_rolled_back',
+          failure_message = 'The membership application rolled back after an unexpected database error. No partial membership changes were committed.'
+    where ir.id = p_import_run_id
+      and ir.organisation_id = p_organisation_id;
+
+    perform public.record_workspace_membership_audit_event(
+      p_organisation_id,
+      null,
+      null,
+      v_actor.actor_user_id,
+      'membership_change_application_failed',
+      'approved_for_application',
+      'rolled_back',
+      jsonb_build_object(
+        'import_run_id', p_import_run_id,
+        'approved_change_set_version', coalesce(v_import.approved_change_set_version, 0)
+      ),
+      jsonb_build_object(
+        'application_run_id', v_application.id,
+        'failure_code', 'transaction_rolled_back',
+        'sqlstate', sqlstate,
+        'applies_changes', false
+      ),
+      'The membership application rolled back after an unexpected database error. No partial membership changes were committed.',
+      'workspace_team_membership_application',
+      v_correlation_id
+    );
+
+    return v_application.id;
 end;
 $$;
 

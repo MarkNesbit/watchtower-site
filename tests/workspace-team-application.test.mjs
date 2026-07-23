@@ -73,6 +73,7 @@ test('Workspace Team application RPC applies only a frozen approved change set a
 	assert.match(sql, /p_import_run_id uuid/);
 	assert.match(sql, /p_operation_key uuid/);
 	assert.match(sql, /workspace_membership_require_admin_actor\(p_organisation_id\)/);
+	assert.match(sql, /set_config\('watchtower\.membership_lifecycle_rpc', 'true', true\)/);
 	assert.match(sql, /approved_for_application/);
 	assert.match(sql, /approved_change_set_version <= 0/);
 	assert.match(sql, /jsonb_array_length\(coalesce\(v_import\.approved_change_set/);
@@ -84,6 +85,8 @@ test('Workspace Team application RPC applies only a frozen approved change set a
 	assert.match(sql, /decision_version is distinct from \(v_item->>'decision_version'\)::integer/);
 	assert.match(sql, /v_decision\.finalised_at is null/);
 	assert.match(sql, /value->>'decision' = 'approved'/);
+	assert.match(sql, /exception\s+when others then/);
+	assert.match(sql, /transaction_rolled_back/);
 	assert.doesNotMatch(sql, /selected_import_row_ids|client_supplied|request\.formData/);
 });
 
