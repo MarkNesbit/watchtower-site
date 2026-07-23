@@ -698,6 +698,12 @@ const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
 										{applicationNeedsReview ? 'Re-review approved changes' : 'Review proposed changes'}
 									</button>
 								</p>
+							) : importRun.status === 'applied' ? (
+								<p class="workspace-team-import-review-link">
+									<button class="button button--secondary" type="button" disabled data-workspace-team-applied-review-disabled>
+										Applied change set
+									</button>
+								</p>
 							) : importReviewPath && importRun.status === 'approved_for_application' ? (
 								<p class="workspace-team-import-review-link">
 									<a class="button button--secondary" href={importReviewPath}>View approved change set</a>
