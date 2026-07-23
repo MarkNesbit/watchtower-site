@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
 	WORKSPACE_INVITATION_EXPIRY_HOURS,
@@ -12,11 +13,50 @@ import {
 import { buildWorkspaceTeamInvitationSendPath } from '../src/lib/projectRoutes.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260723001100_workspace_membership_invitation_delivery_activation.sql', import.meta.url);
+const internalPolicyMigrationUrl = new URL('../supabase/migrations/20260723001200_workspace_invitation_internal_delivery_policy.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const teamPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
 const schemaDocsUrl = new URL('../docs/architecture/database-schema-v1.md', import.meta.url);
+const migrationsDir = new URL('../supabase/migrations/', import.meta.url);
+const productionAppliedInvitationMigrationHash = '5b588a7284c4238e18b06f83d91d101790eb19a865e663abfb7e5a8b6133a5c9';
+
+function sqlConstraintValues(sql, constraintName) {
+	const escapedName = constraintName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const match = sql.match(new RegExp(`${escapedName}[\\s\\S]*?check \\([\\s\\S]*?\\b(?:status|previous_status|new_status|event_type) in \\(([\\s\\S]*?)\\)[\\s\\S]*?\\)\\s*[,;]`));
+	assert.ok(match, `${constraintName} constraint should be present`);
+	return new Set([...match[1].matchAll(/'([^']+)'/g)].map((entry) => entry[1]));
+}
+
+function sqlFunctionDefinition(sql, functionName) {
+	const escapedName = functionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const match = sql.match(new RegExp(`create or replace function public\\.${escapedName}[\\s\\S]*?\\$\\$;`));
+	assert.ok(match, `${functionName} function should be present`);
+	return match[0];
+}
+
+function deterministicInternalAlias(baseEmail, prefix, loginName, profileId) {
+	const [localPart, domain] = baseEmail.trim().toLowerCase().split('@');
+	const aliasPrefix = prefix.trim().replace(/[^a-zA-Z0-9]+/g, '.').toLowerCase() || 'wt';
+	const profileSuffix = profileId.replaceAll('-', '').slice(0, 12);
+	const loginIdentity = (loginName.trim().toLowerCase() || profileId)
+		.replace(/[^a-z0-9._-]+/g, '.')
+		.replace(/^\.+|\.+$/g, '')
+		.slice(0, 40) || profileSuffix;
+	return `${localPart}+${aliasPrefix}.${loginIdentity}.${profileSuffix}@${domain}`;
+}
+
+test('Production-applied WT-008 invitation migration remains unchanged', async () => {
+	const sql = await readFile(migrationUrl, 'utf8');
+	const hash = createHash('sha256').update(sql).digest('hex');
+
+	assert.equal(hash, productionAppliedInvitationMigrationHash);
+	assert.doesNotMatch(sql, /workspace_membership_invitations_current_auth_email_unique/);
+	assert.doesNotMatch(sql, /workspace_invitation_internal_alias_base_email\(\)/);
+	assert.doesNotMatch(sql, /insert into public\.workspace_invitation_delivery_policies[\s\S]*internal_gmail_alias/);
+	assert.doesNotMatch(sql, /prevent_workspace_invitation_delivery_policy_mutation/);
+});
 
 test('Workspace Team invitation route helpers and token helpers are opaque and stable', async () => {
 	const token = generateInvitationToken();
@@ -45,18 +85,130 @@ test('Workspace invitation migration creates separate invitation lifecycle with 
 	assert.doesNotMatch(sql, /raw_token|plain_token|password text|encrypted_password.*token/i);
 });
 
+test('Workspace invitation migration exposes admin directory invitation columns', async () => {
+	const sql = await readFile(migrationUrl, 'utf8');
+
+	assert.match(sql, /create or replace view public\.workspace_member_admin_directory/);
+	assert.match(sql, /invitation\.expires_at as invitation_expires_at/);
+	assert.match(sql, /left join public\.workspace_membership_invitations invitation[\s\S]*invitation\.is_current/);
+});
+
+test('Internal delivery policy migration keeps audit event catalogue as a complete historical superset', async () => {
+	const files = (await readdir(migrationsDir)).filter((file) => file.endsWith('.sql')).sort();
+	const finalSql = await readFile(internalPolicyMigrationUrl, 'utf8');
+	const finalEventTypes = sqlConstraintValues(finalSql, 'workspace_membership_audit_events_event_type_check');
+	const historicalEventTypes = new Set();
+
+	for (const file of files) {
+		const sql = await readFile(new URL(file, migrationsDir), 'utf8');
+		if (!sql.includes('workspace_membership_audit_events_event_type_check')) continue;
+		for (const eventType of sqlConstraintValues(sql, 'workspace_membership_audit_events_event_type_check')) {
+			historicalEventTypes.add(eventType);
+		}
+	}
+
+	for (const eventType of historicalEventTypes) {
+		assert.ok(finalEventTypes.has(eventType), `${eventType} should remain accepted by the WT-008 final audit catalogue`);
+	}
+	for (const eventType of [
+		'membership_change_set_confirmed',
+		'membership_change_set_reconfirmed',
+		'workspace_invitation_prepared',
+		'workspace_invitation_delivery_attempted',
+		'workspace_invitation_delivered',
+		'workspace_invitation_delivery_failed',
+		'workspace_invitation_opened',
+		'workspace_invitation_expired',
+		'workspace_invitation_cancelled',
+		'workspace_invitation_superseded',
+		'workspace_invitation_accepted',
+		'workspace_membership_activated',
+		'workspace_invitation_replay_rejected',
+	]) {
+		assert.ok(finalEventTypes.has(eventType), `${eventType} should be accepted`);
+	}
+});
+
 test('Workspace invitation migration derives identity from handoff and blocks shared contacts without immutable policy', async () => {
 	const sql = await readFile(migrationUrl, 'utf8');
+	const prepareSql = sqlFunctionDefinition(sql, 'prepare_workspace_membership_invitations');
 
 	assert.match(sql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(sql, /delivery_strategy in \('normal_smtp', 'internal_gmail_alias', 'test_record_only'\)/);
-	assert.match(sql, /public\.is_internal_role_simulation_workspace\(p_organisation_id\)/);
+	assert.match(prepareSql, /v_delivery_strategy := coalesce\(v_policy\.delivery_strategy, 'normal_smtp'\)/);
+	assert.match(prepareSql, /public\.is_internal_role_simulation_workspace\(p_organisation_id\)/);
 	assert.match(sql, /shared_contact_policy_required/);
 	assert.match(sql, /existing_account_link_required/);
 	assert.match(sql, /workspace_invitation_internal_alias_email/);
 	assert.match(sql, /update auth\.users as au[\s\S]*set email = v_auth_email/);
 	assert.match(sql, /update public\.profiles as profile[\s\S]*set email = v_auth_email/);
-	assert.doesNotMatch(sql, /where lower\(p\.contact_email\) = .*return.*profile_id/is);
+	assert.doesNotMatch(prepareSql, /organisation\.name|organisation\.slug|workspaceSlug/i);
+	assert.doesNotMatch(prepareSql, /where lower\(p\.contact_email\) = .*return.*profile_id/is);
+});
+
+test('Internal delivery policy migration introduces the locked policy and upgrade-safe ordering', async () => {
+	const files = (await readdir(migrationsDir)).filter((file) => file.endsWith('.sql')).sort();
+	const migrationIndex = files.indexOf('20260723001100_workspace_membership_invitation_delivery_activation.sql');
+	const policyIndex = files.indexOf('20260723001200_workspace_invitation_internal_delivery_policy.sql');
+	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
+	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
+
+	assert.ok(migrationIndex >= 0, 'WT-008 production migration should exist');
+	assert.equal(policyIndex, migrationIndex + 1, 'internal policy migration should immediately follow 20260723001100');
+	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
+	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
+	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
+	assert.match(policySql, /drop trigger if exists prevent_workspace_invitation_delivery_policy_mutation/);
+	assert.match(policySql, /prevent_workspace_invitation_delivery_policy_mutation[\s\S]*old\.locked_at is not null/);
+	assert.match(seedBlock, /where public\.is_internal_role_simulation_workspace\(o\.id\)/);
+	assert.match(seedBlock, /WT_INVITATION_INTERNAL_POLICY_SKIPPED/);
+	assert.match(seedBlock, /WT_INVITATION_INTERNAL_POLICY_NOT_FOUND/);
+	assert.match(seedBlock, /WT_INVITATION_INTERNAL_POLICY_AMBIGUOUS/);
+	assert.match(seedBlock, /on conflict \(organisation_id\) do update/);
+	assert.doesNotMatch(seedBlock, /\.slug|\.name|contact_email|email domain|gmail\.com/i);
+	assert.match(policySql, /revoke all on public\.workspace_invitation_delivery_policies from authenticated/);
+	assert.doesNotMatch(policySql, /grant select on public\.workspace_invitation_delivery_policies to authenticated/i);
+});
+
+test('Workspace invitation internal alias policy is deterministic unique and rename-safe', async () => {
+	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
+	const aliasSql = sqlFunctionDefinition(policySql, 'workspace_invitation_internal_alias_email');
+	const prepareSql = sqlFunctionDefinition(policySql, 'prepare_workspace_membership_invitations');
+	const rubyProfileId = 'aaaaaaaa-1111-2222-3333-444444444444';
+	const alexProfileId = 'bbbbbbbb-1111-2222-3333-444444444444';
+	const rubyAlias = deterministicInternalAlias('Mark.Nesbit.Professional@gmail.com', 'wt', 'ruby.atkinson', rubyProfileId);
+	const rubyRetryAlias = deterministicInternalAlias('Mark.Nesbit.Professional@gmail.com', 'wt', 'ruby.atkinson', rubyProfileId);
+	const alexAlias = deterministicInternalAlias('Mark.Nesbit.Professional@gmail.com', 'wt', 'alex.atkinson', alexProfileId);
+
+	assert.equal(rubyAlias, 'mark.nesbit.professional+wt.ruby.atkinson.aaaaaaaa1111@gmail.com');
+	assert.equal(rubyRetryAlias, rubyAlias);
+	assert.notEqual(rubyAlias, alexAlias);
+	assert.match(aliasSql, /split_part\(base_email, '@', 1\)[\s\S]*\|\| '\+'[\s\S]*alias_prefix[\s\S]*login_identity[\s\S]*profile_suffix[\s\S]*split_part\(base_email, '@', 2\)/);
+	assert.match(aliasSql, /left\(replace\(p_profile_id::text, '-', ''\), 12\) as profile_suffix/);
+	assert.match(policySql, /select 'mark\.nesbit\.professional@gmail\.com'::text/);
+	assert.match(policySql, /select 'wt'::text/);
+	assert.match(prepareSql, /v_recipient_email := v_auth_email/);
+	assert.match(prepareSql, /where policy\.organisation_id = p_organisation_id/);
+	assert.doesNotMatch(prepareSql, /from public\.organisations|\.slug|\.name/);
+});
+
+test('Workspace invitation retry reuses existing identities without duplicate account creation or activation', async () => {
+	const sql = await readFile(migrationUrl, 'utf8');
+	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
+	const prepareSql = sqlFunctionDefinition(policySql, 'prepare_workspace_membership_invitations');
+	const deliverySql = sqlFunctionDefinition(sql, 'record_workspace_membership_invitation_delivery_result');
+	const route = await readFile(sendRouteUrl, 'utf8');
+
+	assert.match(route, /\['pending_delivery', 'delivery_failed', 'expired', 'cancelled', 'superseded'\]\.includes\(String\(row\.invitation_status\)\)/);
+	assert.match(route, /provider_not_configured/);
+	assert.match(prepareSql, /if v_has_current and v_current\.idempotency_key = p_idempotency_key/);
+	assert.match(prepareSql, /set is_current = false,[\s\S]*status = 'superseded'/);
+	assert.match(prepareSql, /v_row\.profile_id,[\s\S]*v_row\.profile_id,[\s\S]*v_handoff\.application_run_id/);
+	assert.match(prepareSql, /where au\.id = v_row\.profile_id/);
+	assert.match(prepareSql, /where profile\.id = v_row\.profile_id/);
+	assert.doesNotMatch(prepareSql, /insert into auth\.users|insert into public\.profiles|insert into public\.organisation_members/i);
+	assert.doesNotMatch(deliverySql, /organisation_members[\s\S]*status = 'active'/i);
+	assert.match(sql, /auth\.uid\(\) <> v_invitation\.auth_user_id/);
 });
 
 test('Workspace invitation RPCs enforce admin delivery and linked-account acceptance', async () => {
@@ -123,6 +275,7 @@ test('Workspace invitation UI and documentation describe delivery without activa
 	assert.match(page, /id="workspace-team-invitation-bulk-dialog"/);
 	assert.match(page, /workspaceInvitationStatusLabel/);
 	assert.match(page, /Cancel invitation/);
+	assert.doesNotMatch(page, /auth_email|recipient_email|internal_alias_base_email|workspace_invitation_delivery_policies/);
 	assert.match(email.subject, /invited to the Watchtower workspace/);
 	assert.match(email.text, /You have been invited to join Alpha Workspace/);
 	assert.match(email.html, /Accept invitation/);
