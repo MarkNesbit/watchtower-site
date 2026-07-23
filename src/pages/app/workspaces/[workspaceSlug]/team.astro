@@ -54,9 +54,12 @@ let importRun: {
 	file_hash: string | null;
 	source_snapshot_version: number | string | null;
 	live_snapshot_version: number | string | null;
+	approved_live_snapshot_version: string | null;
 	approved_change_set_version: number;
 	approved_change_set_snapshot_version: number | string | null;
 	approved_change_set_summary: Record<string, number> | null;
+	approved_at: string | null;
+	approved_by: string | null;
 	applied_at: string | null;
 	checkout_expired: boolean;
 	source_stale: boolean;
@@ -175,7 +178,7 @@ try {
 			if (requestedImportRunId) {
 				const { data: importData, error: importError } = await serverSupabase
 					.from('workspace_membership_import_runs')
-					.select('id, status, uploaded_at, original_filename, file_hash, source_snapshot_version, live_snapshot_version, approved_change_set_version, approved_change_set_snapshot_version, approved_change_set_summary, applied_at, checkout_expired, source_stale, source_superseded, validation_summary, failure_message')
+					.select('id, status, uploaded_at, original_filename, file_hash, source_snapshot_version, live_snapshot_version, approved_live_snapshot_version, approved_change_set_version, approved_change_set_snapshot_version, approved_change_set_summary, approved_at, approved_by, applied_at, checkout_expired, source_stale, source_superseded, validation_summary, failure_message')
 					.eq('organisation_id', organisation.id)
 					.eq('id', requestedImportRunId)
 					.maybeSingle();
@@ -193,7 +196,7 @@ try {
 					if (rowError) throw rowError;
 					importRows = rowData ?? [];
 
-					if (['validated', 'stale_review_required', 'approval_pending'].includes(importRun.status) && !importRun.source_superseded) {
+					if (['validated', 'stale_review_required', 'approval_pending', 'approved_for_application', 'application_failed_pending_review'].includes(importRun.status) && !importRun.source_superseded) {
 						const { data: proposalData, error: proposalError } = await serverSupabase.rpc('recalculate_workspace_membership_change_proposals', {
 							target_import_run_id: importRun.id,
 						});
@@ -349,9 +352,16 @@ const approvedApplicationCount = Number(applicationSummary.approved_additions ??
 	+ Number(applicationSummary.approved_deactivations ?? 0)
 	+ Number(applicationSummary.approved_reactivations ?? 0);
 const applicationSnapshotVersion = importRun
-	? normaliseWorkspaceTeamSnapshotVersion(importRun.approved_change_set_snapshot_version)
+	? normaliseWorkspaceTeamSnapshotVersion(importRun.approved_live_snapshot_version ?? importRun.approved_change_set_snapshot_version)
 	: null;
+const applicationSnapshotMissing = Boolean(importRun && ['approved_for_application', 'application_failed_pending_review'].includes(importRun.status) && !applicationSnapshotVersion);
+const applicationSnapshotDiffers = Boolean(importRun && applicationSnapshotVersion && applicationLiveSnapshotVersion && applicationSnapshotVersion !== applicationLiveSnapshotVersion);
 const applicationSnapshotMatches = Boolean(applicationSnapshotVersion && applicationLiveSnapshotVersion && applicationSnapshotVersion === applicationLiveSnapshotVersion);
+const applicationNeedsReview = Boolean(
+	importRun
+	&& ['approved_for_application', 'application_failed_pending_review'].includes(importRun.status)
+	&& (applicationSnapshotMissing || applicationSnapshotDiffers || importRun.status === 'application_failed_pending_review')
+);
 const canApplyApprovedChangeSet = Boolean(
 	canAdministerLater
 	&& importRun
@@ -361,6 +371,15 @@ const canApplyApprovedChangeSet = Boolean(
 	&& approvedApplicationCount > 0
 	&& applicationSnapshotMatches,
 );
+const applicationStatusLabel = importRun?.status === 'applied'
+	? 'Applied'
+	: applicationSnapshotDiffers
+		? 'Workspace changed since approval'
+		: applicationNeedsReview
+			? 'Re-review required'
+			: applicationSnapshotMatches
+				? 'Ready to apply'
+				: 'Re-review required';
 const applicationOperationKey = crypto.randomUUID();
 const importStatusLabel = (status: string) => status
 	.split('_')
@@ -400,8 +419,17 @@ const reviewItemIsBlocked = (item: ReviewModalItem) => (
 );
 const selectableReviewItems = reviewModalItems.filter((item) => !reviewItemIsBlocked(item));
 const blockedReviewItems = reviewModalItems.filter(reviewItemIsBlocked);
-const reviewModalCanOpen = Boolean(importRun && importReviewConfirmPath && selectableReviewItems.length > 0 && ['validated', 'stale_review_required', 'approval_pending'].includes(importRun.status) && !importRun.source_superseded);
-const reviewModalInitialSelectedCount = selectableReviewItems.length;
+const reviewModalCanOpen = Boolean(importRun && importReviewConfirmPath && selectableReviewItems.length > 0 && (
+	['validated', 'stale_review_required', 'approval_pending'].includes(importRun.status)
+	|| applicationNeedsReview
+) && !importRun.source_superseded);
+const reviewModalIsReconfirmation = Boolean(importRun && ['approved_for_application', 'application_failed_pending_review'].includes(importRun.status));
+const reviewModalInitialSelectedCount = reviewModalIsReconfirmation
+	? selectableReviewItems.filter((item) => item.decision === 'approved').length
+	: selectableReviewItems.length;
+const reviewModalInitialExcludedCount = reviewModalIsReconfirmation
+	? selectableReviewItems.filter((item) => item.decision !== 'approved').length
+	: 0;
 ---
 <AuthenticatedLayout title="Workspace Team | WatchTower">
 	<section class="workspace-team-page" data-workspace-team-page>
@@ -584,7 +612,7 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 							{reviewModalCanOpen ? (
 								<p class="workspace-team-import-review-link">
 									<button class="button button--primary" type="button" aria-haspopup="dialog" data-workspace-team-review-open="workspace-team-review-modal" data-workspace-team-import-review-link>
-										Review proposed changes
+										{applicationNeedsReview ? 'Re-review approved changes' : 'Review proposed changes'}
 									</button>
 								</p>
 							) : importReviewPath && importRun.status === 'approved_for_application' ? (
@@ -610,7 +638,7 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 												Live snapshot {applicationLiveSnapshotVersion ?? 'not available'}.
 											</p>
 										</div>
-										<strong>{importRun.status === 'applied' ? 'Applied' : importRun.status === 'application_failed_pending_review' ? 'Re-review required' : applicationSnapshotMatches ? 'Ready to apply' : 'Re-review required'}</strong>
+										<strong>{applicationStatusLabel}</strong>
 									</div>
 									<div class="workspace-team-application__counts" aria-label="Approved change summary">
 										<span><strong>{applicationSummary.approved_additions ?? 0}</strong> additions</span>
@@ -627,7 +655,11 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 									)}
 									{importRun.status === 'approved_for_application' && (
 										<p class="workspace-team-import-review-link">
-											{canApplyApprovedChangeSet ? (
+											{applicationNeedsReview && reviewModalCanOpen ? (
+												<button class="button button--secondary" type="button" aria-haspopup="dialog" data-workspace-team-review-open="workspace-team-review-modal" data-workspace-team-application-rereview>
+													Re-review approved changes
+												</button>
+											) : canApplyApprovedChangeSet ? (
 												<button class="button button--primary" type="button" aria-haspopup="dialog" data-workspace-team-application-open="workspace-team-application-dialog" data-workspace-team-application-cta>
 													Apply approved changes
 												</button>
@@ -648,13 +680,17 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 							<form method="post" action={importReviewConfirmPath} data-workspace-team-review-form>
 								<div class="workspace-team-review-modal__header">
 									<div>
-										<h3 id="workspace-team-review-modal-title" tabindex="-1" data-workspace-team-dialog-focus>Review proposed changes</h3>
-										<p id="workspace-team-review-modal-description">Review the proposed team changes below. Switch off anything that should not proceed, then accept the selected changes.</p>
+										<h3 id="workspace-team-review-modal-title" tabindex="-1" data-workspace-team-dialog-focus>{reviewModalIsReconfirmation ? 'Re-review approved changes' : 'Review proposed changes'}</h3>
+										<p id="workspace-team-review-modal-description">
+											{reviewModalIsReconfirmation
+												? 'Approved choices are preserved below. Reconfirming records the current live snapshot and does not apply workspace access changes.'
+												: 'Review the proposed team changes below. Switch off anything that should not proceed, then accept the selected changes.'}
+										</p>
 									</div>
 									<div class="workspace-team-review-modal__counts" aria-label="Review selection counts" data-workspace-team-review-counts>
 										<span><strong>{reviewModalItems.length}</strong> total proposals</span>
 										<span><strong data-review-selected-count>{reviewModalInitialSelectedCount}</strong> selected</span>
-										<span><strong data-review-excluded-count>{0}</strong> excluded</span>
+										<span><strong data-review-excluded-count>{reviewModalInitialExcludedCount}</strong> excluded</span>
 										<span><strong>{blockedReviewItems.length}</strong> invalid or blocked</span>
 									</div>
 								</div>
@@ -684,7 +720,7 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 														<span class="workspace-team-review-row__blocked">Excluded</span>
 													) : (
 														<label>
-															<input type="checkbox" name="selected_import_row_id" value={item.row_id} checked data-review-switch aria-describedby={`review-row-${item.row_id}-details`} />
+															<input type="checkbox" name="selected_import_row_id" value={item.row_id} checked={reviewModalIsReconfirmation ? item.decision === 'approved' : true} data-review-switch aria-describedby={`review-row-${item.row_id}-details`} />
 															<span>Include</span>
 														</label>
 													)}
@@ -712,21 +748,21 @@ const reviewModalInitialSelectedCount = selectableReviewItems.length;
 									})}
 								</div>
 								<div class="workspace-team-review-modal__confirm" hidden data-review-confirmation>
-									<h4>Confirm selected team changes?</h4>
+									<h4>{reviewModalIsReconfirmation ? 'Reconfirm approved team changes?' : 'Confirm selected team changes?'}</h4>
 									<p><strong data-review-confirm-selected>{reviewModalInitialSelectedCount}</strong> changes will be approved for application.</p>
-									<p><strong data-review-confirm-excluded>{0}</strong> changes will be excluded. No workspace access changes will be made until the application stage.</p>
+									<p><strong data-review-confirm-excluded>{reviewModalInitialExcludedCount}</strong> changes will be excluded. No workspace access changes will be made until the application stage.</p>
 									<label>
 										<span>Optional batch note</span>
 										<input type="text" name="batch_reason" placeholder="Optional audit note" />
 									</label>
 								</div>
 								<div class="workspace-team-review-modal__footer">
-									<span data-review-footer-count>{reviewModalInitialSelectedCount} selected · 0 excluded</span>
+									<span data-review-footer-count>{reviewModalInitialSelectedCount} selected · {reviewModalInitialExcludedCount} excluded</span>
 									<div>
 										<button class="button button--secondary" type="button" data-workspace-team-dialog-cancel>Cancel</button>
 										<button class="button button--secondary" type="button" hidden data-review-back>Back to review</button>
 										<button class="button button--primary" type="button" data-review-accept>Accept {reviewModalInitialSelectedCount} selected changes</button>
-										<button class="button button--primary" type="submit" hidden data-review-confirm>Confirm selected changes</button>
+										<button class="button button--primary" type="submit" hidden data-review-confirm>{reviewModalIsReconfirmation ? 'Reconfirm selected changes' : 'Confirm selected changes'}</button>
 									</div>
 								</div>
 							</form>

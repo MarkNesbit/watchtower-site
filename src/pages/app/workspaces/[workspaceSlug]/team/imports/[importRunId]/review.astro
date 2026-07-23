@@ -67,12 +67,15 @@ let importRun: {
 	validation_summary: JsonRecord;
 	invalid_row_count: number;
 	approved_change_set_version: number;
+	approved_live_snapshot_version: string | null;
 	approved_change_set_snapshot_version: number | string | null;
 	approved_change_set: JsonRecord[];
 	approved_change_set_summary: JsonRecord;
 	review_completed_at: string | null;
 	review_completed_by: string | null;
 	approval_locked_at: string | null;
+	approved_at: string | null;
+	approved_by: string | null;
 } | null = null;
 let sourceExport: { exported_at: string | null; export_mode: string | null; status: string | null; superseded_at: string | null } | null = null;
 let uploaderName = 'Workspace administrator';
@@ -150,9 +153,11 @@ const decisionRequiresReason = (item: ReviewItem) => item.proposed_change_type =
 	|| item.validation_state === 'warning'
 	|| importRun?.status === 'stale_review_required'
 	|| item.decision !== 'pending';
+const approvedReviewStatuses = ['approved_for_application', 'application_failed_pending_review'];
 const canShowControls = (item: ReviewItem) => Boolean(
 	item.decision_id
-	&& importRun?.status !== 'approved_for_application'
+	&& importRun
+	&& !approvedReviewStatuses.includes(importRun.status)
 	&& item.validation_state !== 'error'
 	&& !['blocked', 'superseded', 'requires_revalidation', 'no_longer_required'].includes(item.live_recalculation_status)
 );
@@ -174,7 +179,7 @@ try {
 
 		const { data: importData, error: importError } = await serverSupabase
 			.from('workspace_membership_import_runs')
-			.select('id, status, review_status, uploaded_by, uploaded_at, original_filename, source_export_id, source_snapshot_version, live_snapshot_version, source_export_mode, checkout_expired, source_stale, source_superseded, validation_summary, invalid_row_count, approved_change_set_version, approved_change_set_snapshot_version, approved_change_set, approved_change_set_summary, review_completed_at, review_completed_by, approval_locked_at')
+			.select('id, status, review_status, uploaded_by, uploaded_at, original_filename, source_export_id, source_snapshot_version, live_snapshot_version, source_export_mode, checkout_expired, source_stale, source_superseded, validation_summary, invalid_row_count, approved_change_set_version, approved_live_snapshot_version, approved_change_set_snapshot_version, approved_change_set, approved_change_set_summary, review_completed_at, review_completed_by, approval_locked_at, approved_at, approved_by')
 			.eq('organisation_id', organisation.id)
 			.eq('id', importRunId)
 			.maybeSingle();
@@ -189,7 +194,7 @@ try {
 		if (!importRun) {
 			loadMessage = 'Import run not found for this workspace.';
 			Astro.response.status = 404;
-		} else if (!['validated', 'stale_review_required', 'approval_pending', 'approved_for_application'].includes(importRun.status) || importRun.source_superseded) {
+		} else if (!['validated', 'stale_review_required', 'approval_pending', ...approvedReviewStatuses].includes(importRun.status) || importRun.source_superseded) {
 			loadMessage = 'This import run is not eligible for Workspace Team change review.';
 			Astro.response.status = 409;
 		} else {
@@ -216,16 +221,23 @@ try {
 				}
 			}
 
-			if (Astro.request.method === 'POST' && importRun.status !== 'approved_for_application') {
+			if (Astro.request.method === 'POST') {
 				const formData = await Astro.request.formData();
 				const intent = String(formData.get('intent') ?? '');
 				try {
 					if (intent === 'confirm_change_set') {
-						const { error } = await serverSupabase.rpc('confirm_workspace_membership_change_set', {
+						const confirmRpc = approvedReviewStatuses.includes(importRun.status)
+							? 'reconfirm_workspace_membership_approved_change_set'
+							: 'confirm_workspace_membership_change_set';
+						const { error } = await serverSupabase.rpc(confirmRpc, {
 							target_import_run_id: importRun.id,
 						});
 						if (error) throw error;
 						return Astro.redirect(`${reviewPath}?confirmed=1`);
+					}
+
+					if (approvedReviewStatuses.includes(importRun.status)) {
+						throw new Error('Approved change sets must be reconfirmed as a set.');
 					}
 
 					const decisionId = String(formData.get('decision_id') ?? '');
@@ -243,30 +255,30 @@ try {
 				}
 			}
 
-			if (importRun.status !== 'approved_for_application') {
+			if (!approvedReviewStatuses.includes(importRun.status)) {
 				const { error: ensureError } = await serverSupabase.rpc('ensure_workspace_membership_change_decisions', {
 					target_import_run_id: importRun.id,
 				});
 				if (ensureError) throw ensureError;
-
-				const { data: recalculatedData, error: recalculationError } = await serverSupabase.rpc('recalculate_workspace_membership_change_proposals', {
-					target_import_run_id: importRun.id,
-				});
-				if (recalculationError) throw recalculationError;
-				reviewItems = asArray<ReviewItem>(recalculatedData).map((item) => ({
-					...item,
-					validation_messages: asArray<{ field?: string; message?: string }>(item.validation_messages),
-					source_export_values: asRecord(item.source_export_values),
-					upload_live_values: asRecord(item.upload_live_values),
-					current_live_values: asRecord(item.current_live_values),
-					proposed_values: asRecord(item.proposed_values),
-					recalculated_proposed_values: asRecord(item.recalculated_proposed_values),
-					field_differences: asArray<{ field?: string; from?: unknown; to?: unknown }>(item.field_differences),
-					live_recalculation_messages: asArray<{ message?: string }>(item.live_recalculation_messages),
-					impact_counts: asRecord(item.impact_counts),
-					decision_history: asArray<JsonRecord>(item.decision_history),
-				}));
 			}
+
+			const { data: recalculatedData, error: recalculationError } = await serverSupabase.rpc('recalculate_workspace_membership_change_proposals', {
+				target_import_run_id: importRun.id,
+			});
+			if (recalculationError) throw recalculationError;
+			reviewItems = asArray<ReviewItem>(recalculatedData).map((item) => ({
+				...item,
+				validation_messages: asArray<{ field?: string; message?: string }>(item.validation_messages),
+				source_export_values: asRecord(item.source_export_values),
+				upload_live_values: asRecord(item.upload_live_values),
+				current_live_values: asRecord(item.current_live_values),
+				proposed_values: asRecord(item.proposed_values),
+				recalculated_proposed_values: asRecord(item.recalculated_proposed_values),
+				field_differences: asArray<{ field?: string; from?: unknown; to?: unknown }>(item.field_differences),
+				live_recalculation_messages: asArray<{ message?: string }>(item.live_recalculation_messages),
+				impact_counts: asRecord(item.impact_counts),
+				decision_history: asArray<JsonRecord>(item.decision_history),
+			}));
 		}
 	}
 } catch (error) {
@@ -293,14 +305,29 @@ const remainingCount = decisionItems.filter((item) => item.decision === 'pending
 const approvedCount = decisionItems.filter((item) => item.decision === 'approved').length;
 const excludedCount = decisionItems.filter((item) => item.decision === 'excluded' || item.decision === 'keep_active').length;
 const blockedCount = blockedItems.length;
-const canConfirm = Boolean(importRun && importRun.status !== 'approved_for_application' && totalDecisionRequired > 0 && remainingCount === 0 && !decisionItems.some((item) => item.decision === 'approved' && ['blocked', 'superseded', 'requires_revalidation', 'no_longer_required'].includes(item.live_recalculation_status)));
 const finalSummary = importRun?.approved_change_set_summary ?? {};
 const latestSnapshot = reviewItems
 	.map((item) => normaliseWorkspaceTeamSnapshotVersion(item.live_snapshot_version))
 	.find((value): value is string => Boolean(value))
-	?? normaliseWorkspaceTeamSnapshotVersion(importRun?.approved_change_set_snapshot_version)
 	?? normaliseWorkspaceTeamSnapshotVersion(importRun?.live_snapshot_version)
 	?? null;
+const approvedSnapshotVersion = normaliseWorkspaceTeamSnapshotVersion(importRun?.approved_live_snapshot_version ?? importRun?.approved_change_set_snapshot_version);
+const isApprovedReconfirmation = Boolean(importRun && approvedReviewStatuses.includes(importRun.status));
+const needsApprovedSnapshotRecovery = Boolean(
+	isApprovedReconfirmation
+	&& (!approvedSnapshotVersion || (latestSnapshot && approvedSnapshotVersion !== latestSnapshot) || importRun?.status === 'application_failed_pending_review')
+);
+const approvedDecisionBlocked = decisionItems.some((item) => item.decision === 'approved' && ['blocked', 'superseded', 'requires_revalidation', 'no_longer_required'].includes(item.live_recalculation_status));
+const canConfirm = Boolean(
+	importRun
+	&& totalDecisionRequired > 0
+	&& !approvedDecisionBlocked
+	&& (
+		isApprovedReconfirmation
+			? approvedCount > 0
+			: remainingCount === 0
+	)
+);
 ---
 
 <AuthenticatedLayout title="Workspace Team Import Review | WatchTower">
@@ -308,8 +335,8 @@ const latestSnapshot = reviewItems
 		<header class="team-review-hero" aria-labelledby="team-review-heading">
 			<div>
 				<p class="eyebrow">Workspace Team</p>
-				<h1 id="team-review-heading">Import review</h1>
-				<p>Review proposed changes, record decisions and freeze the approved set for later application.</p>
+				<h1 id="team-review-heading">{needsApprovedSnapshotRecovery ? 'Re-review approved changes' : 'Import review'}</h1>
+				<p>{needsApprovedSnapshotRecovery ? 'Reconfirm the existing approved set against the current live Workspace Team snapshot.' : 'Review proposed changes, record decisions and freeze the approved set for later application.'}</p>
 			</div>
 			<a class="button button--secondary" href={teamPath}>Back to Team</a>
 		</header>
@@ -357,8 +384,8 @@ const latestSnapshot = reviewItems
 					</div>
 				</ProjectContentPanel>
 
-				{importRun.status === 'approved_for_application' ? (
-					<ProjectContentPanel title="Ready for application" helper="These changes have been approved for application. No workspace membership changes have been made yet." headingId="team-review-ready-heading">
+				{isApprovedReconfirmation ? (
+					<ProjectContentPanel title={needsApprovedSnapshotRecovery ? 'Re-review approved changes' : 'Ready for application'} helper={needsApprovedSnapshotRecovery ? 'No CSV re-upload is required while the proposals remain valid.' : 'These changes have been approved for application. No workspace membership changes have been made yet.'} headingId="team-review-ready-heading">
 						<div class="team-review-final-summary" data-workspace-team-approved-set>
 							<span><strong>{finalSummary.approved_additions ?? 0}</strong> additions</span>
 							<span><strong>{finalSummary.approved_name_corrections ?? 0}</strong> name corrections</span>
@@ -369,7 +396,17 @@ const latestSnapshot = reviewItems
 							<span><strong>{finalSummary.kept_active ?? 0}</strong> kept active</span>
 							<span><strong>{finalSummary.invalid_rows_not_included ?? 0}</strong> invalid not included</span>
 						</div>
-						<p>Approved set version {importRun.approved_change_set_version}. Live snapshot {snapshotLabel(importRun.approved_change_set_snapshot_version)}. Confirmed {formatDateTime(importRun.review_completed_at)}.</p>
+						<p>Approved set version {importRun.approved_change_set_version}. Approved snapshot {snapshotLabel(approvedSnapshotVersion)}. Live snapshot {snapshotLabel(latestSnapshot)}. Confirmed {formatDateTime(importRun.review_completed_at)}.</p>
+						{needsApprovedSnapshotRecovery && (
+							<>
+								<p>No CSV re-upload is required while the proposals remain valid. Reconfirming records the current live snapshot, keeps the current approved and excluded decisions, and makes no membership, profile, auth or invitation delivery change.</p>
+								<form method="post" action={reviewPath} class="team-review-confirm-form">
+									<input type="hidden" name="intent" value="confirm_change_set" />
+									<button class="button button--primary" type="submit" disabled={!canConfirm}>Reconfirm approved change set</button>
+									<p>{canConfirm ? 'Ready to record the current live snapshot for later application.' : 'Resolve any blocked approved proposal before reconfirming.'}</p>
+								</form>
+							</>
+						)}
 					</ProjectContentPanel>
 				) : (
 					<>
