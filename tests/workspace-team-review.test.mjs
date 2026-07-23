@@ -5,11 +5,19 @@ import { buildWorkspaceTeamImportReviewConfirmPath, buildWorkspaceTeamImportRevi
 
 const migrationUrl = new URL('../supabase/migrations/20260722000500_workspace_membership_change_review_approval.sql', import.meta.url);
 const bulkReviewMigrationUrl = new URL('../supabase/migrations/20260723000400_workspace_membership_bulk_review_confirmation.sql', import.meta.url);
+const auditReviewStatusMigrationUrl = new URL('../supabase/migrations/20260723000500_workspace_membership_audit_review_statuses.sql', import.meta.url);
 const reviewPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/imports/[importRunId]/review.astro', import.meta.url);
 const confirmRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/imports/[importRunId]/review/confirm.ts', import.meta.url);
 const teamPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
 const schemaDocsUrl = new URL('../docs/architecture/database-schema-v1.md', import.meta.url);
+
+function sqlConstraintValues(sql, constraintName) {
+	const escapedName = constraintName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	const match = sql.match(new RegExp(`${escapedName}[\\s\\S]*?check \\([\\s\\S]*?\\b(?:previous_status|new_status|event_type) in \\(([\\s\\S]*?)\\)[\\s\\S]*?\\)\\s*[,;]`));
+	assert.ok(match, `${constraintName} constraint should be present`);
+	return new Set([...match[1].matchAll(/'([^']+)'/g)].map((entry) => entry[1]));
+}
 
 test('Workspace Team import review route helper is workspace scoped', () => {
 	assert.equal(
@@ -106,6 +114,78 @@ test('Workspace Team bulk review migration records selected and excluded decisio
 	assert.match(sql, /applies_changes', false/);
 	assert.match(sql, /grant execute on function public\.confirm_workspace_membership_selected_change_set/);
 	assert.doesNotMatch(sql, /insert into public\.organisation_members|update public\.organisation_members|insert into public\.profiles|update public\.profiles|auth\.admin|insert into auth\.users|delete from public\.project_people/i);
+});
+
+test('Workspace Team audit status migration allows review decisions without removing constraints', async () => {
+	const sql = await readFile(auditReviewStatusMigrationUrl, 'utf8');
+	const previousStatuses = sqlConstraintValues(sql, 'workspace_membership_audit_events_previous_status_check');
+	const newStatuses = sqlConstraintValues(sql, 'workspace_membership_audit_events_new_status_check');
+	const eventTypes = sqlConstraintValues(sql, 'workspace_membership_audit_events_event_type_check');
+
+	for (const [previousStatus, newStatus] of [
+		['pending', 'approved'],
+		['pending', 'excluded'],
+		['pending', 'keep_active'],
+		['pending', 'blocked'],
+		['pending', 'no_longer_required'],
+		['invited', 'active'],
+		['active', 'deactivated'],
+		['checked_out', 'released'],
+		['uploaded', 'validated'],
+		['validated', 'approved_for_application'],
+		['stale_review_required', 'approved_for_application'],
+	]) {
+		assert.ok(previousStatuses.has(previousStatus), `${previousStatus} should be accepted as previous_status`);
+		assert.ok(newStatuses.has(newStatus), `${newStatus} should be accepted as new_status`);
+	}
+	for (const status of [
+		'invited',
+		'invite_expired',
+		'active',
+		'suspended',
+		'deactivated',
+		'generated',
+		'checked_out',
+		'released',
+		'superseded',
+		'expired',
+		'cancelled',
+		'uploaded',
+		'parsing',
+		'validation_failed',
+		'validated',
+		'stale_review_required',
+		'comparison_completed',
+		'approval_pending',
+		'approved_for_application',
+		'applied',
+		'failed',
+		'pending',
+		'approved',
+		'excluded',
+		'keep_active',
+		'blocked',
+		'no_longer_required',
+		'rejected',
+		'skipped',
+		'not_started',
+		'in_review',
+		'ready_for_application',
+		'review_blocked',
+		'not_applied',
+	]) {
+		assert.ok(previousStatuses.has(status), `${status} should be accepted as previous_status`);
+		assert.ok(newStatuses.has(status), `${status} should be accepted as new_status`);
+	}
+	for (const invalidStatus of ['unknown', 'archived', 'deleted', 'owner']) {
+		assert.equal(previousStatuses.has(invalidStatus), false);
+		assert.equal(newStatuses.has(invalidStatus), false);
+	}
+	assert.match(sql, /previous_status is null/);
+	assert.match(sql, /new_status is null/);
+	assert.ok(eventTypes.has('workspace_membership_csv_checkout_released'));
+	assert.ok(eventTypes.has('workspace_membership_change_selection_confirmed'));
+	assert.doesNotMatch(sql, /delete from public\.workspace_membership_audit_events|update public\.workspace_membership_audit_events/i);
 });
 
 test('Workspace Team review page groups proposals and saves decisions through controlled RPCs', async () => {
