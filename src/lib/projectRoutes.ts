@@ -34,6 +34,10 @@ export function buildWorkspaceTeamImportApplyPath(workspaceSlug: string, importR
 	return `${buildWorkspaceTeamPath(workspaceSlug)}/imports/${encodeURIComponent(importRunId)}/apply`;
 }
 
+export function buildWorkspaceTeamInvitationSendPath(workspaceSlug: string): string {
+	return `${buildWorkspaceTeamPath(workspaceSlug)}/invitations/send`;
+}
+
 export function buildProjectEditPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/edit`;
 }

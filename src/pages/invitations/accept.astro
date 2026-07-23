@@ -1,0 +1,173 @@
+---
+import AuthLayout from '../../layouts/AuthLayout.astro';
+import { createSupabaseServerClient, getServerAccessToken } from '../../lib/supabaseServer.ts';
+import { hashInvitationToken } from '../../lib/workspaceInvitations.ts';
+import { workspaceRoleLabel } from '../../lib/workspaceTeam.ts';
+
+Astro.response.headers.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
+Astro.response.headers.set('Pragma', 'no-cache');
+Astro.response.headers.set('Expires', '0');
+
+type InvitationInfo = {
+	invitation_id: string;
+	organisation_id: string;
+	membership_id: string;
+	profile_id: string;
+	auth_user_id: string;
+	workspace_name: string;
+	workspace_slug: string;
+	person_name: string;
+	login_name: string | null;
+	intended_role: string;
+	expires_at: string;
+	status: string;
+};
+
+const token = String(Astro.url.searchParams.get('token') ?? '').trim();
+const errorCode = String(Astro.url.searchParams.get('error') ?? '').trim();
+const success = String(Astro.url.searchParams.get('accepted') ?? '') === 'true';
+let invitation: InvitationInfo | null = null;
+let loadError = '';
+let acceptedWorkspacePath = '';
+
+const formatDateTime = (value: string | null) => value
+	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
+	: 'Not available';
+
+const errorMessage = ({
+	signin: 'Sign in as the account linked to this invitation, then return to this link.',
+	wrong_account: 'This invitation belongs to another account. Sign out and use the invited account.',
+	invalid: 'This invitation link is invalid, expired, cancelled or has already been used.',
+	provider_required: 'Account setup links require the configured Supabase invitation email provider before password setup can be completed.',
+	failed: 'Invitation acceptance could not be completed. Try again, or ask the workspace Owner to resend the invitation.',
+} as Record<string, string>)[errorCode] ?? '';
+
+if (!token || !/^[a-f0-9]{64}$/i.test(token)) {
+	loadError = 'This invitation link is invalid or incomplete.';
+} else if (Astro.request.method === 'POST') {
+	const accessToken = getServerAccessToken(Astro.cookies);
+	if (!accessToken) {
+		return Astro.redirect(`/invitations/accept?token=${encodeURIComponent(token)}&error=signin`, 303);
+	}
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	const tokenHash = await hashInvitationToken(token);
+	const { data: invitationData } = await serverSupabase.rpc('get_workspace_membership_invitation_by_token', {
+		p_token_hash: tokenHash,
+	});
+	const currentInvitation = Array.isArray(invitationData) ? invitationData[0] as InvitationInfo | undefined : null;
+	const { error } = await serverSupabase.rpc('accept_workspace_membership_invitation', {
+		p_token_hash: tokenHash,
+	});
+	if (error) {
+		const text = [error.message, error.details, error.hint].filter(Boolean).join(' ');
+		const code = /WRONG_ACCOUNT/i.test(text)
+			? 'wrong_account'
+			: /INVALID|NOT_ACCEPTABLE|EXPIRED|CANCELLED|SUPERSEDED/i.test(text)
+				? 'invalid'
+				: 'failed';
+		return Astro.redirect(`/invitations/accept?token=${encodeURIComponent(token)}&error=${code}`, 303);
+	}
+	const slug = currentInvitation?.workspace_slug;
+	return Astro.redirect(slug ? `/app/workspaces/${encodeURIComponent(slug)}/team?invitation_acceptance=success` : '/app?invitation_acceptance=success', 303);
+} else {
+	try {
+		const serverSupabase = createSupabaseServerClient();
+		const tokenHash = await hashInvitationToken(token);
+		const { data, error } = await serverSupabase.rpc('get_workspace_membership_invitation_by_token', {
+			p_token_hash: tokenHash,
+		});
+		if (error) throw error;
+		invitation = Array.isArray(data) ? data[0] as InvitationInfo | null : null;
+		if (!invitation) loadError = 'This invitation link is invalid, expired, cancelled or has already been used.';
+		if (success && invitation?.workspace_slug) acceptedWorkspacePath = `/app/workspaces/${encodeURIComponent(invitation.workspace_slug)}/team`;
+	} catch (error) {
+		console.error('workspace_invitation_acceptance_lookup_failed', {
+			routeName: 'workspace_invitation_acceptance',
+			message: error instanceof Error ? error.message : 'Invitation lookup failed',
+		});
+		loadError = 'This invitation could not be validated. Try the link again, or ask the workspace Owner to resend it.';
+	}
+}
+---
+<AuthLayout title="Accept invitation | WatchTower" description="Accept a WatchTower workspace invitation.">
+	<section class="invitation-accept-card" data-invitation-acceptance>
+		<p class="eyebrow">Watchtower invitation</p>
+		{success ? (
+			<>
+				<h1>Invitation accepted</h1>
+				<p>Your workspace membership is active.</p>
+				{acceptedWorkspacePath ? <p><a class="button button--primary" href={acceptedWorkspacePath}>Open workspace</a></p> : <p><a class="button button--primary" href="/app">Continue to WatchTower</a></p>}
+			</>
+		) : loadError ? (
+			<>
+				<h1>Invitation unavailable</h1>
+				<p>{loadError}</p>
+				<p><a class="button button--secondary" href="/login">Sign in</a></p>
+			</>
+		) : invitation ? (
+			<>
+				<h1>Accept workspace invitation</h1>
+				{errorMessage && <p class="invitation-accept-card__error" role="alert">{errorMessage}</p>}
+				<div class="invitation-accept-card__summary" aria-label="Invitation details">
+					<span><strong>Workspace</strong>{invitation.workspace_name}</span>
+					<span><strong>Invited person</strong>{invitation.person_name}</span>
+					<span><strong>Login</strong>{invitation.login_name ?? 'Linked account'}</span>
+					<span><strong>Role</strong>{workspaceRoleLabel(invitation.intended_role)}</span>
+					<span><strong>Expires</strong>{formatDateTime(invitation.expires_at)}</span>
+				</div>
+				<form method="post" action={`/invitations/accept?token=${encodeURIComponent(token)}`}>
+					<button class="button button--primary" type="submit">Accept invitation</button>
+				</form>
+				<p class="invitation-accept-card__note">Password setup is completed through the secure provider invitation email. If you are signed in as a different account, sign out before accepting.</p>
+				<p><a class="button button--secondary" href="/login">Sign in with invited account</a></p>
+			</>
+		) : null}
+	</section>
+</AuthLayout>
+
+<style>
+	.invitation-accept-card {
+		inline-size: min(680px, 100%);
+		margin-inline: auto;
+		padding: 2rem;
+		border: 1px solid var(--color-border, #d9e2ec);
+		border-radius: 8px;
+		background: var(--color-surface, #fff);
+		box-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
+	}
+
+	.invitation-accept-card h1 {
+		margin-block: 0.35rem 0.75rem;
+	}
+
+	.invitation-accept-card__summary {
+		display: grid;
+		gap: 0.75rem;
+		margin-block: 1.25rem;
+	}
+
+	.invitation-accept-card__summary span {
+		display: grid;
+		gap: 0.15rem;
+		padding-block-end: 0.75rem;
+		border-block-end: 1px solid var(--color-border, #d9e2ec);
+	}
+
+	.invitation-accept-card__summary strong {
+		color: var(--color-muted, #526070);
+		font-size: 0.82rem;
+	}
+
+	.invitation-accept-card__error {
+		padding: 0.75rem;
+		border: 1px solid #f6b6b6;
+		border-radius: 8px;
+		background: #fff1f1;
+		color: #8f1d1d;
+	}
+
+	.invitation-accept-card__note {
+		margin-block-start: 1rem;
+		color: var(--color-muted, #526070);
+	}
+</style>

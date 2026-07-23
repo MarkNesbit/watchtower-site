@@ -10,7 +10,12 @@ import {
 	workspaceTeamLoginLabel,
 	workspaceTeamPersonName,
 } from '../src/lib/workspaceTeam.ts';
-import { buildWorkspaceTeamPath } from '../src/lib/projectRoutes.ts';
+import {
+	invitationLifecycleCounts,
+	workspaceInvitationActionLabel,
+	workspaceInvitationStatusLabel,
+} from '../src/lib/workspaceInvitations.ts';
+import { buildWorkspaceTeamInvitationSendPath, buildWorkspaceTeamPath } from '../src/lib/projectRoutes.ts';
 
 const routeUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const headerUrl = new URL('../src/components/Header.astro', import.meta.url);
@@ -56,7 +61,8 @@ test('Workspace Team route exposes CSV export controls without membership mutati
 	assert.match(route, /data-team-csv-takeover/);
 	assert.match(route, /data-membership-history/);
 	assert.match(route, /Owner or Admin access is required for future team CSV administration/);
-	assert.match(route, /No actions in this release/);
+	assert.match(route, /data-workspace-team-invitations/);
+	assert.match(route, /Send \{invitationCounts\.eligibleToSend\}/);
 	assert.match(route, /recalculate_workspace_membership_change_proposals/);
 	assert.doesNotMatch(route, /\.insert\(|\.update\(|\.upsert\(|\.delete\(|\.rpc\('confirm_workspace_membership_selected_change_set'/);
 });
@@ -64,7 +70,7 @@ test('Workspace Team route exposes CSV export controls without membership mutati
 test('Workspace Team route renders roles states filters search and accessible responsive table', async () => {
 	const route = await routeSource();
 
-	for (const label of ['Person', 'Login', 'Role', 'Status', 'Joined / invited', 'Actions']) {
+	for (const label of ['Person', 'Login', 'Role', 'Status', 'Invitation', 'Joined / invited', 'Actions']) {
 		assert.match(route, new RegExp(`<th scope="col">${label.replace('/', '\\/')}`));
 	}
 	for (const label of ['All', 'Active', 'Invitations', 'Deactivated']) {
@@ -77,6 +83,30 @@ test('Workspace Team route renders roles states filters search and accessible re
 	assert.match(route, /aria-label=\{\`\$\{member\.displayStatus\}\. \$\{member\.statusDescription\}\`\}/);
 	assert.match(route, /@media \(max-width: 900px\)/);
 	assert.match(route, /content: attr\(data-label\)/);
+});
+
+test('Workspace Team invitation helpers keep delivery state separate from membership state', () => {
+	const rows = [
+		{ organisation_id: 'org', organisation_membership_id: 'm-1', profile_id: 'u1', membership_status: 'invited', invitation_status: null },
+		{ organisation_id: 'org', organisation_membership_id: 'm-2', profile_id: 'u2', membership_status: 'invited', invitation_status: 'delivered' },
+		{ organisation_id: 'org', organisation_membership_id: 'm-3', profile_id: 'u3', membership_status: 'invited', invitation_status: 'delivery_failed' },
+		{ organisation_id: 'org', organisation_membership_id: 'm-4', profile_id: 'u4', membership_status: 'invite_expired', invitation_status: 'expired' },
+		{ organisation_id: 'org', organisation_membership_id: 'm-5', profile_id: 'u5', membership_status: 'active', invitation_status: 'accepted' },
+	];
+
+	assert.deepEqual(invitationLifecycleCounts(rows), {
+		invited: 4,
+		pendingDelivery: 1,
+		delivered: 1,
+		accepted: 1,
+		expired: 1,
+		failed: 1,
+		awaitingAcceptance: 1,
+		eligibleToSend: 3,
+	});
+	assert.equal(workspaceInvitationStatusLabel('delivery_failed'), 'Delivery failed');
+	assert.equal(workspaceInvitationActionLabel({ membership_status: 'invited', invitation_status: 'delivered' }), 'Resend invitation');
+	assert.equal(workspaceInvitationActionLabel({ membership_status: 'active', invitation_status: 'accepted' }), 'Invitation accepted');
 });
 
 test('Workspace Team helper labels do not leak database lifecycle terms', () => {
@@ -144,7 +174,9 @@ test('Workspace navigation links to the workspace-level team route when a worksp
 	const projectRoutes = await readFile(projectRoutesUrl, 'utf8');
 
 	assert.equal(buildWorkspaceTeamPath('mark-nesbit-professional-workspace'), '/app/workspaces/mark-nesbit-professional-workspace/team');
+	assert.equal(buildWorkspaceTeamInvitationSendPath('mark-nesbit-professional-workspace'), '/app/workspaces/mark-nesbit-professional-workspace/team/invitations/send');
 	assert.match(projectRoutes, /export function buildWorkspaceTeamPath\(workspaceSlug: string\)/);
+	assert.match(projectRoutes, /export function buildWorkspaceTeamInvitationSendPath\(workspaceSlug: string\)/);
 	assert.match(header, /getCurrentWorkspace\(serverSupabase, accessToken\)/);
 	assert.match(header, /buildWorkspaceTeamPath\(organisation\.slug\)/);
 	assert.match(header, /workspaceTeamHref \? \{ href: workspaceTeamHref, label: 'Workspace' \} : \{ label: 'Workspace' \}/);

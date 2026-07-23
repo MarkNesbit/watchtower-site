@@ -18,6 +18,7 @@ import {
 	buildWorkspaceTeamImportPath,
 	buildWorkspaceTeamImportReviewConfirmPath,
 	buildWorkspaceTeamImportReviewPath,
+	buildWorkspaceTeamInvitationSendPath,
 	buildWorkspaceTeamPath,
 } from './projectRoutes.ts';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs.ts';
@@ -80,6 +81,7 @@ export {
 	buildWorkspaceTeamImportPath,
 	buildWorkspaceTeamImportReviewConfirmPath,
 	buildWorkspaceTeamImportReviewPath,
+	buildWorkspaceTeamInvitationSendPath,
 	buildWorkspaceTeamPath,
 	buildUniqueProjectRef,
 	normaliseProjectRef,

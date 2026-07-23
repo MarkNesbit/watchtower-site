@@ -399,6 +399,20 @@ WT-WORKSPACE-TEAM-007-FIX-002 adds `release_workspace_membership_csv_checkout_af
 
 `workspace_membership_change_application_runs` records each application attempt with an idempotency `operation_key`, requested/applied actor and timestamps, status values `requested`, `applying`, `applied`, `failed`, `drift_detected`, `rolled_back` and `already_applied`, expected/applied counts, live snapshot before/after and controlled failure details. `workspace_membership_invitation_handoffs` records pending invitation-delivery work for approved additions after the transaction creates a synthetic pending `auth.users` identity, `profiles` row and invited `organisation_members` row. The handoff table does not store invitation tokens and WT-007 does not send invitation email.
 
+WT-WORKSPACE-TEAM-008 adds `workspace_membership_invitations` and `workspace_invitation_delivery_policies`. `workspace_membership_invitations` stores one membership-specific invitation lifecycle with organisation, membership, profile, auth user, application/handoff references, version, current flag, intended role, recipient email, restricted auth email, delivery strategy, SHA-256 token hashes only, issuer, expiry, delivery/open/accept/cancel/supersede timestamps, attempt counts, failure code/message, correlation id and timestamps. A partial unique index enforces one current invitation per membership, and a token-hash unique index prevents duplicate live tokens. Supported invitation statuses are `pending_delivery`, `sending`, `delivered`, `delivery_failed`, `opened`, `accepted`, `expired`, `cancelled` and `superseded`; these do not replace `organisation_members.status`.
+
+`workspace_invitation_delivery_policies` is the explicit delivery-policy foundation for unusual workspace delivery. Normal workspaces use `normal_smtp`. The bounded internal path uses `internal_gmail_alias` only when an immutable policy row exists and `public.is_internal_role_simulation_workspace(organisation_id)` also passes; this preserves shared `contact_email`, generates unique deterministic auth aliases and never infers mode from workspace name, slug, domain or duplicate contact email. `test_record_only` is reserved for controlled internal validation where delivery is recorded but production email is not claimed.
+
+WT-008 RPCs are:
+
+- `prepare_workspace_membership_invitations` derives profile, membership, intended role, contact email, auth email and handoff evidence server-side; stores hashed tokens only; supersedes old current links on resend; and blocks duplicate shared-contact delivery without immutable policy.
+- `record_workspace_membership_invitation_delivery_result` records delivery success or provider failure without activating membership.
+- `cancel_workspace_membership_invitation` invalidates the current token while leaving membership invited.
+- `get_workspace_membership_invitation_by_token` validates the token hash before returning safe public invitation details and marks delivered links opened.
+- `accept_workspace_membership_invitation` transactionally marks the invitation accepted and moves the linked membership to `active` only for the correct signed-in auth user, preserving the approved role.
+
+Owner/Admin RLS can read invitation rows and policy rows for their workspace. Normal authenticated users cannot directly mutate invitation rows; mutation occurs only through the controlled RPCs. Production migration deployment is required before WT-008 can run against a live Supabase project, and production email delivery requires provider configuration outside the migration.
+
 Approved additions become invited memberships using deterministic login names and synthetic `@pending.watchtower.invalid` auth emails; contact email is stored on `profiles.contact_email`. Approved profile corrections update only `first_name`, `last_name` and `contact_email`, leaving `profiles.email`, auth email, login name, UUIDs, role and membership state unchanged. Approved deactivations and reactivations reuse the existing membership row, retain export/import/review evidence and write per-change plus batch audit events. Excluded proposals remain untouched.
 
 ---

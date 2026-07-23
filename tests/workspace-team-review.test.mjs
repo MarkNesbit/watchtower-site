@@ -214,7 +214,7 @@ test('Workspace Team review page groups proposals and saves decisions through co
 	assert.match(page, /Contact email correction does not change the Supabase authentication login email/);
 	assert.match(page, /Full deactivation impact assessment remains WT-WORKSPACE-TEAM-010/);
 	assert.match(page, /No workspace membership changes have been made yet/);
-	assert.doesNotMatch(page, /\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update|auth\.admin|Send invitation|Apply changes|\.delete\(/);
+	assert.doesNotMatch(page, /\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update|auth\.admin|Apply changes|\.delete\(/);
 });
 
 test('Workspace Team review page relative imports resolve from the nested route directory', async () => {
@@ -263,7 +263,7 @@ test('Workspace Team page links validated imports into review and delegates appl
 	assert.match(page, /data-workspace-team-application-cta/);
 	assert.match(page, /importApplyPath/);
 	assert.doesNotMatch(page, /Proposed additions', importGroups|Row \{row\.source_row_number\}: \{importRowIdentity\(row\)\}/);
-	assert.doesNotMatch(page, /Send invitation|auth\.admin|\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update/);
+	assert.doesNotMatch(page, /auth\.admin|\.from\('organisation_members'\)\.update|\.from\('profiles'\)\.update/);
 });
 
 test('Workspace Team bulk review confirmation route is scoped and delegates to the controlled RPC', async () => {

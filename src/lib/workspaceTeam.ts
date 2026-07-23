@@ -20,6 +20,18 @@ export type WorkspaceTeamMember = {
 	accepted_at?: string | null;
 	deactivated_at?: string | null;
 	reactivated_at?: string | null;
+	invitation_id?: string | null;
+	invitation_status?: string | null;
+	invitation_delivered_at?: string | null;
+	invitation_opened_at?: string | null;
+	invitation_accepted_at?: string | null;
+	invitation_cancelled_at?: string | null;
+	invitation_superseded_at?: string | null;
+	invitation_delivery_attempt_count?: number | null;
+	invitation_last_delivery_attempt_at?: string | null;
+	invitation_failure_code?: string | null;
+	invitation_failure_message?: string | null;
+	invitation_delivery_strategy?: string | null;
 };
 
 export type WorkspaceTeamActiveEditableCheckout = {
