@@ -559,9 +559,9 @@ test('Workspace invitation send route does not expose privileged keys or fake pr
 
 	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
 	assert.match(route, /workspace\.role !== 'owner' && workspace\.role !== 'admin'/);
-	assert.match(route, /POST: APIRoute = async \(\{ cookies, locals, params, request, url \}\)/);
-	assert.match(route, /workspaceInvitationDeliveryEnvFromLocals\(locals\)/);
-	assert.match(route, /runtime\?\.env \?\? \{\}/);
+	assert.match(route, /import \{ env \} from 'cloudflare:workers'/);
+	assert.match(route, /POST: APIRoute = async \(\{ cookies, params, request, url \}\)/);
+	assert.match(route, /const invitationDeliveryEnv = env as InvitationDeliveryEnv/);
 	assert.match(route, /generateInvitationToken\(\)/);
 	assert.match(route, /hashInvitationToken\(token\)/);
 	assert.match(route, /prepare_workspace_membership_invitations/);
@@ -570,6 +570,9 @@ test('Workspace invitation send route does not expose privileged keys or fake pr
 	assert.match(route, /sendWorkspaceInvitationEmail/);
 	assert.match(route, /env: invitationDeliveryEnv/);
 	assert.match(route, /workspaceInvitationEmailConfigDiagnostics\(invitationDeliveryEnv\)/);
+	assert.match(route, /workspace_team_invitation_delivery_claim_failed/);
+	assert.match(route, /workspace_team_invitation_delivery_result_record_failed/);
+	assert.match(route, /return redirectToTeam\(workspaceSlug, \{\s*invitation_delivery: 'error',\s*invitation_delivery_error: 'failed'/);
 	assert.match(delivery, /provider_not_configured/);
 	assert.match(delivery, /test_record_only/);
 	assert.match(delivery, /renderInvitationEmail/);
@@ -578,7 +581,7 @@ test('Workspace invitation send route does not expose privileged keys or fake pr
 	assert.match(delivery, /WATCHTOWER_EMAIL_FROM_ADDRESS/);
 	assert.match(delivery, /WATCHTOWER_EMAIL_FROM_NAME/);
 	assert.doesNotMatch(route, /SUPABASE_SERVICE_ROLE|service_role|auth\.admin|console\.log\(.*token|rawToken.*console/i);
-	assert.doesNotMatch(route, /import\.meta\.env|WATCHTOWER_RESEND_API_KEY|WATCHTOWER_EMAIL_FROM_ADDRESS|WATCHTOWER_EMAIL_FROM_NAME|WATCHTOWER_INVITATION_REPLY_TO|WATCHTOWER_SITE_URL/);
+	assert.doesNotMatch(route, /locals\.runtime|runtime\.env|workspaceInvitationDeliveryEnvFromLocals|import\.meta\.env|WATCHTOWER_RESEND_API_KEY|WATCHTOWER_EMAIL_FROM_ADDRESS|WATCHTOWER_EMAIL_FROM_NAME|WATCHTOWER_INVITATION_REPLY_TO|WATCHTOWER_SITE_URL/);
 	assert.doesNotMatch(delivery, /console\.log\(.*token|rawToken.*console|provider_response/i);
 });
 
