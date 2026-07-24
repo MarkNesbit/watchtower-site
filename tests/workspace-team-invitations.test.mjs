@@ -15,6 +15,7 @@ import { buildWorkspaceTeamInvitationSendPath } from '../src/lib/projectRoutes.t
 const migrationUrl = new URL('../supabase/migrations/20260723001100_workspace_membership_invitation_delivery_activation.sql', import.meta.url);
 const internalPolicyMigrationUrl = new URL('../supabase/migrations/20260723001200_workspace_invitation_internal_delivery_policy.sql', import.meta.url);
 const retryPolicyMigrationUrl = new URL('../supabase/migrations/20260723001300_workspace_invitation_retry_policy_resolution.sql', import.meta.url);
+const controlledIdentityMigrationUrl = new URL('../supabase/migrations/20260723001400_workspace_invitation_controlled_identity_preparation.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const teamPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
@@ -159,12 +160,14 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	const migrationIndex = files.indexOf('20260723001100_workspace_membership_invitation_delivery_activation.sql');
 	const policyIndex = files.indexOf('20260723001200_workspace_invitation_internal_delivery_policy.sql');
 	const retryIndex = files.indexOf('20260723001300_workspace_invitation_retry_policy_resolution.sql');
+	const controlledIdentityIndex = files.indexOf('20260723001400_workspace_invitation_controlled_identity_preparation.sql');
 	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
 	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
 
 	assert.ok(migrationIndex >= 0, 'WT-008 production migration should exist');
 	assert.equal(policyIndex, migrationIndex + 1, 'internal policy migration should immediately follow 20260723001100');
 	assert.equal(retryIndex, policyIndex + 1, 'retry policy-resolution migration should follow the internal policy migration');
+	assert.equal(controlledIdentityIndex, retryIndex + 1, 'controlled identity migration should follow the retry policy-resolution migration');
 	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
 	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
@@ -220,8 +223,8 @@ test('Workspace invitation internal alias policy is deterministic unique and ren
 
 test('Workspace invitation retry reuses existing identities without duplicate account creation or activation', async () => {
 	const sql = await readFile(migrationUrl, 'utf8');
-	const retrySql = await readFile(retryPolicyMigrationUrl, 'utf8');
-	const prepareSql = sqlFunctionDefinition(retrySql, 'prepare_workspace_membership_invitations');
+	const controlledIdentitySql = await readFile(controlledIdentityMigrationUrl, 'utf8');
+	const prepareSql = sqlFunctionDefinition(controlledIdentitySql, 'prepare_workspace_membership_invitations');
 	const deliverySql = sqlFunctionDefinition(sql, 'record_workspace_membership_invitation_delivery_result');
 	const route = await readFile(sendRouteUrl, 'utf8');
 
@@ -253,11 +256,14 @@ test('Workspace invitation retry uses a fresh retry key while preserving send an
 
 test('Workspace invitation retry migration re-resolves policy and rejects stale failed replay keys', async () => {
 	const retrySql = await readFile(retryPolicyMigrationUrl, 'utf8');
-	const prepareSql = sqlFunctionDefinition(retrySql, 'prepare_workspace_membership_invitations');
+	const controlledIdentitySql = await readFile(controlledIdentityMigrationUrl, 'utf8');
+	const prepareSql = sqlFunctionDefinition(controlledIdentitySql, 'prepare_workspace_membership_invitations');
 	const insertBlock = prepareSql.match(/insert into public\.workspace_membership_invitations[\s\S]*?\)\s*returning \* into v_new;/)?.[0] ?? '';
 
 	assert.match(retrySql, /create or replace function public\.prepare_workspace_membership_invitations\([\s\S]*p_request_intent text[\s\S]*\)/);
+	assert.match(controlledIdentitySql, /create or replace function public\.prepare_workspace_membership_invitations\([\s\S]*p_request_intent text[\s\S]*\)/);
 	assert.doesNotMatch(retrySql, /p_request_intent text default/i);
+	assert.doesNotMatch(controlledIdentitySql, /p_request_intent text default/i);
 	assert.match(prepareSql, /v_request_intent := lower\(coalesce\(nullif\(btrim\(p_request_intent\), ''\), 'send'\)\)/);
 	assert.match(prepareSql, /v_request_intent not in \('send', 'resend', 'retry'\)/);
 	assert.match(prepareSql, /select \* into v_policy[\s\S]*where policy\.organisation_id = p_organisation_id/);
@@ -277,8 +283,55 @@ test('Workspace invitation retry migration re-resolves policy and rejects stale 
 	assert.match(prepareSql, /'previous_delivery_strategy', case when v_has_current then v_current\.delivery_strategy else null end/);
 	assert.match(prepareSql, /'policy_source', v_policy_source/);
 	assert.match(prepareSql, /'recipient_domain', split_part\(v_new\.recipient_email, '@', 2\)/);
-	assert.match(retrySql, /create or replace function public\.prepare_workspace_membership_invitations\([\s\S]*p_token_hashes jsonb default '\{\}'::jsonb[\s\S]*\)[\s\S]*language sql[\s\S]*'send'/);
-	assert.match(retrySql, /grant execute on function public\.prepare_workspace_membership_invitations\(uuid, uuid\[\], uuid, jsonb, text\) to authenticated, service_role/);
+	assert.match(controlledIdentitySql, /create or replace function public\.prepare_workspace_membership_invitations\([\s\S]*p_token_hashes jsonb default '\{\}'::jsonb[\s\S]*\)[\s\S]*language sql[\s\S]*'send'/);
+	assert.match(controlledIdentitySql, /grant execute on function public\.prepare_workspace_membership_invitations\(uuid, uuid\[\], uuid, jsonb, text\) to authenticated, service_role/);
+});
+
+test('Workspace invitation controlled identity preparation extends the lifecycle guard narrowly', async () => {
+	const baselineSql = await readFile(new URL('../supabase/migrations/20260614000300_enable_rls_and_baseline_policies.sql', import.meta.url), 'utf8');
+	const controlledIdentitySql = await readFile(controlledIdentityMigrationUrl, 'utf8');
+	const route = await readFile(sendRouteUrl, 'utf8');
+	const guardSql = sqlFunctionDefinition(controlledIdentitySql, 'prevent_unsafe_workspace_membership_update');
+	const prepareSql = sqlFunctionDefinition(controlledIdentitySql, 'prepare_workspace_membership_invitations');
+	const sqlWithoutPrepare = controlledIdentitySql.replace(prepareSql, '');
+
+	assert.match(guardSql, /current_setting\('watchtower\.membership_lifecycle_operation', true\)[\s\S]*workspace_invitation_identity_preparation/);
+	assert.match(guardSql, /marker_organisation_id := nullif\(current_setting\('watchtower\.membership_lifecycle_organisation_id', true\), ''\)/);
+	assert.match(guardSql, /marker_membership_id := nullif\(current_setting\('watchtower\.membership_lifecycle_membership_id', true\), ''\)/);
+	assert.match(guardSql, /marker_profile_id := nullif\(current_setting\('watchtower\.membership_lifecycle_profile_id', true\), ''\)/);
+	assert.match(guardSql, /old\.organisation_id <> marker_organisation_id::uuid/);
+	assert.match(guardSql, /old\.id <> marker_membership_id::uuid/);
+	assert.match(guardSql, /old\.user_id <> marker_profile_id::uuid/);
+	assert.match(guardSql, /old\.status not in \('invited', 'invite_expired'\)/);
+	assert.match(guardSql, /new\.status is distinct from old\.status/);
+	assert.match(guardSql, /new\.role is distinct from old\.role/);
+	assert.match(guardSql, /new\.accepted_at is distinct from old\.accepted_at/);
+	assert.match(guardSql, /new\.deactivated_at is distinct from old\.deactivated_at/);
+	assert.match(guardSql, /new\.reactivated_at is distinct from old\.reactivated_at/);
+	assert.match(guardSql, /new\.invitation_expires_at is null/);
+	assert.match(guardSql, /WT_INVITATION_CONTROLLED_IDENTITY_SCOPE/);
+	assert.match(guardSql, /Use controlled workspace membership lifecycle functions for membership lifecycle changes/);
+	assert.match(prepareSql, /set_config\('watchtower\.membership_lifecycle_operation', 'workspace_invitation_identity_preparation', true\)/);
+	assert.match(prepareSql, /set_config\('watchtower\.membership_lifecycle_organisation_id', p_organisation_id::text, true\)/);
+	assert.match(prepareSql, /set_config\('watchtower\.membership_lifecycle_membership_id', v_row\.membership_id::text, true\)/);
+	assert.match(prepareSql, /set_config\('watchtower\.membership_lifecycle_profile_id', v_row\.profile_id::text, true\)/);
+	assert.match(prepareSql, /set_config\('watchtower\.membership_lifecycle_invitation_id', v_new\.id::text, true\)/);
+	assert.match(prepareSql, /update public\.organisation_members as om[\s\S]*set invitation_expires_at = v_new\.expires_at,[\s\S]*updated_by = v_actor\.actor_user_id,[\s\S]*where om\.id = v_row\.membership_id/);
+	assert.match(prepareSql, /set_config\('watchtower\.membership_lifecycle_operation', '', true\)/);
+	assert.match(prepareSql, /'controlled_operation', 'workspace_invitation_identity_preparation'/);
+	assert.match(prepareSql, /'temporary_auth_email_replaced', v_temporary_auth_email_replaced/);
+	assert.match(prepareSql, /where au\.id = v_row\.profile_id[\s\S]*lower\(coalesce\(au\.email, ''\)\) ~ '@pending\\\.watchtower\\\.invalid\$'/);
+	assert.match(prepareSql, /where profile\.id = v_row\.profile_id[\s\S]*lower\(coalesce\(profile\.email, ''\)\) ~ '@pending\\\.watchtower\\\.invalid\$'/);
+	assert.match(prepareSql, /WT_INVITATION_AUTH_IDENTITY_CONTEXT/);
+	assert.match(prepareSql, /WT_INVITATION_PROFILE_IDENTITY_CONTEXT/);
+	assert.match(prepareSql, /v_next_version := coalesce\(v_current\.invitation_version, 0\) \+ 1/);
+	assert.match(prepareSql, /set is_current = false,[\s\S]*status = 'superseded'/);
+	assert.doesNotMatch(prepareSql, /set status = 'active'|set role =|contact_email =/);
+	assert.doesNotMatch(route, /membership_lifecycle_operation|membership_lifecycle_rpc|set_config/);
+	assert.doesNotMatch(sqlWithoutPrepare, /set_config\('watchtower\.membership_lifecycle_operation', 'workspace_invitation_identity_preparation'/);
+	assert.doesNotMatch(controlledIdentitySql, /disable trigger|session_replication_role/i);
+	assert.doesNotMatch(controlledIdentitySql, /grant update .*public\.organisation_members to authenticated|grant update .*public\.profiles to authenticated/i);
+	assert.doesNotMatch(baselineSql, /on public\.profiles for update|grant update .*public\.profiles to authenticated/i);
 });
 
 test('Workspace invitation RPCs enforce admin delivery and linked-account acceptance', async () => {
