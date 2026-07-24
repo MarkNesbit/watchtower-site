@@ -2,7 +2,11 @@ import type { APIRoute } from 'astro';
 import { buildWorkspaceTeamPath, getWorkspaceBySlug } from '../../../../../../lib/projects.ts';
 import { isWorkspaceRole } from '../../../../../../lib/permissions.ts';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer.ts';
-import { sendWorkspaceInvitationEmail } from '../../../../../../lib/workspaceInvitationDelivery.ts';
+import {
+	sendWorkspaceInvitationEmail,
+	workspaceInvitationEmailConfigDiagnostics,
+	type InvitationDeliveryEnv,
+} from '../../../../../../lib/workspaceInvitationDelivery.ts';
 import {
 	generateInvitationToken,
 	hashInvitationToken,
@@ -37,6 +41,12 @@ type DeliveryClaimRow = {
 	failure_code?: string | null;
 	failure_message?: string | null;
 };
+
+function workspaceInvitationDeliveryEnvFromLocals(locals: unknown): InvitationDeliveryEnv {
+	if (!locals || typeof locals !== 'object') return {};
+	const runtime = (locals as { runtime?: { env?: InvitationDeliveryEnv } }).runtime;
+	return runtime?.env ?? {};
+}
 
 function redirectToTeam(workspaceSlug: string, params: Record<string, string>) {
 	const query = new URLSearchParams(params);
@@ -100,8 +110,9 @@ async function claimDeliveryAttempt(client, invitationId: string, operationKey: 
 	return rows[0] ?? { should_send: false, status: 'delivery_failed', failure_code: 'delivery_claim_failed', failure_message: 'Invitation delivery could not be claimed safely.' };
 }
 
-export const POST: APIRoute = async ({ cookies, params, request, url }) => {
+export const POST: APIRoute = async ({ cookies, locals, params, request, url }) => {
 	const workspaceSlug = params.workspaceSlug ?? '';
+	const invitationDeliveryEnv = workspaceInvitationDeliveryEnvFromLocals(locals);
 	const accessToken = getServerAccessToken(cookies);
 	if (!accessToken) {
 		return redirectToTeam(workspaceSlug, {
@@ -238,6 +249,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 		});
 	}
 	const directoryByMembership = new Map((directoryData ?? []).map((row: DirectoryRow) => [row.organisation_membership_id, row]));
+	let loggedProviderConfigDiagnostics = false;
 
 	for (const invitation of deliverable) {
 		const row = directoryByMembership.get(invitation.membership_id);
@@ -279,7 +291,12 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 			roleLabel: workspaceRoleLabel(row.role),
 			expiresAt: row.invitation_expires_at,
 			requestOrigin: url.origin,
+			env: invitationDeliveryEnv,
 		});
+		if (result.status === 'delivery_failed' && result.failureCode === 'provider_not_configured' && !loggedProviderConfigDiagnostics) {
+			console.warn('workspace_team_invitation_email_provider_not_configured', workspaceInvitationEmailConfigDiagnostics(invitationDeliveryEnv));
+			loggedProviderConfigDiagnostics = true;
+		}
 
 		await markDeliveryResult(serverSupabase, result);
 		deliveryResults.push(result);
