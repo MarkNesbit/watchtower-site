@@ -35,6 +35,26 @@ Configure the same Supabase values in the Cloudflare Worker environment:
 
 These are needed at runtime by server-rendered routes.
 
+## Invitation email delivery
+
+WT-WORKSPACE-TEAM-008A uses Resend through a direct HTTPS request from the Cloudflare Worker. The production sender is:
+
+- From name: `Watchtower`
+- From email: `invitations@watch-tower.co.uk`
+
+Configure these Worker values/secrets before production invitation validation:
+
+- `WATCHTOWER_EMAIL_PROVIDER=resend`
+- `WATCHTOWER_RESEND_API_KEY` as a Worker secret
+- `WATCHTOWER_INVITATION_FROM_NAME=Watchtower`
+- `WATCHTOWER_INVITATION_FROM_EMAIL=invitations@watch-tower.co.uk`
+- `WATCHTOWER_INVITATION_REPLY_TO` when a monitored reply mailbox is available
+- `WATCHTOWER_SITE_URL=https://watch-tower.co.uk`
+
+The invitation acceptance URL is generated server-side from `WATCHTOWER_SITE_URL` and is accepted only when it resolves to the production HTTPS origin `https://watch-tower.co.uk`. Browser request origin is not used for production provider email.
+
+Resend must have the sending domain configured and verified before live use. Complete the provider-side DNS records for `watch-tower.co.uk`, including SPF/DKIM alignment and DMARC posture, then send a single staged invitation first. Do not bulk-send the remaining pending invitations until Ruby Atkinson and one second shared-inbox identity have been validated end to end. Provider acceptance records the email as sent and awaiting acceptance; it does not prove mailbox delivery and does not activate workspace access.
+
 ## Deployment flow
 
 On push to `main`, GitHub Actions runs:

@@ -2,12 +2,10 @@ import type { APIRoute } from 'astro';
 import { buildWorkspaceTeamPath, getWorkspaceBySlug } from '../../../../../../lib/projects.ts';
 import { isWorkspaceRole } from '../../../../../../lib/permissions.ts';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer.ts';
+import { sendWorkspaceInvitationEmail } from '../../../../../../lib/workspaceInvitationDelivery.ts';
 import {
-	buildWorkspaceInvitationAcceptPath,
 	generateInvitationToken,
 	hashInvitationToken,
-	invitationDeliveryMode,
-	renderInvitationEmail,
 	summariseInvitationSendResults,
 	type InvitationDeliveryResult,
 	type PreparedInvitation,
@@ -31,6 +29,13 @@ type DirectoryRow = {
 	role: string | null;
 	invitation_status: string | null;
 	invitation_expires_at: string | null;
+};
+
+type DeliveryClaimRow = {
+	should_send?: boolean | null;
+	status?: string | null;
+	failure_code?: string | null;
+	failure_message?: string | null;
 };
 
 function redirectToTeam(workspaceSlug: string, params: Record<string, string>) {
@@ -79,8 +84,20 @@ async function markDeliveryResult(client, result: InvitationDeliveryResult) {
 		p_delivery_status: result.status,
 		p_failure_code: result.failureCode ?? null,
 		p_failure_message: result.failureMessage ?? null,
+		p_email_provider: result.providerName ?? null,
+		p_provider_message_id: result.providerMessageId ?? null,
 	});
 	if (error) throw error;
+}
+
+async function claimDeliveryAttempt(client, invitationId: string, operationKey: string): Promise<DeliveryClaimRow> {
+	const { data, error } = await client.rpc('begin_workspace_membership_invitation_delivery_attempt', {
+		p_invitation_id: invitationId,
+		p_delivery_operation_key: operationKey,
+	});
+	if (error) throw error;
+	const rows = (data ?? []) as DeliveryClaimRow[];
+	return rows[0] ?? { should_send: false, status: 'delivery_failed', failure_code: 'delivery_claim_failed', failure_message: 'Invitation delivery could not be claimed safely.' };
 }
 
 export const POST: APIRoute = async ({ cookies, params, request, url }) => {
@@ -193,7 +210,6 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 
 	const prepared = (data ?? []) as PreparedInvitation[];
 	const deliverable = prepared.filter((invitation) => invitation.status === 'pending_delivery');
-	const deliveryMode = invitationDeliveryMode();
 	const deliveryResults: InvitationDeliveryResult[] = prepared
 		.filter((invitation) => invitation.status === 'delivery_failed')
 		.map((invitation) => ({
@@ -239,28 +255,31 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 			continue;
 		}
 
-		const acceptUrl = buildWorkspaceInvitationAcceptPath(rawToken, url.origin);
-		renderInvitationEmail({
+		const claim = await claimDeliveryAttempt(serverSupabase, invitation.invitation_id, operationKey);
+		if (!claim.should_send) {
+			if (claim.status === 'delivered' || claim.status === 'delivery_failed') {
+				deliveryResults.push({
+					invitationId: invitation.invitation_id,
+					membershipId: invitation.membership_id,
+					status: claim.status,
+					failureCode: claim.failure_code ?? undefined,
+					failureMessage: claim.failure_message ?? undefined,
+				});
+			}
+			continue;
+		}
+
+		const result = await sendWorkspaceInvitationEmail({
+			invitationId: invitation.invitation_id,
+			membershipId: invitation.membership_id,
+			recipientEmail: invitation.recipient_email,
+			rawToken,
 			workspaceName: organisation.name,
 			personName: personName(row),
 			roleLabel: workspaceRoleLabel(row.role),
-			acceptUrl,
 			expiresAt: row.invitation_expires_at,
+			requestOrigin: url.origin,
 		});
-
-		const result: InvitationDeliveryResult = deliveryMode === 'test_record_only'
-			? {
-				invitationId: invitation.invitation_id,
-				membershipId: invitation.membership_id,
-				status: 'delivered',
-			}
-			: {
-				invitationId: invitation.invitation_id,
-				membershipId: invitation.membership_id,
-				status: 'delivery_failed',
-				failureCode: 'provider_not_configured',
-				failureMessage: 'Invitation email provider is not configured. Retry after enabling a server-side delivery provider.',
-			};
 
 		await markDeliveryResult(serverSupabase, result);
 		deliveryResults.push(result);
