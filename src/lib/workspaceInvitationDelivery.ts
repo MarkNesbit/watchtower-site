@@ -12,10 +12,12 @@ export type InvitationDeliveryEnv = {
 	WATCHTOWER_INVITATION_DELIVERY_MODE?: string;
 	WATCHTOWER_EMAIL_PROVIDER?: string;
 	WATCHTOWER_RESEND_API_KEY?: string;
-	WATCHTOWER_INVITATION_FROM_NAME?: string;
-	WATCHTOWER_INVITATION_FROM_EMAIL?: string;
+	WATCHTOWER_EMAIL_FROM_ADDRESS?: string;
+	WATCHTOWER_EMAIL_FROM_NAME?: string;
 	WATCHTOWER_INVITATION_REPLY_TO?: string;
 	WATCHTOWER_SITE_URL?: string;
+	WATCHTOWER_INVITATION_FROM_EMAIL?: string;
+	WATCHTOWER_INVITATION_FROM_NAME?: string;
 };
 
 export type WorkspaceInvitationEmailDeliveryRequest = {
@@ -60,6 +62,15 @@ export function resolveWorkspaceInvitationSiteOrigin(env: InvitationDeliveryEnv 
 	}
 }
 
+export function workspaceInvitationEmailConfigDiagnostics(env: InvitationDeliveryEnv = import.meta.env ?? {}) {
+	return {
+		providerBindingPresent: hasBinding(env.WATCHTOWER_EMAIL_PROVIDER),
+		apiKeyBindingPresent: hasBinding(env.WATCHTOWER_RESEND_API_KEY),
+		senderBindingPresent: hasBinding(env.WATCHTOWER_EMAIL_FROM_ADDRESS ?? env.WATCHTOWER_INVITATION_FROM_EMAIL),
+		siteUrlBindingPresent: hasBinding(env.WATCHTOWER_SITE_URL),
+	};
+}
+
 export function resolveInvitationProviderConfig(env: InvitationDeliveryEnv = import.meta.env ?? {}): ProviderConfig {
 	if (workspaceInvitationDeliveryMode(env) === 'test_record_only') {
 		return { mode: 'test_record_only' };
@@ -82,8 +93,8 @@ export function resolveInvitationProviderConfig(env: InvitationDeliveryEnv = imp
 	}
 
 	const apiKey = String(env.WATCHTOWER_RESEND_API_KEY ?? '').trim();
-	const fromEmail = normaliseEmail(env.WATCHTOWER_INVITATION_FROM_EMAIL);
-	const fromName = String(env.WATCHTOWER_INVITATION_FROM_NAME ?? 'Watchtower').trim() || 'Watchtower';
+	const fromEmail = normaliseEmail(env.WATCHTOWER_EMAIL_FROM_ADDRESS ?? env.WATCHTOWER_INVITATION_FROM_EMAIL);
+	const fromName = String(env.WATCHTOWER_EMAIL_FROM_NAME ?? env.WATCHTOWER_INVITATION_FROM_NAME ?? 'Watchtower').trim() || 'Watchtower';
 	const siteOrigin = resolveWorkspaceInvitationSiteOrigin(env);
 	if (!apiKey || !fromEmail || !siteOrigin) {
 		return {
@@ -204,6 +215,10 @@ function normaliseEmail(value: unknown): string | null {
 	const email = String(value ?? '').trim().toLowerCase();
 	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
 	return email;
+}
+
+function hasBinding(value: unknown): boolean {
+	return String(value ?? '').trim().length > 0;
 }
 
 function formatDisplayName(value: string): string {

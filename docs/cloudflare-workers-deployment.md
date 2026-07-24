@@ -46,8 +46,8 @@ Configure these Worker values/secrets before production invitation validation:
 
 - `WATCHTOWER_EMAIL_PROVIDER=resend`
 - `WATCHTOWER_RESEND_API_KEY` as a Worker secret
-- `WATCHTOWER_INVITATION_FROM_NAME=Watchtower`
-- `WATCHTOWER_INVITATION_FROM_EMAIL=invitations@watch-tower.co.uk`
+- `WATCHTOWER_EMAIL_FROM_NAME=Watchtower`
+- `WATCHTOWER_EMAIL_FROM_ADDRESS=invitations@watch-tower.co.uk`
 - `WATCHTOWER_INVITATION_REPLY_TO` when a monitored reply mailbox is available
 - `WATCHTOWER_SITE_URL=https://watch-tower.co.uk`
 

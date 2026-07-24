@@ -14,6 +14,7 @@ import {
 	resolveInvitationProviderConfig,
 	resolveWorkspaceInvitationSiteOrigin,
 	sendWorkspaceInvitationEmail,
+	workspaceInvitationEmailConfigDiagnostics,
 } from '../src/lib/workspaceInvitationDelivery.ts';
 import { buildWorkspaceTeamInvitationSendPath } from '../src/lib/projectRoutes.ts';
 
@@ -225,13 +226,37 @@ test('Workspace invitation delivery provider configuration is server-side and pr
 	assert.deepEqual(resolveInvitationProviderConfig({
 		WATCHTOWER_EMAIL_PROVIDER: 'resend',
 		WATCHTOWER_RESEND_API_KEY: 're_secret',
+		WATCHTOWER_EMAIL_FROM_NAME: 'Watchtower',
+		WATCHTOWER_EMAIL_FROM_ADDRESS: 'invitations@watch-tower.co.uk',
+		WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
+	}).mode, 'resend');
+	assert.deepEqual(resolveInvitationProviderConfig({
+		WATCHTOWER_EMAIL_PROVIDER: 'resend',
+		WATCHTOWER_RESEND_API_KEY: 're_secret',
 		WATCHTOWER_INVITATION_FROM_NAME: 'Watchtower',
 		WATCHTOWER_INVITATION_FROM_EMAIL: 'invitations@watch-tower.co.uk',
 		WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
 	}).mode, 'resend');
+	assert.deepEqual(workspaceInvitationEmailConfigDiagnostics({
+		WATCHTOWER_EMAIL_PROVIDER: 'resend',
+		WATCHTOWER_RESEND_API_KEY: 're_secret',
+		WATCHTOWER_EMAIL_FROM_ADDRESS: 'invitations@watch-tower.co.uk',
+		WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
+	}), {
+		providerBindingPresent: true,
+		apiKeyBindingPresent: true,
+		senderBindingPresent: true,
+		siteUrlBindingPresent: true,
+	});
+	assert.deepEqual(workspaceInvitationEmailConfigDiagnostics({ WATCHTOWER_EMAIL_PROVIDER: 'resend' }), {
+		providerBindingPresent: true,
+		apiKeyBindingPresent: false,
+		senderBindingPresent: false,
+		siteUrlBindingPresent: false,
+	});
 });
 
-test('Workspace invitation delivery sends HTML and text through Resend without browser-controlled origin', async () => {
+test('Workspace invitation delivery uses runtime Worker bindings for Resend without browser-controlled origin', async () => {
 	let requestUrl = '';
 	let requestBody = {};
 	let authorization = '';
@@ -248,8 +273,8 @@ test('Workspace invitation delivery sends HTML and text through Resend without b
 		env: {
 			WATCHTOWER_EMAIL_PROVIDER: 'resend',
 			WATCHTOWER_RESEND_API_KEY: 're_test',
-			WATCHTOWER_INVITATION_FROM_NAME: 'Watchtower',
-			WATCHTOWER_INVITATION_FROM_EMAIL: 'invitations@watch-tower.co.uk',
+			WATCHTOWER_EMAIL_FROM_NAME: 'Watchtower',
+			WATCHTOWER_EMAIL_FROM_ADDRESS: 'invitations@watch-tower.co.uk',
 			WATCHTOWER_INVITATION_REPLY_TO: 'support@watch-tower.co.uk',
 			WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
 		},
@@ -276,6 +301,38 @@ test('Workspace invitation delivery sends HTML and text through Resend without b
 	assert.doesNotMatch(requestBody.html, /attacker\.example/);
 });
 
+test('Workspace invitation delivery reaches Resend from explicit runtime env independently of build-time env', async () => {
+	let fetched = false;
+	const result = await sendWorkspaceInvitationEmail({
+		invitationId: '11111111-1111-4111-8111-111111111111',
+		membershipId: '22222222-2222-4222-8222-222222222222',
+		recipientEmail: 'ruby.atkinson@example.com',
+		rawToken: 'c'.repeat(64),
+		workspaceName: 'Internal Simulation',
+		personName: 'Ruby Atkinson',
+		roleLabel: 'Viewer',
+		env: {
+			WATCHTOWER_EMAIL_PROVIDER: 'resend',
+			WATCHTOWER_RESEND_API_KEY: 'runtime_secret',
+			WATCHTOWER_EMAIL_FROM_NAME: 'Runtime Watchtower',
+			WATCHTOWER_EMAIL_FROM_ADDRESS: 'runtime-invitations@watch-tower.co.uk',
+			WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
+		},
+		fetchImpl: async (_url, init) => {
+			fetched = true;
+			assert.equal(String(init?.headers?.authorization ?? ''), 'Bearer runtime_secret');
+			const body = JSON.parse(String(init?.body ?? '{}'));
+			assert.equal(body.from, 'Runtime Watchtower <runtime-invitations@watch-tower.co.uk>');
+			return new Response(JSON.stringify({ id: 'resend_runtime_123' }), { status: 200, headers: { 'content-type': 'application/json' } });
+		},
+	});
+
+	assert.equal(fetched, true);
+	assert.equal(result.status, 'delivered');
+	assert.equal(result.providerName, 'resend');
+	assert.equal(result.providerMessageId, 'resend_runtime_123');
+});
+
 test('Workspace invitation delivery fails safely when provider is missing, rejected or unavailable', async () => {
 	const baseRequest = {
 		invitationId: '11111111-1111-4111-8111-111111111111',
@@ -292,7 +349,7 @@ test('Workspace invitation delivery fails safely when provider is missing, rejec
 		env: {
 			WATCHTOWER_EMAIL_PROVIDER: 'resend',
 			WATCHTOWER_RESEND_API_KEY: 're_test',
-			WATCHTOWER_INVITATION_FROM_EMAIL: 'invitations@watch-tower.co.uk',
+			WATCHTOWER_EMAIL_FROM_ADDRESS: 'invitations@watch-tower.co.uk',
 			WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
 		},
 		fetchImpl: async () => new Response(JSON.stringify({ message: 'raw provider detail' }), { status: 422 }),
@@ -302,7 +359,7 @@ test('Workspace invitation delivery fails safely when provider is missing, rejec
 		env: {
 			WATCHTOWER_EMAIL_PROVIDER: 'resend',
 			WATCHTOWER_RESEND_API_KEY: 're_test',
-			WATCHTOWER_INVITATION_FROM_EMAIL: 'invitations@watch-tower.co.uk',
+			WATCHTOWER_EMAIL_FROM_ADDRESS: 'invitations@watch-tower.co.uk',
 			WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
 		},
 		fetchImpl: async () => {
@@ -502,18 +559,26 @@ test('Workspace invitation send route does not expose privileged keys or fake pr
 
 	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
 	assert.match(route, /workspace\.role !== 'owner' && workspace\.role !== 'admin'/);
+	assert.match(route, /POST: APIRoute = async \(\{ cookies, locals, params, request, url \}\)/);
+	assert.match(route, /workspaceInvitationDeliveryEnvFromLocals\(locals\)/);
+	assert.match(route, /runtime\?\.env \?\? \{\}/);
 	assert.match(route, /generateInvitationToken\(\)/);
 	assert.match(route, /hashInvitationToken\(token\)/);
 	assert.match(route, /prepare_workspace_membership_invitations/);
 	assert.match(route, /begin_workspace_membership_invitation_delivery_attempt/);
 	assert.match(route, /record_workspace_membership_invitation_delivery_result/);
 	assert.match(route, /sendWorkspaceInvitationEmail/);
+	assert.match(route, /env: invitationDeliveryEnv/);
+	assert.match(route, /workspaceInvitationEmailConfigDiagnostics\(invitationDeliveryEnv\)/);
 	assert.match(delivery, /provider_not_configured/);
 	assert.match(delivery, /test_record_only/);
 	assert.match(delivery, /renderInvitationEmail/);
 	assert.match(delivery, /https:\/\/api\.resend\.com\/emails/);
 	assert.match(delivery, /WATCHTOWER_SITE_URL/);
+	assert.match(delivery, /WATCHTOWER_EMAIL_FROM_ADDRESS/);
+	assert.match(delivery, /WATCHTOWER_EMAIL_FROM_NAME/);
 	assert.doesNotMatch(route, /SUPABASE_SERVICE_ROLE|service_role|auth\.admin|console\.log\(.*token|rawToken.*console/i);
+	assert.doesNotMatch(route, /import\.meta\.env|WATCHTOWER_RESEND_API_KEY|WATCHTOWER_EMAIL_FROM_ADDRESS|WATCHTOWER_EMAIL_FROM_NAME|WATCHTOWER_INVITATION_REPLY_TO|WATCHTOWER_SITE_URL/);
 	assert.doesNotMatch(delivery, /console\.log\(.*token|rawToken.*console|provider_response/i);
 });
 
