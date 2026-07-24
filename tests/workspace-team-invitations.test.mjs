@@ -47,6 +47,13 @@ function deterministicInternalAlias(baseEmail, prefix, loginName, profileId) {
 	return `${localPart}+${aliasPrefix}.${loginIdentity}.${profileSuffix}@${domain}`;
 }
 
+function internalPolicySeedOutcome(totalOrganisationCount, internalOrganisationCount) {
+	if (totalOrganisationCount === 0) return 'skip';
+	if (internalOrganisationCount === 0) return 'not_found';
+	if (internalOrganisationCount > 1) return 'ambiguous';
+	return 'seed';
+}
+
 test('Production-applied WT-008 invitation migration remains unchanged', async () => {
 	const sql = await readFile(migrationUrl, 'utf8');
 	const hash = createHash('sha256').update(sql).digest('hex');
@@ -168,6 +175,22 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.doesNotMatch(seedBlock, /\.slug|\.name|contact_email|email domain|gmail\.com/i);
 	assert.match(policySql, /revoke all on public\.workspace_invitation_delivery_policies from authenticated/);
 	assert.doesNotMatch(policySql, /grant select on public\.workspace_invitation_delivery_policies to authenticated/i);
+});
+
+test('Internal delivery policy seed counts UUID organisations without aggregate selection', async () => {
+	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
+	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
+
+	assert.equal(internalPolicySeedOutcome(0, 0), 'skip');
+	assert.equal(internalPolicySeedOutcome(2, 1), 'seed');
+	assert.equal(internalPolicySeedOutcome(2, 0), 'not_found');
+	assert.equal(internalPolicySeedOutcome(3, 2), 'ambiguous');
+	assert.match(seedBlock, /select count\(\*\)::integer\s+into v_total_organisation_count\s+from public\.organisations/);
+	assert.match(seedBlock, /select count\(\*\)::integer\s+into v_internal_organisation_count\s+from public\.organisations as o\s+where public\.is_internal_role_simulation_workspace\(o\.id\);/);
+	assert.match(seedBlock, /select o\.id\s+into v_internal_organisation_id\s+from public\.organisations as o\s+where public\.is_internal_role_simulation_workspace\(o\.id\)\s+limit 1;/);
+	assert.match(seedBlock, /elsif v_internal_organisation_count > 1[\s\S]*else[\s\S]*select o\.id/);
+	assert.doesNotMatch(seedBlock, /\b(?:min|max)\s*\(\s*o\.id\s*\)/i);
+	assert.doesNotMatch(seedBlock, /o\.id::text|cast\s*\(\s*o\.id\s+as\s+text\s*\)|order by\s+o\.id/i);
 });
 
 test('Workspace invitation internal alias policy is deterministic unique and rename-safe', async () => {

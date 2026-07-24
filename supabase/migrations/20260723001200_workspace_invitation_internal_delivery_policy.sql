@@ -192,8 +192,8 @@ begin
     into v_total_organisation_count
   from public.organisations;
 
-  select min(o.id), count(*)::integer
-    into v_internal_organisation_id, v_internal_organisation_count
+  select count(*)::integer
+    into v_internal_organisation_count
   from public.organisations as o
   where public.is_internal_role_simulation_workspace(o.id);
 
@@ -204,6 +204,12 @@ begin
   elsif v_internal_organisation_count > 1 then
     raise exception 'WT_INVITATION_INTERNAL_POLICY_AMBIGUOUS: The internal invitation delivery policy seed resolved more than one internal workspace.' using errcode = '23514';
   else
+    select o.id
+      into v_internal_organisation_id
+    from public.organisations as o
+    where public.is_internal_role_simulation_workspace(o.id)
+    limit 1;
+
     insert into public.workspace_invitation_delivery_policies (
       organisation_id,
       delivery_strategy,
