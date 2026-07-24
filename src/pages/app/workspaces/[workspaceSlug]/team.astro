@@ -435,6 +435,7 @@ const invitationDeliveryMessage = invitationDeliveryState === 'success'
 					empty_selection: 'No invited memberships are currently eligible for invitation delivery.',
 					missing_invitation: 'The invitation could not be identified. Refresh the Team page and try again.',
 					provider_not_configured: 'Invitation email provider is not configured. Rows remain retryable.',
+					retry_requires_new_operation_key: 'Refresh the Team page before retrying this failed invitation.',
 					method: 'Invitation administration requires the confirmation form.',
 					failed: 'Invitation delivery could not be completed. Check row status and retry.',
 				} as Record<string, string>)[invitationDeliveryError] ?? `${invitationDeliverySent} delivered. ${invitationDeliveryFailed} could not be delivered and can be retried.`
@@ -1143,6 +1144,9 @@ const invitationOperationKey = crypto.randomUUID();
 															<input type="hidden" name="membership_id" value={member.organisation_membership_id} />
 															<input type="hidden" name="operation_key" value={crypto.randomUUID()} />
 															<input type="hidden" name="invitation_action" value={currentInvitationActionForSubmission(member.invitation_status)} />
+															{currentInvitationActionForSubmission(member.invitation_status) === 'retry' && (
+																<input type="hidden" name="retry_operation_key" value={crypto.randomUUID()} />
+															)}
 															<button class="button button--secondary" type="submit">{workspaceInvitationActionLabel(member)}</button>
 														</form>
 														{member.invitation_id && invitationNeedsCancellation(member.invitation_status) && (

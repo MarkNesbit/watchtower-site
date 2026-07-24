@@ -48,6 +48,7 @@ function invitationErrorCode(error: SupabaseError | null | undefined) {
 	const text = [error?.message, error?.details, error?.hint].filter(Boolean).join(' ');
 	if (/WT_MEMBERSHIP_PERMISSION_DENIED|permission denied/i.test(text)) return 'permission_denied';
 	if (/WT_INVITATION_NOT_FOUND/i.test(text)) return 'not_found';
+	if (/retry_requires_new_operation_key/i.test(text)) return 'retry_requires_new_operation_key';
 	if (/shared_contact_policy_required/i.test(text)) return 'shared_contact_policy_required';
 	return 'failed';
 }
@@ -109,8 +110,13 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 	}
 
 	const formData = await request.formData();
-	const requestedAction = String(formData.get('invitation_action') ?? 'send').trim();
-	const operationKey = String(formData.get('operation_key') ?? '').trim() || crypto.randomUUID();
+	const submittedAction = String(formData.get('invitation_action') ?? 'send').trim();
+	const requestedAction = ['send', 'resend', 'retry', 'cancel'].includes(submittedAction) ? submittedAction : 'send';
+	const submittedOperationKey = String(formData.get('operation_key') ?? '').trim();
+	const retryOperationKey = String(formData.get('retry_operation_key') ?? '').trim();
+	const operationKey = requestedAction === 'retry'
+		? retryOperationKey || crypto.randomUUID()
+		: submittedOperationKey || crypto.randomUUID();
 
 	if (requestedAction === 'cancel') {
 		const invitationId = String(formData.get('invitation_id') ?? '').trim();
@@ -166,6 +172,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 		p_membership_ids: membershipIds,
 		p_idempotency_key: operationKey,
 		p_token_hashes: tokenHashes,
+		p_request_intent: requestedAction,
 	});
 
 	if (error) {
