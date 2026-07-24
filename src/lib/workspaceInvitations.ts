@@ -63,6 +63,8 @@ export type InvitationDeliveryResult = {
 	status: 'delivered' | 'delivery_failed';
 	failureCode?: string;
 	failureMessage?: string;
+	providerName?: string;
+	providerMessageId?: string;
 };
 
 export function isWorkspaceInvitationStatus(value: unknown): value is WorkspaceInvitationStatus {
@@ -73,7 +75,7 @@ export function workspaceInvitationStatusLabel(status: unknown): string {
 	return ({
 		pending_delivery: 'Pending delivery',
 		sending: 'Sending',
-		delivered: 'Delivered',
+		delivered: 'Sent',
 		delivery_failed: 'Delivery failed',
 		opened: 'Opened',
 		accepted: 'Accepted',
@@ -173,11 +175,12 @@ export function renderInvitationEmail(model: InvitationEmailModel) {
 	const expiryText = model.expiresAt
 		? `This invitation expires on ${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(model.expiresAt))}.`
 		: `This invitation expires after ${WORKSPACE_INVITATION_EXPIRY_HOURS} hours.`;
-	const subject = 'You have been invited to the Watchtower workspace';
+	const subject = 'You have been invited to a Watchtower workspace';
 	const text = [
 		`Hello ${model.personName},`,
 		'',
 		`You have been invited to join ${model.workspaceName} in Watchtower as ${model.roleLabel}.`,
+		'Your workspace access is not active until you accept this invitation.',
 		expiryText,
 		'',
 		`Accept invitation: ${model.acceptUrl}`,
@@ -188,6 +191,7 @@ export function renderInvitationEmail(model: InvitationEmailModel) {
 		'<main>',
 		`<p>Hello ${escapeHtml(model.personName)},</p>`,
 		`<p>You have been invited to join <strong>${escapeHtml(model.workspaceName)}</strong> in Watchtower as <strong>${escapeHtml(model.roleLabel)}</strong>.</p>`,
+		'<p>Your workspace access is not active until you accept this invitation.</p>',
 		`<p>${escapeHtml(expiryText)}</p>`,
 		`<p><a href="${escapeHtml(model.acceptUrl)}">Accept invitation</a></p>`,
 		'<p>If you were not expecting this invitation, ignore this message or report it to the workspace Owner.</p>',

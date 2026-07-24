@@ -421,9 +421,9 @@ const invitationDeliveryError = String(Astro.url.searchParams.get('invitation_de
 const invitationDeliverySent = Number(Astro.url.searchParams.get('invitation_delivery_sent') ?? 0);
 const invitationDeliveryFailed = Number(Astro.url.searchParams.get('invitation_delivery_failed') ?? 0);
 const invitationDeliveryMessage = invitationDeliveryState === 'success'
-	? `${invitationDeliverySent} ${invitationDeliverySent === 1 ? 'invitation' : 'invitations'} delivered. Delivery alone does not activate workspace access.`
+	? `${invitationDeliverySent} ${invitationDeliverySent === 1 ? 'invitation' : 'invitations'} sent. Delivery alone does not activate workspace access.`
 	: invitationDeliveryState === 'partial'
-		? `${invitationDeliverySent} ${invitationDeliverySent === 1 ? 'invitation' : 'invitations'} delivered. ${invitationDeliveryFailed} could not be delivered and can be retried.`
+		? `${invitationDeliverySent} ${invitationDeliverySent === 1 ? 'invitation' : 'invitations'} sent. ${invitationDeliveryFailed} could not be sent and can be retried.`
 		: invitationDeliveryState === 'cancelled'
 			? 'Invitation cancelled. Membership remains invited and can receive a new invitation later.'
 			: invitationDeliveryState === 'error'

@@ -10,12 +10,18 @@ import {
 	invitationDeliveryMode,
 	renderInvitationEmail,
 } from '../src/lib/workspaceInvitations.ts';
+import {
+	resolveInvitationProviderConfig,
+	resolveWorkspaceInvitationSiteOrigin,
+	sendWorkspaceInvitationEmail,
+} from '../src/lib/workspaceInvitationDelivery.ts';
 import { buildWorkspaceTeamInvitationSendPath } from '../src/lib/projectRoutes.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260723001100_workspace_membership_invitation_delivery_activation.sql', import.meta.url);
 const internalPolicyMigrationUrl = new URL('../supabase/migrations/20260723001200_workspace_invitation_internal_delivery_policy.sql', import.meta.url);
 const retryPolicyMigrationUrl = new URL('../supabase/migrations/20260723001300_workspace_invitation_retry_policy_resolution.sql', import.meta.url);
 const controlledIdentityMigrationUrl = new URL('../supabase/migrations/20260723001400_workspace_invitation_controlled_identity_preparation.sql', import.meta.url);
+const outboundEmailMigrationUrl = new URL('../supabase/migrations/20260723001500_workspace_invitation_outbound_email_delivery.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const teamPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
@@ -161,6 +167,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	const policyIndex = files.indexOf('20260723001200_workspace_invitation_internal_delivery_policy.sql');
 	const retryIndex = files.indexOf('20260723001300_workspace_invitation_retry_policy_resolution.sql');
 	const controlledIdentityIndex = files.indexOf('20260723001400_workspace_invitation_controlled_identity_preparation.sql');
+	const outboundEmailIndex = files.indexOf('20260723001500_workspace_invitation_outbound_email_delivery.sql');
 	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
 	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
 
@@ -168,6 +175,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.equal(policyIndex, migrationIndex + 1, 'internal policy migration should immediately follow 20260723001100');
 	assert.equal(retryIndex, policyIndex + 1, 'retry policy-resolution migration should follow the internal policy migration');
 	assert.equal(controlledIdentityIndex, retryIndex + 1, 'controlled identity migration should follow the retry policy-resolution migration');
+	assert.equal(outboundEmailIndex, controlledIdentityIndex + 1, 'outbound email delivery migration should follow controlled identity preparation');
 	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
 	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
@@ -181,6 +189,136 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.doesNotMatch(seedBlock, /\.slug|\.name|contact_email|email domain|gmail\.com/i);
 	assert.match(policySql, /revoke all on public\.workspace_invitation_delivery_policies from authenticated/);
 	assert.doesNotMatch(policySql, /grant select on public\.workspace_invitation_delivery_policies to authenticated/i);
+});
+
+test('Workspace invitation outbound email migration records provider evidence and claims idempotent sends', async () => {
+	const migrationSql = await readFile(outboundEmailMigrationUrl, 'utf8');
+	const beginSql = sqlFunctionDefinition(migrationSql, 'begin_workspace_membership_invitation_delivery_attempt');
+	const recordSql = sqlFunctionDefinition(migrationSql, 'record_workspace_membership_invitation_delivery_result');
+
+	assert.match(migrationSql, /add column if not exists delivery_operation_key uuid/);
+	assert.match(migrationSql, /add column if not exists email_provider text/);
+	assert.match(migrationSql, /add column if not exists provider_message_id text/);
+	assert.match(migrationSql, /add column if not exists provider_accepted_at timestamptz/);
+	assert.match(beginSql, /where invitation\.id = p_invitation_id[\s\S]*and invitation\.is_current[\s\S]*for update/);
+	assert.match(beginSql, /if v_invitation\.status <> 'pending_delivery'[\s\S]*should_send := false/);
+	assert.match(beginSql, /set status = 'sending'[\s\S]*delivery_operation_key = p_delivery_operation_key[\s\S]*delivery_attempt_count = invitation\.delivery_attempt_count \+ 1/);
+	assert.match(beginSql, /workspace_invitation_delivery_attempted/);
+	assert.match(recordSql, /p_email_provider text[\s\S]*p_provider_message_id text/);
+	assert.match(recordSql, /email_provider = v_email_provider/);
+	assert.match(recordSql, /provider_message_id = case when p_delivery_status = 'delivered' then v_provider_message_id else null end/);
+	assert.match(recordSql, /provider_accepted_at = case when p_delivery_status = 'delivered' then now\(\) else invitation\.provider_accepted_at end/);
+	assert.match(recordSql, /case\s+when v_invitation\.status = 'sending' then v_invitation\.delivery_attempt_count[\s\S]*else v_invitation\.delivery_attempt_count \+ 1/);
+	assert.match(recordSql, /jsonb_strip_nulls\(jsonb_build_object\([\s\S]*'email_provider', v_email_provider[\s\S]*'provider_message_id'/);
+	assert.doesNotMatch(recordSql, /token_hash|raw_token|html_message|text_message|email_body|api_key|authorization|provider_response/i);
+	assert.doesNotMatch(recordSql, /organisation_members[\s\S]*status = 'active'/i);
+	assert.match(migrationSql, /grant execute on function public\.begin_workspace_membership_invitation_delivery_attempt\(uuid, uuid\) to authenticated, service_role/);
+	assert.match(migrationSql, /grant execute on function public\.record_workspace_membership_invitation_delivery_result\(uuid, text, text, text, text, text\) to authenticated, service_role/);
+});
+
+test('Workspace invitation delivery provider configuration is server-side and production-origin bounded', () => {
+	assert.equal(resolveWorkspaceInvitationSiteOrigin({ WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk/app' }), 'https://watch-tower.co.uk');
+	assert.equal(resolveWorkspaceInvitationSiteOrigin({ WATCHTOWER_SITE_URL: 'http://watch-tower.co.uk' }), null);
+	assert.equal(resolveWorkspaceInvitationSiteOrigin({ WATCHTOWER_SITE_URL: 'https://evil.example' }), null);
+	assert.deepEqual(resolveInvitationProviderConfig({}).mode, 'provider_required');
+	assert.deepEqual(resolveInvitationProviderConfig({ WATCHTOWER_INVITATION_DELIVERY_MODE: 'test_record_only' }).mode, 'test_record_only');
+	assert.deepEqual(resolveInvitationProviderConfig({
+		WATCHTOWER_EMAIL_PROVIDER: 'resend',
+		WATCHTOWER_RESEND_API_KEY: 're_secret',
+		WATCHTOWER_INVITATION_FROM_NAME: 'Watchtower',
+		WATCHTOWER_INVITATION_FROM_EMAIL: 'invitations@watch-tower.co.uk',
+		WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
+	}).mode, 'resend');
+});
+
+test('Workspace invitation delivery sends HTML and text through Resend without browser-controlled origin', async () => {
+	let requestUrl = '';
+	let requestBody = {};
+	let authorization = '';
+	const result = await sendWorkspaceInvitationEmail({
+		invitationId: '11111111-1111-4111-8111-111111111111',
+		membershipId: '22222222-2222-4222-8222-222222222222',
+		recipientEmail: 'Ruby.Atkinson+Test@Example.com',
+		rawToken: 'a'.repeat(64),
+		workspaceName: 'Internal Simulation',
+		personName: 'Ruby Atkinson',
+		roleLabel: 'Viewer',
+		expiresAt: '2026-07-26T12:00:00Z',
+		requestOrigin: 'https://attacker.example',
+		env: {
+			WATCHTOWER_EMAIL_PROVIDER: 'resend',
+			WATCHTOWER_RESEND_API_KEY: 're_test',
+			WATCHTOWER_INVITATION_FROM_NAME: 'Watchtower',
+			WATCHTOWER_INVITATION_FROM_EMAIL: 'invitations@watch-tower.co.uk',
+			WATCHTOWER_INVITATION_REPLY_TO: 'support@watch-tower.co.uk',
+			WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
+		},
+		fetchImpl: async (url, init) => {
+			requestUrl = String(url);
+			authorization = String(init?.headers?.authorization ?? init?.headers?.Authorization ?? '');
+			requestBody = JSON.parse(String(init?.body ?? '{}'));
+			return new Response(JSON.stringify({ id: 'resend_123' }), { status: 200, headers: { 'content-type': 'application/json' } });
+		},
+	});
+
+	assert.equal(result.status, 'delivered');
+	assert.equal(result.providerName, 'resend');
+	assert.equal(result.providerMessageId, 'resend_123');
+	assert.equal(requestUrl, 'https://api.resend.com/emails');
+	assert.equal(authorization, 'Bearer re_test');
+	assert.equal(requestBody.from, 'Watchtower <invitations@watch-tower.co.uk>');
+	assert.deepEqual(requestBody.to, ['ruby.atkinson+test@example.com']);
+	assert.equal(requestBody.reply_to, 'support@watch-tower.co.uk');
+	assert.match(requestBody.subject, /invited to a Watchtower workspace/);
+	assert.match(requestBody.text, /https:\/\/watch-tower\.co\.uk\/invitations\/accept\?token=/);
+	assert.match(requestBody.html, /https:\/\/watch-tower\.co\.uk\/invitations\/accept\?token=/);
+	assert.doesNotMatch(requestBody.text, /attacker\.example/);
+	assert.doesNotMatch(requestBody.html, /attacker\.example/);
+});
+
+test('Workspace invitation delivery fails safely when provider is missing, rejected or unavailable', async () => {
+	const baseRequest = {
+		invitationId: '11111111-1111-4111-8111-111111111111',
+		membershipId: '22222222-2222-4222-8222-222222222222',
+		recipientEmail: 'ruby.atkinson@example.com',
+		rawToken: 'b'.repeat(64),
+		workspaceName: 'Internal Simulation',
+		personName: 'Ruby Atkinson',
+		roleLabel: 'Viewer',
+	};
+	const missing = await sendWorkspaceInvitationEmail({ ...baseRequest, env: {} });
+	const rejected = await sendWorkspaceInvitationEmail({
+		...baseRequest,
+		env: {
+			WATCHTOWER_EMAIL_PROVIDER: 'resend',
+			WATCHTOWER_RESEND_API_KEY: 're_test',
+			WATCHTOWER_INVITATION_FROM_EMAIL: 'invitations@watch-tower.co.uk',
+			WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
+		},
+		fetchImpl: async () => new Response(JSON.stringify({ message: 'raw provider detail' }), { status: 422 }),
+	});
+	const unavailable = await sendWorkspaceInvitationEmail({
+		...baseRequest,
+		env: {
+			WATCHTOWER_EMAIL_PROVIDER: 'resend',
+			WATCHTOWER_RESEND_API_KEY: 're_test',
+			WATCHTOWER_INVITATION_FROM_EMAIL: 'invitations@watch-tower.co.uk',
+			WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk',
+		},
+		fetchImpl: async () => {
+			throw new Error('network includes secret re_test and raw response');
+		},
+	});
+
+	assert.equal(missing.status, 'delivery_failed');
+	assert.equal(missing.failureCode, 'provider_not_configured');
+	assert.equal(rejected.status, 'delivery_failed');
+	assert.equal(rejected.failureCode, 'provider_rejected');
+	assert.equal(rejected.providerName, 'resend');
+	assert.doesNotMatch(rejected.failureMessage ?? '', /raw provider detail|re_test/i);
+	assert.equal(unavailable.status, 'delivery_failed');
+	assert.equal(unavailable.failureCode, 'provider_unavailable');
+	assert.doesNotMatch(unavailable.failureMessage ?? '', /raw response|re_test/i);
 });
 
 test('Internal delivery policy seed counts UUID organisations without aggregate selection', async () => {
@@ -224,12 +362,14 @@ test('Workspace invitation internal alias policy is deterministic unique and ren
 test('Workspace invitation retry reuses existing identities without duplicate account creation or activation', async () => {
 	const sql = await readFile(migrationUrl, 'utf8');
 	const controlledIdentitySql = await readFile(controlledIdentityMigrationUrl, 'utf8');
+	const outboundEmailSql = await readFile(outboundEmailMigrationUrl, 'utf8');
 	const prepareSql = sqlFunctionDefinition(controlledIdentitySql, 'prepare_workspace_membership_invitations');
-	const deliverySql = sqlFunctionDefinition(sql, 'record_workspace_membership_invitation_delivery_result');
+	const deliverySql = sqlFunctionDefinition(outboundEmailSql, 'record_workspace_membership_invitation_delivery_result');
 	const route = await readFile(sendRouteUrl, 'utf8');
 
 	assert.match(route, /\['pending_delivery', 'delivery_failed', 'expired', 'cancelled', 'superseded'\]\.includes\(String\(row\.invitation_status\)\)/);
-	assert.match(route, /provider_not_configured/);
+	assert.match(route, /claimDeliveryAttempt/);
+	assert.match(route, /sendWorkspaceInvitationEmail/);
 	assert.match(prepareSql, /if v_has_current and v_current\.idempotency_key = p_idempotency_key/);
 	assert.match(prepareSql, /v_current\.delivery_strategy is distinct from v_delivery_strategy/);
 	assert.match(prepareSql, /set is_current = false,[\s\S]*status = 'superseded'/);
@@ -358,17 +498,23 @@ test('Workspace invitation RPCs enforce admin delivery and linked-account accept
 
 test('Workspace invitation send route does not expose privileged keys or fake provider delivery', async () => {
 	const route = await readFile(sendRouteUrl, 'utf8');
+	const delivery = await readFile(new URL('../src/lib/workspaceInvitationDelivery.ts', import.meta.url), 'utf8');
 
 	assert.match(route, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
 	assert.match(route, /workspace\.role !== 'owner' && workspace\.role !== 'admin'/);
 	assert.match(route, /generateInvitationToken\(\)/);
 	assert.match(route, /hashInvitationToken\(token\)/);
 	assert.match(route, /prepare_workspace_membership_invitations/);
+	assert.match(route, /begin_workspace_membership_invitation_delivery_attempt/);
 	assert.match(route, /record_workspace_membership_invitation_delivery_result/);
-	assert.match(route, /provider_not_configured/);
-	assert.match(route, /test_record_only/);
-	assert.match(route, /renderInvitationEmail/);
+	assert.match(route, /sendWorkspaceInvitationEmail/);
+	assert.match(delivery, /provider_not_configured/);
+	assert.match(delivery, /test_record_only/);
+	assert.match(delivery, /renderInvitationEmail/);
+	assert.match(delivery, /https:\/\/api\.resend\.com\/emails/);
+	assert.match(delivery, /WATCHTOWER_SITE_URL/);
 	assert.doesNotMatch(route, /SUPABASE_SERVICE_ROLE|service_role|auth\.admin|console\.log\(.*token|rawToken.*console/i);
+	assert.doesNotMatch(delivery, /console\.log\(.*token|rawToken.*console|provider_response/i);
 });
 
 test('Workspace invitation acceptance page validates before disclosure and blocks wrong account', async () => {
@@ -399,8 +545,9 @@ test('Workspace invitation UI and documentation describe delivery without activa
 	assert.match(page, /workspaceInvitationStatusLabel/);
 	assert.match(page, /Cancel invitation/);
 	assert.doesNotMatch(page, /auth_email|recipient_email|internal_alias_base_email|workspace_invitation_delivery_policies/);
-	assert.match(email.subject, /invited to the Watchtower workspace/);
+	assert.match(email.subject, /invited to a Watchtower workspace/);
 	assert.match(email.text, /You have been invited to join Alpha Workspace/);
+	assert.match(email.text, /not active until you accept/);
 	assert.match(email.html, /Accept invitation/);
 	assert.match(docs, /WT-WORKSPACE-TEAM-008/);
 	assert.match(docs, /Delivery alone does not activate workspace access/);
