@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { env } from 'cloudflare:workers';
 import { buildWorkspaceTeamPath, getWorkspaceBySlug } from '../../../../../../lib/projects.ts';
 import { isWorkspaceRole } from '../../../../../../lib/permissions.ts';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer.ts';
@@ -42,12 +43,6 @@ type DeliveryClaimRow = {
 	failure_message?: string | null;
 };
 
-function workspaceInvitationDeliveryEnvFromLocals(locals: unknown): InvitationDeliveryEnv {
-	if (!locals || typeof locals !== 'object') return {};
-	const runtime = (locals as { runtime?: { env?: InvitationDeliveryEnv } }).runtime;
-	return runtime?.env ?? {};
-}
-
 function redirectToTeam(workspaceSlug: string, params: Record<string, string>) {
 	const query = new URLSearchParams(params);
 	return new Response(null, {
@@ -71,6 +66,19 @@ function invitationErrorCode(error: SupabaseError | null | undefined) {
 function personName(row: DirectoryRow) {
 	const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ').trim();
 	return fullName || row.display_name || row.login_name || 'Workspace user';
+}
+
+function logInvitationDeliveryOperationError(eventName: string, workspaceId: string, invitationId: string | null, error: SupabaseError | Error | unknown) {
+	const supabaseError = error as SupabaseError;
+	console.error(eventName, {
+		routeName: 'workspace_team_invitation_send',
+		workspaceId,
+		invitationId,
+		code: supabaseError?.code,
+		message: error instanceof Error ? error.message : supabaseError?.message,
+		details: supabaseError?.details,
+		hint: supabaseError?.hint,
+	});
 }
 
 async function eligibleMembershipIds(client, organisationId: string) {
@@ -110,9 +118,9 @@ async function claimDeliveryAttempt(client, invitationId: string, operationKey: 
 	return rows[0] ?? { should_send: false, status: 'delivery_failed', failure_code: 'delivery_claim_failed', failure_message: 'Invitation delivery could not be claimed safely.' };
 }
 
-export const POST: APIRoute = async ({ cookies, locals, params, request, url }) => {
+export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 	const workspaceSlug = params.workspaceSlug ?? '';
-	const invitationDeliveryEnv = workspaceInvitationDeliveryEnvFromLocals(locals);
+	const invitationDeliveryEnv = env as InvitationDeliveryEnv;
 	const accessToken = getServerAccessToken(cookies);
 	if (!accessToken) {
 		return redirectToTeam(workspaceSlug, {
@@ -262,12 +270,29 @@ export const POST: APIRoute = async ({ cookies, locals, params, request, url }) 
 				failureCode: 'delivery_context_missing',
 				failureMessage: 'Invitation was prepared, but delivery context could not be loaded.',
 			};
-			await markDeliveryResult(serverSupabase, result);
+			try {
+				await markDeliveryResult(serverSupabase, result);
+			} catch (error) {
+				logInvitationDeliveryOperationError('workspace_team_invitation_delivery_result_record_failed', organisation.id, invitation.invitation_id, error);
+				return redirectToTeam(workspaceSlug, {
+					invitation_delivery: 'error',
+					invitation_delivery_error: 'failed',
+				});
+			}
 			deliveryResults.push(result);
 			continue;
 		}
 
-		const claim = await claimDeliveryAttempt(serverSupabase, invitation.invitation_id, operationKey);
+		let claim: DeliveryClaimRow;
+		try {
+			claim = await claimDeliveryAttempt(serverSupabase, invitation.invitation_id, operationKey);
+		} catch (error) {
+			logInvitationDeliveryOperationError('workspace_team_invitation_delivery_claim_failed', organisation.id, invitation.invitation_id, error);
+			return redirectToTeam(workspaceSlug, {
+				invitation_delivery: 'error',
+				invitation_delivery_error: 'failed',
+			});
+		}
 		if (!claim.should_send) {
 			if (claim.status === 'delivered' || claim.status === 'delivery_failed') {
 				deliveryResults.push({
@@ -281,24 +306,44 @@ export const POST: APIRoute = async ({ cookies, locals, params, request, url }) 
 			continue;
 		}
 
-		const result = await sendWorkspaceInvitationEmail({
-			invitationId: invitation.invitation_id,
-			membershipId: invitation.membership_id,
-			recipientEmail: invitation.recipient_email,
-			rawToken,
-			workspaceName: organisation.name,
-			personName: personName(row),
-			roleLabel: workspaceRoleLabel(row.role),
-			expiresAt: row.invitation_expires_at,
-			requestOrigin: url.origin,
-			env: invitationDeliveryEnv,
-		});
+		let result: InvitationDeliveryResult;
+		try {
+			result = await sendWorkspaceInvitationEmail({
+				invitationId: invitation.invitation_id,
+				membershipId: invitation.membership_id,
+				recipientEmail: invitation.recipient_email,
+				rawToken,
+				workspaceName: organisation.name,
+				personName: personName(row),
+				roleLabel: workspaceRoleLabel(row.role),
+				expiresAt: row.invitation_expires_at,
+				requestOrigin: url.origin,
+				env: invitationDeliveryEnv,
+			});
+		} catch (error) {
+			logInvitationDeliveryOperationError('workspace_team_invitation_email_provider_unexpected_failed', organisation.id, invitation.invitation_id, error);
+			result = {
+				invitationId: invitation.invitation_id,
+				membershipId: invitation.membership_id,
+				status: 'delivery_failed',
+				failureCode: 'provider_unavailable',
+				failureMessage: 'Invitation email provider could not be reached. Retry is available.',
+			};
+		}
 		if (result.status === 'delivery_failed' && result.failureCode === 'provider_not_configured' && !loggedProviderConfigDiagnostics) {
 			console.warn('workspace_team_invitation_email_provider_not_configured', workspaceInvitationEmailConfigDiagnostics(invitationDeliveryEnv));
 			loggedProviderConfigDiagnostics = true;
 		}
 
-		await markDeliveryResult(serverSupabase, result);
+		try {
+			await markDeliveryResult(serverSupabase, result);
+		} catch (error) {
+			logInvitationDeliveryOperationError('workspace_team_invitation_delivery_result_record_failed', organisation.id, invitation.invitation_id, error);
+			return redirectToTeam(workspaceSlug, {
+				invitation_delivery: 'error',
+				invitation_delivery_error: 'failed',
+			});
+		}
 		deliveryResults.push(result);
 	}
 
