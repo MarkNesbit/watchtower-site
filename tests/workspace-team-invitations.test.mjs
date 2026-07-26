@@ -28,6 +28,9 @@ const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.me
 const teamPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
 const schemaDocsUrl = new URL('../docs/architecture/database-schema-v1.md', import.meta.url);
+const cloudflareDeploymentDocsUrl = new URL('../docs/cloudflare-workers-deployment.md', import.meta.url);
+const wranglerConfigUrl = new URL('../wrangler.toml', import.meta.url);
+const cloudflareDeployWorkflowUrl = new URL('../.github/workflows/deploy-cloudflare-worker.yml', import.meta.url);
 const migrationsDir = new URL('../supabase/migrations/', import.meta.url);
 const productionAppliedInvitationMigrationHash = '5b588a7284c4238e18b06f83d91d101790eb19a865e663abfb7e5a8b6133a5c9';
 
@@ -254,6 +257,25 @@ test('Workspace invitation delivery provider configuration is server-side and pr
 		senderBindingPresent: false,
 		siteUrlBindingPresent: false,
 	});
+});
+
+test('Workspace invitation Cloudflare deployment preserves non-secret email bindings through Wrangler config', async () => {
+	const wrangler = await readFile(wranglerConfigUrl, 'utf8');
+	const workflow = await readFile(cloudflareDeployWorkflowUrl, 'utf8');
+	const docs = await readFile(cloudflareDeploymentDocsUrl, 'utf8');
+	const varsBlock = wrangler.match(/\[vars\][\s\S]*?(?=\n\[|$)/)?.[0] ?? '';
+
+	assert.match(workflow, /npx wrangler deploy/);
+	assert.match(varsBlock, /WATCHTOWER_EMAIL_PROVIDER = "resend"/);
+	assert.match(varsBlock, /WATCHTOWER_EMAIL_FROM_ADDRESS = "invitations@watch-tower\.co\.uk"/);
+	assert.match(varsBlock, /WATCHTOWER_EMAIL_FROM_NAME = "Watchtower"/);
+	assert.match(varsBlock, /WATCHTOWER_INVITATION_REPLY_TO = "mark\.nesbit\.professional@gmail\.com"/);
+	assert.match(varsBlock, /WATCHTOWER_SITE_URL = "https:\/\/watch-tower\.co\.uk"/);
+	assert.doesNotMatch(wrangler, /WATCHTOWER_RESEND_API_KEY|re_[a-z0-9]/i);
+	assert.doesNotMatch(wrangler, /keep_vars\s*=\s*true/i);
+	assert.match(docs, /non-secret Worker variables are committed in `wrangler\.toml` under `\[vars\]`/);
+	assert.match(docs, /`keep_vars` is intentionally not enabled/);
+	assert.match(docs, /`WATCHTOWER_RESEND_API_KEY` as a Worker secret/);
 });
 
 test('Workspace invitation delivery uses runtime Worker bindings for Resend without browser-controlled origin', async () => {

@@ -42,13 +42,18 @@ WT-WORKSPACE-TEAM-008A uses Resend through a direct HTTPS request from the Cloud
 - From name: `Watchtower`
 - From email: `invitations@watch-tower.co.uk`
 
-Configure these Worker values/secrets before production invitation validation:
+The non-secret Worker variables are committed in `wrangler.toml` under `[vars]` so a GitHub/Wrangler deployment preserves them. Do not manage these production plaintext values only through the Cloudflare dashboard; Wrangler deployments replace dashboard-only plaintext variables. `keep_vars` is intentionally not enabled because the production deployment treats explicit Wrangler configuration as the source of truth for plaintext bindings.
+
+Configure this Worker secret before production invitation validation:
+
+- `WATCHTOWER_RESEND_API_KEY` as a Worker secret
+
+The committed non-secret values are:
 
 - `WATCHTOWER_EMAIL_PROVIDER=resend`
-- `WATCHTOWER_RESEND_API_KEY` as a Worker secret
 - `WATCHTOWER_EMAIL_FROM_NAME=Watchtower`
 - `WATCHTOWER_EMAIL_FROM_ADDRESS=invitations@watch-tower.co.uk`
-- `WATCHTOWER_INVITATION_REPLY_TO` when a monitored reply mailbox is available
+- `WATCHTOWER_INVITATION_REPLY_TO=mark.nesbit.professional@gmail.com`
 - `WATCHTOWER_SITE_URL=https://watch-tower.co.uk`
 
 The invitation acceptance URL is generated server-side from `WATCHTOWER_SITE_URL` and is accepted only when it resolves to the production HTTPS origin `https://watch-tower.co.uk`. Browser request origin is not used for production provider email.
