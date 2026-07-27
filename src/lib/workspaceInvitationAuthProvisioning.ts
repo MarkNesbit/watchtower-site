@@ -38,7 +38,10 @@ type SupabaseAdminClient = {
 				app_metadata?: Record<string, unknown>;
 			}): Promise<{ data?: unknown; error: Error | null }>;
 			deleteUser(userId: string, shouldSoftDelete?: boolean): Promise<{ data?: unknown; error: Error | null }>;
-			getUserById(userId: string): Promise<{ data: { user?: { id?: string; email?: string | null } | null } | null; error: Error | null }>;
+			getUserById(userId: string): Promise<{
+				data: { user?: { id?: string; email?: string | null } | null } | null;
+				error: Error | null;
+			}>;
 			listUsers?(input?: {
 				page?: number;
 				perPage?: number;
@@ -110,6 +113,17 @@ function logRepairFailed(
 	});
 }
 
+function logRepairStage(
+	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
+	stage: string,
+	newAuthUserId?: string | null,
+) {
+	console.info(stage, {
+		...repairLogContext(candidate),
+		...(newAuthUserId ? { newAuthUserId } : {}),
+	});
+}
+
 async function recordRepair(
 	client: SupabaseAdminClient,
 	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
@@ -120,7 +134,7 @@ async function recordRepair(
 ) {
 	const { error } = await client.rpc('record_workspace_invitation_auth_identity_repair', {
 		p_invitation_id: candidate.invitation_id,
-		p_old_auth_user_id: candidate.current_auth_user_id,
+		p_old_auth_user_id: placeholderAuthUserIdFor(candidate),
 		p_new_auth_user_id: authUserId,
 		p_outcome: outcome,
 		p_failure_code: failure?.code ?? null,
@@ -139,7 +153,7 @@ async function recordRepairFailure(
 ) {
 	await recordRepair(
 		client,
-		{ ...candidate, current_auth_user_id: currentAuthUserId },
+		candidate,
 		currentAuthUserId,
 		'failed',
 		correlationId,
@@ -147,18 +161,26 @@ async function recordRepairFailure(
 	);
 }
 
-async function findAuthUserByEmail(client: SupabaseAdminClient, email: string) {
-	if (typeof client.auth.admin.listUsers !== 'function') return null;
+async function findAuthUsersByEmail(client: SupabaseAdminClient, email: string) {
+	if (typeof client.auth.admin.listUsers !== 'function') return [];
 	const targetEmail = email.trim().toLowerCase();
+	const matches: string[] = [];
 	for (let page = 1; page <= 10; page += 1) {
 		const { data, error } = await client.auth.admin.listUsers({ page, perPage: 1000 });
 		if (error) throw error;
 		const users = data?.users ?? [];
-		const match = users.find((user) => typeof user.email === 'string' && user.email.trim().toLowerCase() === targetEmail);
-		if (match?.id) return match.id;
-		if (users.length < 1000) return null;
+		for (const user of users) {
+			if (user.id && typeof user.email === 'string' && user.email.trim().toLowerCase() === targetEmail) {
+				matches.push(user.id);
+			}
+		}
+		if (users.length < 1000) break;
 	}
-	return null;
+	return matches;
+}
+
+async function findAuthUserByEmail(client: SupabaseAdminClient, email: string) {
+	return (await findAuthUsersByEmail(client, email))[0] ?? null;
 }
 
 function isMissingUserError(error: Error | null | undefined) {
@@ -173,6 +195,20 @@ async function softDeleteAuthUser(client: SupabaseAdminClient, authUserId: strin
 async function hardDeleteAuthUser(client: SupabaseAdminClient, authUserId: string) {
 	const { error } = await client.auth.admin.deleteUser(authUserId, false);
 	if (error && !isMissingUserError(error)) throw error;
+}
+
+async function getAuthUserById(client: SupabaseAdminClient, authUserId: string) {
+	const { data, error } = await client.auth.admin.getUserById(authUserId);
+	if (error && isMissingUserError(error)) return null;
+	if (error) throw error;
+	return data?.user?.id ? data.user : null;
+}
+
+async function verifyAuthUserDeleted(client: SupabaseAdminClient, authUserId: string) {
+	const user = await getAuthUserById(client, authUserId);
+	if (user?.id) {
+		throw new Error('Malformed invitation Auth placeholder still exists after hard deletion.');
+	}
 }
 
 async function verifyPlaceholderRelease(
@@ -193,10 +229,13 @@ async function verifyFinalAuthIdentity(
 	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
 	authUserId: string,
 ) {
-	const { data: userData, error: userError } = await client.auth.admin.getUserById(authUserId);
-	if (userError) throw userError;
-	if (userData?.user?.email?.trim().toLowerCase() !== candidate.auth_email.trim().toLowerCase()) {
+	const user = await getAuthUserById(client, authUserId);
+	if (user?.email?.trim().toLowerCase() !== candidate.auth_email.trim().toLowerCase()) {
 		throw new Error('Final invitation Auth user email does not match the deterministic alias.');
+	}
+	const aliasOwners = await findAuthUsersByEmail(client, candidate.auth_email);
+	if (aliasOwners.some((ownerId) => ownerId !== authUserId)) {
+		throw new Error('Deterministic invitation Auth alias is still owned by another Auth user.');
 	}
 
 	const { data, error } = await client.rpc('get_workspace_invitation_auth_identity_repair_candidates', {
@@ -300,10 +339,24 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 			repairStage = 'verify_placeholder_unreferenced';
 			await verifyPlaceholderRelease(input.adminClient, candidate, replacementAuthUserId);
 
-			repairStage = 'hard_delete_identityless_placeholder';
-			await hardDeleteAuthUser(input.adminClient, placeholderAuthUserIdFor(candidate));
+			const placeholderAuthUserId = placeholderAuthUserIdFor(candidate);
+			repairStage = 'placeholder_delete_started';
+			logRepairStage(candidate, repairStage, replacementAuthUserId);
+			try {
+				await hardDeleteAuthUser(input.adminClient, placeholderAuthUserId);
+				repairStage = 'placeholder_delete_api_completed';
+				logRepairStage(candidate, repairStage, replacementAuthUserId);
+				await verifyAuthUserDeleted(input.adminClient, placeholderAuthUserId);
+				repairStage = 'placeholder_delete_verified';
+				logRepairStage(candidate, repairStage, replacementAuthUserId);
+			} catch (error) {
+				repairStage = 'placeholder_delete_failed';
+				logRepairStage(candidate, repairStage, replacementAuthUserId);
+				throw error;
+			}
 
-			repairStage = 'assign_deterministic_alias';
+			repairStage = 'deterministic_alias_assignment_started';
+			logRepairStage(candidate, repairStage, replacementAuthUserId);
 			if (!candidate.existing_valid_auth_user_id || !authEmailMatchesInvitation) {
 				const { error: aliasError } = await input.adminClient.auth.admin.updateUserById(replacementAuthUserId, {
 					email: candidate.auth_email,
@@ -318,8 +371,9 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 				if (aliasError) throw aliasError;
 			}
 
-			repairStage = 'verify_valid_email_identity';
 			await verifyFinalAuthIdentity(input.adminClient, candidate, replacementAuthUserId);
+			repairStage = 'deterministic_alias_assignment_verified';
+			logRepairStage(candidate, repairStage, replacementAuthUserId);
 
 			const outcome = candidate.existing_valid_auth_user_id ? 'remapped_existing_user' : 'remapped_created_user';
 			results.push({
@@ -332,7 +386,7 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 			logRepairCompleted(candidate, replacementAuthUserId, outcome);
 		} catch (error) {
 			const failureMessage = safeFailureMessage(error, 'Invitation Auth identity could not be provisioned.');
-			const failureCode = repairStage === 'assign_deterministic_alias'
+			const failureCode = repairStage.startsWith('deterministic_alias_assignment')
 				? WORKSPACE_INVITATION_AUTH_IDENTITY_ALIAS_FAILURE_CODE
 				: WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE;
 			logRepairFailed(candidate, repairStage, failureCode);
