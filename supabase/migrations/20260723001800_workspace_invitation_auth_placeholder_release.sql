@@ -11,8 +11,29 @@ alter table public.organisation_members
 alter table public.profiles
   drop constraint if exists profiles_id_fkey;
 
-alter table public.workspace_invitation_auth_identity_repairs
-  drop constraint if exists workspace_invitation_auth_identity_repairs_old_auth_user_id_fkey;
+do $$
+declare
+  v_constraint_name name;
+begin
+  select c.conname
+  into v_constraint_name
+  from pg_constraint c
+  join pg_attribute a
+    on a.attrelid = c.conrelid
+    and a.attnum = any(c.conkey)
+  where c.conrelid = 'public.workspace_invitation_auth_identity_repairs'::regclass
+    and c.contype = 'f'
+    and a.attname = 'old_auth_user_id'
+  limit 1;
+
+  if v_constraint_name is not null then
+    execute format(
+      'alter table public.workspace_invitation_auth_identity_repairs drop constraint %I',
+      v_constraint_name
+    );
+  end if;
+end;
+$$;
 
 do $$
 begin
@@ -29,9 +50,6 @@ begin
   end if;
 end;
 $$;
-
-alter table public.organisation_members
-  validate constraint organisation_members_user_id_profile_fkey;
 
 comment on column public.profiles.id is
   'Immutable Watchtower profile/person UUID. Authentication is linked through profiles.auth_user_id; profiles.id is intentionally not an auth.users foreign key after invitation Auth repair support.';

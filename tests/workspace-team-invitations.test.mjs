@@ -587,8 +587,10 @@ test('Workspace invitation Auth placeholder release migration gates hard deletio
 
 	assert.match(sql, /alter table public\.organisation_members[\s\S]*drop constraint if exists organisation_members_user_id_fkey/);
 	assert.match(sql, /alter table public\.profiles[\s\S]*drop constraint if exists profiles_id_fkey/);
-	assert.match(sql, /drop constraint if exists workspace_invitation_auth_identity_repairs_old_auth_user_id_fkey/);
-	assert.match(sql, /organisation_members_user_id_profile_fkey[\s\S]*foreign key \(user_id\) references public\.profiles\(id\) on delete cascade/);
+	assert.match(sql, /from pg_constraint c[\s\S]*join pg_attribute a[\s\S]*a\.attname = 'old_auth_user_id'/);
+	assert.match(sql, /execute format\([\s\S]*alter table public\.workspace_invitation_auth_identity_repairs drop constraint %I/);
+	assert.match(sql, /organisation_members_user_id_profile_fkey[\s\S]*foreign key \(user_id\) references public\.profiles\(id\) on delete cascade[\s\S]*not valid/);
+	assert.doesNotMatch(sql, /validate constraint organisation_members_user_id_profile_fkey/);
 	assert.match(releaseSql, /coalesce\(auth\.role\(\), ''\) <> 'service_role'/);
 	assert.match(releaseSql, /v_invitation\.profile_id is distinct from p_old_auth_user_id/);
 	assert.match(releaseSql, /v_invitation\.auth_user_id is distinct from p_new_auth_user_id[\s\S]*v_invitation\.profile_auth_user_id is distinct from p_new_auth_user_id[\s\S]*v_invitation\.membership_auth_user_id is distinct from p_new_auth_user_id/);
