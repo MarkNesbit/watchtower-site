@@ -2,6 +2,13 @@ name = "watchtower-site"
 main = "@astrojs/cloudflare/entrypoints/server"
 compatibility_date = "2026-06-17"
 
+[vars]
+WATCHTOWER_EMAIL_PROVIDER = "resend"
+WATCHTOWER_EMAIL_FROM_ADDRESS = "invitations@watch-tower.co.uk"
+WATCHTOWER_EMAIL_FROM_NAME = "Watchtower"
+WATCHTOWER_INVITATION_REPLY_TO = "mark.nesbit.professional@gmail.com"
+WATCHTOWER_SITE_URL = "https://watch-tower.co.uk"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
