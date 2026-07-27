@@ -439,7 +439,9 @@ test('Current workspace lookup is scoped to the signed-in user membership', asyn
 	assert.match(source, /client\.auth\.getUser\(/);
 	assert.match(source, /const user = userData\.user/);
 	assert.match(source, /if \(!user\) return null/);
-	assert.match(source, /\.eq\('status', 'active'\)\s*\n\s*\.eq\('user_id', user\.id\)/);
+	assert.match(source, /function filterSignedInMembership\(query, userId: string\)/);
+	assert.match(source, /query\.or\(`user_id\.eq\.\$\{userId\},auth_user_id\.eq\.\$\{userId\}`\)/);
+	assert.match(source, /filterSignedInMembership\([\s\S]*\.eq\('status', 'active'\), user\.id\)/);
 });
 
 test('Project list and detail render database values with safe Astro templates', async () => {
@@ -708,7 +710,8 @@ test('Workspace lookup requires the authenticated user active membership and wor
 	const source = await readFile(new URL('../src/lib/projects.ts', import.meta.url), 'utf8');
 	assert.match(source, /export async function getWorkspaceBySlug/);
 	assert.match(source, /organisations!inner\(id, name, slug\)/);
-	assert.match(source, /\.eq\('status', 'active'\)\s*\n\s*\.eq\('user_id', user\.id\)\s*\n\s*\.eq\('organisations\.slug', workspaceSlug\)/);
+	assert.match(source, /filterSignedInMembership\([\s\S]*\.eq\('status', 'active'\), user\.id\)/);
+	assert.match(source, /\.eq\('organisations\.slug', workspaceSlug\)/);
 });
 
 test('Every workspace-scoped project page binds project slug to the matched workspace', async () => {

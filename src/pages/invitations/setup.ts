@@ -5,6 +5,10 @@ import {
 	createSupabaseServerClient,
 } from '../../lib/supabaseServer.ts';
 import {
+	provisionWorkspaceInvitationAuthIdentities,
+	type WorkspaceInvitationAuthIdentityRepairCandidate,
+} from '../../lib/workspaceInvitationAuthProvisioning.ts';
+import {
 	buildWorkspaceInvitationAcceptRelativePath,
 	buildWorkspaceInvitationResetPasswordPath,
 	hashInvitationToken,
@@ -47,6 +51,15 @@ function runtimeString(runtimeEnv: RuntimeEnv, name: string): string | null {
 	return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
+function safeLogMessage(error: unknown, fallback: string) {
+	const message = error instanceof Error ? error.message : String(error ?? fallback);
+	return message
+		.replace(/https?:\/\/\S+/gi, '[redacted-link]')
+		.replace(/[^\s@]+@[^\s@]+/g, '[redacted-email]')
+		.replace(/\b(?:token|password|authorization)\b/gi, '[redacted]')
+		.slice(0, 240) || fallback;
+}
+
 function safeSupabaseActionLink(actionLink: string | undefined, runtimeEnv: RuntimeEnv) {
 	if (!actionLink) return null;
 	const supabaseUrl = runtimeString(runtimeEnv, 'PUBLIC_SUPABASE_URL');
@@ -77,7 +90,33 @@ async function loadInvitation(token: string) {
 		p_token_hash: tokenHash,
 	});
 	if (error) throw error;
-	return Array.isArray(data) ? data[0] as InvitationInfo | undefined : undefined;
+	return {
+		invitation: Array.isArray(data) ? data[0] as InvitationInfo | undefined : undefined,
+		tokenHash,
+	};
+}
+
+async function resolveLinkedAuthUserId(adminSupabase, invitation: InvitationInfo, tokenHash: string) {
+	const { data, error } = await adminSupabase.rpc('get_workspace_invitation_auth_identity_repair_candidates', {
+		p_invitation_ids: null,
+		p_membership_ids: null,
+		p_token_hash: tokenHash,
+	});
+	if (error) throw error;
+
+	const candidates = (data ?? []) as WorkspaceInvitationAuthIdentityRepairCandidate[];
+	const candidate = candidates[0];
+	if (!candidate) return invitation.auth_user_id;
+	if (candidate.has_email_identity) return candidate.current_auth_user_id;
+
+	const [result] = await provisionWorkspaceInvitationAuthIdentities({
+		adminClient: adminSupabase,
+		candidates: [candidate],
+	});
+	if (!result || result.status === 'failed') {
+		throw new Error(result?.failureCode ?? 'Invitation Auth identity could not be provisioned.');
+	}
+	return result.authUserId;
 }
 
 export const POST: APIRoute = async ({ request, url }) => {
@@ -86,12 +125,15 @@ export const POST: APIRoute = async ({ request, url }) => {
 	if (!isWorkspaceInvitationToken(token)) return redirect('/invitations/accept?error=invalid');
 
 	let invitation: InvitationInfo | undefined;
+	let tokenHash = '';
 	try {
-		invitation = await loadInvitation(token);
+		const loaded = await loadInvitation(token);
+		invitation = loaded.invitation;
+		tokenHash = loaded.tokenHash;
 	} catch (error) {
 		console.error('workspace_invitation_setup_lookup_failed', {
 			routeName: 'workspace_invitation_setup',
-			message: error instanceof Error ? error.message : 'Invitation lookup failed',
+			message: safeLogMessage(error, 'Invitation lookup failed'),
 		});
 		return redirectToAccept(token, 'failed');
 	}
@@ -100,7 +142,8 @@ export const POST: APIRoute = async ({ request, url }) => {
 	try {
 		const runtimeEnv = env as RuntimeEnv;
 		const adminSupabase = createSupabaseAdminClient(runtimeEnv);
-		const { data: userData, error: userError } = await adminSupabase.auth.admin.getUserById(invitation.auth_user_id);
+		const linkedAuthUserId = await resolveLinkedAuthUserId(adminSupabase, invitation, tokenHash);
+		const { data: userData, error: userError } = await adminSupabase.auth.admin.getUserById(linkedAuthUserId);
 		const authEmail = userData.user?.email;
 		if (userError || !authEmail) throw userError ?? new Error('Linked invitation auth user has no email.');
 
@@ -122,7 +165,7 @@ export const POST: APIRoute = async ({ request, url }) => {
 	} catch (error) {
 		console.error('workspace_invitation_setup_link_failed', {
 			routeName: 'workspace_invitation_setup',
-			message: error instanceof Error ? error.message : 'Invitation setup link failed',
+			message: safeLogMessage(error, 'Invitation setup link failed'),
 		});
 		return redirectToAccept(token, 'setup_unavailable');
 	}
