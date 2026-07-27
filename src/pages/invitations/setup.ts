@@ -121,7 +121,7 @@ async function resolveLinkedAuthUserId(adminSupabase, invitation: InvitationInfo
 	logRepairCandidateLookupCompleted(candidates);
 	const candidate = candidates[0];
 	if (!candidate) return invitation.auth_user_id;
-	if (candidate.has_email_identity) return candidate.current_auth_user_id;
+	if (candidate.has_email_identity && candidate.auth_email_matches_invitation !== false) return candidate.current_auth_user_id;
 
 	const [result] = await provisionWorkspaceInvitationAuthIdentities({
 		adminClient: adminSupabase,
