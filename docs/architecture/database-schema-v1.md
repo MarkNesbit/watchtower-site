@@ -143,15 +143,15 @@ A profile record should be created for each authenticated user.
 
 ## Relationship
 
-One profile maps to one Supabase Auth user.
+One profile maps to one Supabase Auth user through `profiles.auth_user_id`.
 
-`profiles.id` references `auth.users.id`.
+`profiles.id` is the immutable Watchtower profile/person UUID. For historical direct sign-ups it may match the Supabase Auth UUID, but invitation Auth repair can deliberately move sign-in to a different Auth UUID.
 
 ## Fields
 
 | Field           | Type          | Nullable | Default            | Foreign Key     | Description                                                                  |
 | --------------- | ------------- | -------: | ------------------ | --------------- | ---------------------------------------------------------------------------- |
-| `id`            | `uuid`        |       No | None               | `auth.users.id` | Primary key. Same identifier as the Supabase Auth user.                      |
+| `id`            | `uuid`        |       No | None               | None            | Primary key. Immutable Watchtower profile/person UUID.                      |
 | `email`         | `text`        |       No | None               | None            | User email address copied from Supabase Auth for display/search convenience. |
 | `display_name`  | `text`        |       No | Derived from email | None            | User-facing name. Initially generated from the email address.                |
 | `first_name`    | `text`        |      Yes | Safe existing profile derivation where available | None | Nullable future team administration first-name field.                        |
@@ -275,7 +275,7 @@ A workspace may have multiple users.
 | ----------------- | ------------- | -------: | ------------------- | ------------------ | --------------------------------------------------------------------------------------- |
 | `id`              | `uuid`        |       No | `gen_random_uuid()` | None               | Primary key for the membership record.                                                  |
 | `organisation_id` | `uuid`        |       No | None                | `organisations.id` | Workspace the membership belongs to.                                                    |
-| `user_id`         | `uuid`        |       No | None                | `auth.users.id`    | User who is a member of the workspace.                                                  |
+| `user_id`         | `uuid`        |       No | None                | `profiles.id`      | Immutable profile/person UUID for the workspace member.                                |
 | `role`            | `text`        |       No | `member`            | None               | User role within the workspace. Supported values: `owner`, `admin`, `member`, `viewer`. |
 | `status`          | `text`        |       No | `active`            | None               | Membership status. Supported values: `invited`, `invite_expired`, `active`, `suspended`, `deactivated`. |
 | `invited_by`      | `uuid`        |      Yes | `null`              | `auth.users.id`    | User who invited this member. Null for automatically created owner membership.          |
@@ -300,7 +300,7 @@ A workspace may have multiple users.
 
 * `id` is the primary key.
 * `organisation_id` references `organisations.id`.
-* `user_id` references `auth.users.id`.
+* `user_id` references `profiles.id`.
 * `role` must be one of: `owner`, `admin`, `member`, `viewer`.
 * `status` must be one of: `invited`, `invite_expired`, `active`, `suspended`, `deactivated`.
 * A user should not have duplicate membership records for the same organisation.
@@ -412,7 +412,7 @@ WT-008 RPCs are:
 - `get_workspace_membership_invitation_by_token` validates the token hash before returning safe public invitation details and marks delivered links opened.
 - `accept_workspace_membership_invitation` transactionally marks the invitation accepted and moves the linked membership to `active` only for the correct signed-in auth user, preserving the approved role.
 - `workspace_invitation_identityless_auth_user_report` identifies current invited memberships whose invitation Auth user has email populated in `auth.users` but no email identity in `auth.identities`. It returns UUIDs, statuses and email domain only for service-role diagnostics.
-- `get_workspace_invitation_auth_identity_repair_candidates` and `record_workspace_invitation_auth_identity_repair` support service-role-only, idempotent remediation. The application uses Supabase Auth Admin to create a valid email identity and the database transaction remaps explicit `auth_user_id` columns on `profiles`, `organisation_members` and the current invitation without changing profile UUID, membership UUID, role or membership status.
+- `get_workspace_invitation_auth_identity_repair_candidates`, `record_workspace_invitation_auth_identity_repair` and `verify_workspace_invitation_auth_placeholder_release` support service-role-only, idempotent remediation. The application uses Supabase Auth Admin to create a valid email identity and the database transaction remaps explicit `auth_user_id` columns on `profiles`, `organisation_members` and the current invitation without changing profile UUID, membership UUID, role or membership status. The placeholder release verifier must pass before the application hard-deletes a historical identity-less Auth placeholder to free the deterministic invitation alias.
 
 Owner/Admin RLS can read invitation rows for their workspace. Policy rows are restricted database configuration: authenticated workspace users cannot directly select or mutate them, and locked policy rows reject update/delete. Normal authenticated users cannot directly mutate invitation rows; mutation occurs only through the controlled RPCs. `profiles.auth_user_id` and `organisation_members.auth_user_id` are explicit sign-in links and may differ from the immutable Watchtower profile/person UUIDs after invitation Auth repair. Production migration deployment is required before WT-008 can run against a live Supabase project. WT-WORKSPACE-TEAM-008A production email delivery uses Resend from the Cloudflare Worker with `WATCHTOWER_EMAIL_PROVIDER=resend`, `WATCHTOWER_RESEND_API_KEY`, `WATCHTOWER_EMAIL_FROM_NAME`, `WATCHTOWER_EMAIL_FROM_ADDRESS`, optional `WATCHTOWER_INVITATION_REPLY_TO` and `WATCHTOWER_SITE_URL=https://watch-tower.co.uk`; provider DNS verification for SPF/DKIM/DMARC remains an operational requirement outside the database migration.
 
