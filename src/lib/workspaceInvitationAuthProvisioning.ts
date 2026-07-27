@@ -57,6 +57,45 @@ function quarantineEmailFor(candidate: WorkspaceInvitationAuthIdentityRepairCand
 	return `invitation-auth-orphan+${compactAuthUserId}@pending.watchtower.invalid`;
 }
 
+function repairLogContext(candidate: WorkspaceInvitationAuthIdentityRepairCandidate) {
+	return {
+		profileId: candidate.profile_id,
+		membershipId: candidate.membership_id,
+		invitationId: candidate.invitation_id,
+		oldAuthUserId: candidate.current_auth_user_id,
+	};
+}
+
+function logRepairStarted(candidate: WorkspaceInvitationAuthIdentityRepairCandidate) {
+	console.info('auth_identity_repair_started', repairLogContext(candidate));
+}
+
+function logRepairCompleted(
+	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
+	newAuthUserId: string,
+	outcome: WorkspaceInvitationAuthIdentityRepairResult['status'],
+) {
+	console.info('auth_identity_repair_completed', {
+		...repairLogContext(candidate),
+		newAuthUserId,
+		outcome,
+	});
+}
+
+function logRepairFailed(
+	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
+	stage: string,
+	failureCode = WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE,
+) {
+	console.error('auth_identity_repair_failed', {
+		failureCode,
+		stage,
+		profileId: candidate.profile_id,
+		membershipId: candidate.membership_id,
+		invitationId: candidate.invitation_id,
+	});
+}
+
 async function recordRepair(
 	client: SupabaseAdminClient,
 	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
@@ -97,8 +136,11 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 			continue;
 		}
 
+		let repairStage = 'started';
+		logRepairStarted(candidate);
 		try {
 			if (candidate.existing_valid_auth_user_id) {
+				repairStage = 'record_existing_valid_user_remap';
 				await recordRepair(
 					input.adminClient,
 					candidate,
@@ -113,10 +155,12 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 					authUserId: candidate.existing_valid_auth_user_id,
 					status: 'remapped_existing_user',
 				});
+				logRepairCompleted(candidate, candidate.existing_valid_auth_user_id, 'remapped_existing_user');
 				continue;
 			}
 
 			const quarantineEmail = quarantineEmailFor(candidate);
+			repairStage = 'quarantine_placeholder_auth_user';
 			const { error: quarantineError } = await input.adminClient.auth.admin.updateUserById(
 				candidate.current_auth_user_id,
 				{
@@ -131,6 +175,7 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 			);
 			if (quarantineError) throw quarantineError;
 
+			repairStage = 'create_valid_auth_user';
 			const { data, error: createError } = await input.adminClient.auth.admin.createUser({
 				email: candidate.auth_email,
 				email_confirm: false,
@@ -149,6 +194,7 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 			const authUserId = data?.user?.id;
 			if (!authUserId) throw new Error('Supabase Auth Admin did not return a user id.');
 
+			repairStage = 'record_created_user_remap';
 			await recordRepair(input.adminClient, candidate, authUserId, 'remapped_created_user', correlationId);
 			results.push({
 				invitationId: candidate.invitation_id,
@@ -157,9 +203,12 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 				authUserId,
 				status: 'remapped_created_user',
 			});
+			logRepairCompleted(candidate, authUserId, 'remapped_created_user');
 		} catch (error) {
 			const failureMessage = safeFailureMessage(error, 'Invitation Auth identity could not be provisioned.');
+			logRepairFailed(candidate, repairStage);
 			try {
+				repairStage = 'record_repair_failure';
 				await recordRepair(
 					input.adminClient,
 					candidate,

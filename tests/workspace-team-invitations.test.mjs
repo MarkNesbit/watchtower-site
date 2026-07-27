@@ -92,6 +92,21 @@ function internalPolicySeedOutcome(totalOrganisationCount, internalOrganisationC
 	return 'seed';
 }
 
+async function captureConsole(callback) {
+	const originalInfo = console.info;
+	const originalError = console.error;
+	const entries = [];
+	console.info = (...args) => entries.push(['info', ...args]);
+	console.error = (...args) => entries.push(['error', ...args]);
+	try {
+		const result = await callback(entries);
+		return { entries, result };
+	} finally {
+		console.info = originalInfo;
+		console.error = originalError;
+	}
+}
+
 test('Production-applied WT-008 invitation migration remains unchanged', async () => {
 	const sql = await readFile(migrationUrl, 'utf8');
 	const hash = createHash('sha256').update(sql).digest('hex');
@@ -584,11 +599,12 @@ test('Workspace invitation Auth provisioning helper uses Supabase Admin without 
 		existing_valid_auth_user_id: null,
 	};
 
-	const [result] = await provisionWorkspaceInvitationAuthIdentities({
+	const { result: helperResults } = await captureConsole(() => provisionWorkspaceInvitationAuthIdentities({
 		adminClient: client,
 		candidates: [candidate],
 		correlationId: '66666666-6666-4666-8666-666666666666',
-	});
+	}));
+	const [result] = helperResults;
 
 	assert.equal(result.status, 'remapped_created_user');
 	assert.equal(result.profileId, candidate.profile_id);
@@ -616,6 +632,60 @@ test('Workspace invitation Auth provisioning helper uses Supabase Admin without 
 	assert.equal(calls[2][2].p_old_auth_user_id, candidate.current_auth_user_id);
 	assert.equal(calls[2][2].p_new_auth_user_id, '99999999-9999-4999-8999-999999999999');
 	assert.equal(calls[2][2].p_correlation_id, '66666666-6666-4666-8666-666666666666');
+});
+
+test('Workspace invitation Auth provisioning logs safe repair lifecycle diagnostics', async () => {
+	const client = {
+		auth: {
+			admin: {
+				async updateUserById() {
+					return { data: {}, error: null };
+				},
+				async createUser() {
+					return { data: { user: { id: '99999999-9999-4999-8999-999999999999' } }, error: null };
+				},
+			},
+		},
+		async rpc() {
+			return { data: 'repair-id', error: null };
+		},
+	};
+	const candidate = {
+		invitation_id: '11111111-1111-4111-8111-111111111111',
+		organisation_id: '22222222-2222-4222-8222-222222222222',
+		membership_id: '33333333-3333-4333-8333-333333333333',
+		profile_id: '44444444-4444-4444-8444-444444444444',
+		current_auth_user_id: '55555555-5555-4555-8555-555555555555',
+		auth_email: 'mark.nesbit.professional+wt.ruby.atkinson.444444444444@gmail.com',
+		membership_status: 'invited',
+		invitation_status: 'pending_delivery',
+		has_email_identity: false,
+		existing_valid_auth_user_id: null,
+	};
+
+	const { entries } = await captureConsole(() => provisionWorkspaceInvitationAuthIdentities({
+		adminClient: client,
+		candidates: [candidate],
+		correlationId: '66666666-6666-4666-8666-666666666666',
+	}));
+
+	assert.deepEqual(entries, [
+		['info', 'auth_identity_repair_started', {
+			profileId: candidate.profile_id,
+			membershipId: candidate.membership_id,
+			invitationId: candidate.invitation_id,
+			oldAuthUserId: candidate.current_auth_user_id,
+		}],
+		['info', 'auth_identity_repair_completed', {
+			profileId: candidate.profile_id,
+			membershipId: candidate.membership_id,
+			invitationId: candidate.invitation_id,
+			oldAuthUserId: candidate.current_auth_user_id,
+			newAuthUserId: '99999999-9999-4999-8999-999999999999',
+			outcome: 'remapped_created_user',
+		}],
+	]);
+	assert.doesNotMatch(JSON.stringify(entries), /mark\.nesbit\.professional|ruby\.atkinson|gmail\.com|token|password|action_link|https?:\/\//i);
 });
 
 test('Workspace invitation Auth provisioning helper is idempotent for existing valid users and redacts failures', async () => {
@@ -651,11 +721,11 @@ test('Workspace invitation Auth provisioning helper is idempotent for existing v
 		},
 	};
 
-	const results = await provisionWorkspaceInvitationAuthIdentities({
+	const { result: results } = await captureConsole(() => provisionWorkspaceInvitationAuthIdentities({
 		adminClient: client,
 		candidates: [existingValidCandidate, failingCandidate],
 		correlationId: '88888888-8888-4888-8888-888888888888',
-	});
+	}));
 
 	assert.equal(results[0].status, 'valid_existing');
 	assert.equal(results[0].authUserId, existingValidCandidate.current_auth_user_id);
@@ -665,6 +735,60 @@ test('Workspace invitation Auth provisioning helper is idempotent for existing v
 	assert.equal(calls.filter((call) => call[0] === 'updateUserById').length, 1);
 	assert.equal(calls.filter((call) => call[0] === 'rpc').length, 1);
 	assert.equal(calls.find((call) => call[0] === 'rpc')[2].p_outcome, 'failed');
+});
+
+test('Workspace invitation Auth provisioning logs safe failure stage without raw provider details', async () => {
+	const failingCandidate = {
+		invitation_id: '77777777-7777-4777-8777-777777777777',
+		organisation_id: '22222222-2222-4222-8222-222222222222',
+		membership_id: '33333333-3333-4333-8333-333333333333',
+		profile_id: '44444444-4444-4444-8444-444444444444',
+		current_auth_user_id: '55555555-5555-4555-8555-555555555555',
+		auth_email: 'secret@example.test',
+		membership_status: 'invited',
+		invitation_status: 'delivery_failed',
+		has_email_identity: false,
+		existing_valid_auth_user_id: null,
+	};
+	const client = {
+		auth: {
+			admin: {
+				async updateUserById() {
+					return { data: null, error: new Error('User secret@example.test failed with token https://example.test/action') };
+				},
+				async createUser() {
+					throw new Error('createUser should not run after quarantine failure');
+				},
+			},
+		},
+		async rpc() {
+			return { data: 'repair-id', error: null };
+		},
+	};
+
+	const { entries, result } = await captureConsole(() => provisionWorkspaceInvitationAuthIdentities({
+		adminClient: client,
+		candidates: [failingCandidate],
+		correlationId: '88888888-8888-4888-8888-888888888888',
+	}));
+
+	assert.equal(result[0].status, 'failed');
+	assert.deepEqual(entries, [
+		['info', 'auth_identity_repair_started', {
+			profileId: failingCandidate.profile_id,
+			membershipId: failingCandidate.membership_id,
+			invitationId: failingCandidate.invitation_id,
+			oldAuthUserId: failingCandidate.current_auth_user_id,
+		}],
+		['error', 'auth_identity_repair_failed', {
+			failureCode: WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE,
+			stage: 'quarantine_placeholder_auth_user',
+			profileId: failingCandidate.profile_id,
+			membershipId: failingCandidate.membership_id,
+			invitationId: failingCandidate.invitation_id,
+		}],
+	]);
+	assert.doesNotMatch(JSON.stringify(entries), /secret@example\.test|example\.test\/action|token|password|authorization|re_[a-z0-9_-]+/i);
 });
 
 test('Workspace invitation send and setup routes repair Auth identity before delivery and recovery', async () => {
@@ -685,6 +809,25 @@ test('Workspace invitation send and setup routes repair Auth identity before del
 	assert.match(setupRoute, /auth\.admin\.generateLink\(\{/);
 	assert.doesNotMatch(route, /insert into auth\.identities|auth_email|contact_email|console\.log\(.*token|rawToken.*console/i);
 	assert.doesNotMatch(setupRoute, /insert into auth\.identities|formData\.get\('auth_user_id'\)|formData\.get\('email'\)|contact_email|login_name/);
+});
+
+test('Workspace invitation setup route logs candidate lookup and stage-specific setup failures safely', async () => {
+	const setupRoute = await readFile(setupRouteUrl, 'utf8');
+
+	assert.match(setupRoute, /repair_candidate_lookup_completed/);
+	assert.match(setupRoute, /candidateFound: Boolean\(candidate\)/);
+	assert.match(setupRoute, /candidateCount: candidates\.length/);
+	assert.match(setupRoute, /membershipId: candidate\?\.membership_id \?\? null/);
+	assert.match(setupRoute, /invitationId: candidate\?\.invitation_id \?\? null/);
+	assert.match(setupRoute, /currentAuthUserId: candidate\?\.current_auth_user_id \?\? null/);
+	assert.match(setupRoute, /hasEmailIdentity: candidate\?\.has_email_identity \?\? null/);
+	assert.match(setupRoute, /let setupStage = 'auth_identity_repair'/);
+	assert.match(setupRoute, /setupStage = 'get_user_by_id'[\s\S]*auth\.admin\.getUserById\(linkedAuthUserId\)/);
+	assert.match(setupRoute, /setupStage = 'generate_link'[\s\S]*auth\.admin\.generateLink\(\{/);
+	assert.match(setupRoute, /setupStage = 'validate_action_link'[\s\S]*safeSupabaseActionLink/);
+	assert.match(setupRoute, /stage: setupStage/);
+	assert.match(setupRoute, /safeLogMessage\(error, 'Invitation setup link failed'\)/);
+	assert.doesNotMatch(setupRoute, /console\.(?:info|warn|error)\([^)]*(?:tokenHash|token|authEmail|actionLink|email: authEmail)/i);
 });
 
 test('Workspace invitation retry uses a fresh retry key while preserving send and bulk idempotency', async () => {

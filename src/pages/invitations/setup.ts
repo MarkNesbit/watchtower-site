@@ -84,6 +84,19 @@ function watchtowerReturnOrigin(runtimeEnv: RuntimeEnv, requestOrigin: string) {
 	}
 }
 
+function logRepairCandidateLookupCompleted(candidates: WorkspaceInvitationAuthIdentityRepairCandidate[]) {
+	const candidate = candidates[0];
+	console.info('repair_candidate_lookup_completed', {
+		routeName: 'workspace_invitation_setup',
+		candidateFound: Boolean(candidate),
+		candidateCount: candidates.length,
+		membershipId: candidate?.membership_id ?? null,
+		invitationId: candidate?.invitation_id ?? null,
+		currentAuthUserId: candidate?.current_auth_user_id ?? null,
+		hasEmailIdentity: candidate?.has_email_identity ?? null,
+	});
+}
+
 async function loadInvitation(token: string) {
 	const tokenHash = await hashInvitationToken(token);
 	const { data, error } = await createSupabaseServerClient().rpc('get_workspace_membership_invitation_by_token', {
@@ -105,6 +118,7 @@ async function resolveLinkedAuthUserId(adminSupabase, invitation: InvitationInfo
 	if (error) throw error;
 
 	const candidates = (data ?? []) as WorkspaceInvitationAuthIdentityRepairCandidate[];
+	logRepairCandidateLookupCompleted(candidates);
 	const candidate = candidates[0];
 	if (!candidate) return invitation.auth_user_id;
 	if (candidate.has_email_identity) return candidate.current_auth_user_id;
@@ -139,14 +153,17 @@ export const POST: APIRoute = async ({ request, url }) => {
 	}
 	if (!invitation) return redirectToAccept(token, 'invalid');
 
+	let setupStage = 'auth_identity_repair';
 	try {
 		const runtimeEnv = env as RuntimeEnv;
 		const adminSupabase = createSupabaseAdminClient(runtimeEnv);
 		const linkedAuthUserId = await resolveLinkedAuthUserId(adminSupabase, invitation, tokenHash);
+		setupStage = 'get_user_by_id';
 		const { data: userData, error: userError } = await adminSupabase.auth.admin.getUserById(linkedAuthUserId);
 		const authEmail = userData.user?.email;
 		if (userError || !authEmail) throw userError ?? new Error('Linked invitation auth user has no email.');
 
+		setupStage = 'generate_link';
 		const { data: linkData, error: linkError } = await adminSupabase.auth.admin.generateLink({
 			type: 'recovery',
 			email: authEmail,
@@ -156,6 +173,7 @@ export const POST: APIRoute = async ({ request, url }) => {
 		});
 		if (linkError) throw linkError;
 
+		setupStage = 'validate_action_link';
 		const actionLink = safeSupabaseActionLink(linkData.properties?.action_link, runtimeEnv);
 		if (!actionLink) throw new Error('Supabase setup link could not be validated.');
 
@@ -165,6 +183,7 @@ export const POST: APIRoute = async ({ request, url }) => {
 	} catch (error) {
 		console.error('workspace_invitation_setup_link_failed', {
 			routeName: 'workspace_invitation_setup',
+			stage: setupStage,
 			message: safeLogMessage(error, 'Invitation setup link failed'),
 		});
 		return redirectToAccept(token, 'setup_unavailable');
