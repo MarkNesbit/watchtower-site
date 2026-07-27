@@ -3,11 +3,22 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env?.PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env?.PUBLIC_SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = import.meta.env?.SUPABASE_SERVICE_ROLE_KEY;
 export const SESSION_EXPIRED_MESSAGE = 'Your session has expired. Please sign in again to continue.';
 
 function requirePublicEnv(name: string, value: string | undefined): string {
 	if (value && value.trim().length > 0) return value;
 	throw new Error(`Missing required Supabase environment variable: ${name}.`);
+}
+
+function runtimeString(env: Record<string, unknown> | undefined, name: string, fallback: string | undefined): string | undefined {
+	const value = env?.[name];
+	return typeof value === 'string' ? value : fallback;
+}
+
+function requireSecretEnv(name: string, value: string | undefined): string {
+	if (value && value.trim().length > 0) return value;
+	throw new Error(`Missing required Supabase server secret: ${name}.`);
 }
 
 export function getServerAccessToken(cookies: AstroCookies): string | undefined {
@@ -47,6 +58,20 @@ export function createSupabaseServerClient(accessToken?: string) {
 					},
 				}
 				: undefined,
+		},
+	);
+}
+
+export function createSupabaseAdminClient(env?: Record<string, unknown>) {
+	return createClient(
+		requirePublicEnv('PUBLIC_SUPABASE_URL', runtimeString(env, 'PUBLIC_SUPABASE_URL', supabaseUrl)),
+		requireSecretEnv('SUPABASE_SERVICE_ROLE_KEY', runtimeString(env, 'SUPABASE_SERVICE_ROLE_KEY', supabaseServiceRoleKey)),
+		{
+			auth: {
+				autoRefreshToken: false,
+				detectSessionInUrl: false,
+				persistSession: false,
+			},
 		},
 	);
 }

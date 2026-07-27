@@ -1,7 +1,13 @@
 ---
 import AuthLayout from '../../layouts/AuthLayout.astro';
 import { createSupabaseServerClient, getServerAccessToken } from '../../lib/supabaseServer.ts';
-import { hashInvitationToken } from '../../lib/workspaceInvitations.ts';
+import {
+	buildWorkspaceInvitationAcceptRelativePath,
+	buildWorkspaceInvitationLoginPath,
+	buildWorkspaceInvitationSetupPath,
+	hashInvitationToken,
+	isWorkspaceInvitationToken,
+} from '../../lib/workspaceInvitations.ts';
 import { workspaceRoleLabel } from '../../lib/workspaceTeam.ts';
 
 Astro.response.headers.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
@@ -29,25 +35,40 @@ const success = String(Astro.url.searchParams.get('accepted') ?? '') === 'true';
 let invitation: InvitationInfo | null = null;
 let loadError = '';
 let acceptedWorkspacePath = '';
+let accountState: 'signed_out' | 'matching' | 'wrong_account' | 'unavailable' = 'unavailable';
 
 const formatDateTime = (value: string | null) => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
 	: 'Not available';
 
 const errorMessage = ({
-	signin: 'Sign in as the account linked to this invitation, then return to this link.',
-	wrong_account: 'This invitation belongs to another account. Sign out and use the invited account.',
+	signin: 'Set up or sign in to the account created for this invitation before accepting it.',
+	wrong_account: 'You are currently signed in with a different Watchtower account. Sign out to continue as the invited person.',
 	invalid: 'This invitation link is invalid, expired, cancelled or has already been used.',
-	provider_required: 'Account setup links require the configured Supabase invitation email provider before password setup can be completed.',
+	setup_unavailable: 'Account setup is not available right now. Ask the workspace Owner to retry the invitation, then use the latest link.',
 	failed: 'Invitation acceptance could not be completed. Try again, or ask the workspace Owner to resend the invitation.',
 } as Record<string, string>)[errorCode] ?? '';
 
-if (!token || !/^[a-f0-9]{64}$/i.test(token)) {
+async function currentAuthUserId() {
+	const accessToken = getServerAccessToken(Astro.cookies);
+	if (!accessToken) return null;
+
+	try {
+		const serverSupabase = createSupabaseServerClient(accessToken);
+		const { data, error } = await serverSupabase.auth.getUser();
+		if (error) return null;
+		return data.user?.id ?? null;
+	} catch {
+		return null;
+	}
+}
+
+if (!isWorkspaceInvitationToken(token)) {
 	loadError = 'This invitation link is invalid or incomplete.';
 } else if (Astro.request.method === 'POST') {
 	const accessToken = getServerAccessToken(Astro.cookies);
 	if (!accessToken) {
-		return Astro.redirect(`/invitations/accept?token=${encodeURIComponent(token)}&error=signin`, 303);
+		return Astro.redirect(`${buildWorkspaceInvitationAcceptRelativePath(token)}&error=signin`, 303);
 	}
 	const serverSupabase = createSupabaseServerClient(accessToken);
 	const tokenHash = await hashInvitationToken(token);
@@ -65,7 +86,7 @@ if (!token || !/^[a-f0-9]{64}$/i.test(token)) {
 			: /INVALID|NOT_ACCEPTABLE|EXPIRED|CANCELLED|SUPERSEDED/i.test(text)
 				? 'invalid'
 				: 'failed';
-		return Astro.redirect(`/invitations/accept?token=${encodeURIComponent(token)}&error=${code}`, 303);
+		return Astro.redirect(`${buildWorkspaceInvitationAcceptRelativePath(token)}&error=${code}`, 303);
 	}
 	const slug = currentInvitation?.workspace_slug;
 	return Astro.redirect(slug ? `/app/workspaces/${encodeURIComponent(slug)}/team?invitation_acceptance=success` : '/app?invitation_acceptance=success', 303);
@@ -80,6 +101,14 @@ if (!token || !/^[a-f0-9]{64}$/i.test(token)) {
 		invitation = Array.isArray(data) ? data[0] as InvitationInfo | null : null;
 		if (!invitation) loadError = 'This invitation link is invalid, expired, cancelled or has already been used.';
 		if (success && invitation?.workspace_slug) acceptedWorkspacePath = `/app/workspaces/${encodeURIComponent(invitation.workspace_slug)}/team`;
+		if (invitation) {
+			const authUserId = await currentAuthUserId();
+			accountState = !authUserId
+				? 'signed_out'
+				: authUserId === invitation.auth_user_id
+					? 'matching'
+					: 'wrong_account';
+		}
 	} catch (error) {
 		console.error('workspace_invitation_acceptance_lookup_failed', {
 			routeName: 'workspace_invitation_acceptance',
@@ -101,73 +130,217 @@ if (!token || !/^[a-f0-9]{64}$/i.test(token)) {
 		) : loadError ? (
 			<>
 				<h1>Invitation unavailable</h1>
-				<p>{loadError}</p>
-				<p><a class="button button--secondary" href="/login">Sign in</a></p>
+				<p class="invitation-accept-card__status">{loadError}</p>
+				<p><a class="button button--secondary" href="/login">Return to sign in</a></p>
 			</>
 		) : invitation ? (
 			<>
 				<h1>Accept workspace invitation</h1>
-				{errorMessage && <p class="invitation-accept-card__error" role="alert">{errorMessage}</p>}
-				<div class="invitation-accept-card__summary" aria-label="Invitation details">
-					<span><strong>Workspace</strong>{invitation.workspace_name}</span>
-					<span><strong>Invited person</strong>{invitation.person_name}</span>
-					<span><strong>Login</strong>{invitation.login_name ?? 'Linked account'}</span>
-					<span><strong>Role</strong>{workspaceRoleLabel(invitation.intended_role)}</span>
-					<span><strong>Expires</strong>{formatDateTime(invitation.expires_at)}</span>
-				</div>
-				<form method="post" action={`/invitations/accept?token=${encodeURIComponent(token)}`}>
-					<button class="button button--primary" type="submit">Accept invitation</button>
-				</form>
-				<p class="invitation-accept-card__note">Password setup is completed through the secure provider invitation email. If you are signed in as a different account, sign out before accepting.</p>
-				<p><a class="button button--secondary" href="/login">Sign in with invited account</a></p>
+				{errorMessage && <p class="invitation-accept-card__error" role="alert" aria-live="assertive"><strong>Action needed.</strong> {errorMessage}</p>}
+				<p class="invitation-accept-card__status" id="invitation-account-state">
+					{accountState === 'matching'
+						? 'You are signed in as the invited person. Review the details below before accepting.'
+						: accountState === 'wrong_account'
+							? 'You are currently signed in with a different Watchtower account. Sign out to continue as the invited person.'
+							: 'Set up or sign in to the account created for this invitation before accepting it.'}
+				</p>
+				<dl class="invitation-accept-card__summary" aria-label="Invitation details">
+					<div>
+						<dt>Workspace</dt>
+						<dd>{invitation.workspace_name}</dd>
+					</div>
+					<div>
+						<dt>Invited person</dt>
+						<dd>{invitation.person_name}</dd>
+					</div>
+					<div>
+						<dt>Login</dt>
+						<dd>{invitation.login_name ?? 'Linked account'}</dd>
+					</div>
+					<div>
+						<dt>Role</dt>
+						<dd>{workspaceRoleLabel(invitation.intended_role)}</dd>
+					</div>
+					<div>
+						<dt>Expires</dt>
+						<dd>{formatDateTime(invitation.expires_at)}</dd>
+					</div>
+				</dl>
+				{accountState === 'matching' ? (
+					<form method="post" action={buildWorkspaceInvitationAcceptRelativePath(token)} aria-describedby="invitation-account-state">
+						<button class="button button--primary" type="submit">Accept invitation</button>
+					</form>
+				) : accountState === 'wrong_account' ? (
+					<form method="post" action={buildWorkspaceInvitationSetupPath(token)} data-invitation-sign-out-form aria-describedby="invitation-account-state">
+						<input type="hidden" name="token" value={token} />
+						<button class="button button--primary" type="submit">Sign out and continue with this invitation</button>
+					</form>
+				) : (
+					<div class="invitation-accept-card__actions" aria-describedby="invitation-account-state">
+						<form method="post" action={buildWorkspaceInvitationSetupPath(token)}>
+							<input type="hidden" name="token" value={token} />
+							<button class="button button--primary" type="submit">Set up invited account</button>
+						</form>
+						<a class="button button--secondary" href={buildWorkspaceInvitationLoginPath(token)}>Sign in if already set up</a>
+					</div>
+				)}
+				<p class="invitation-accept-card__note">Workspace access is activated only after the linked invited account is signed in and this invitation is accepted.</p>
 			</>
 		) : null}
 	</section>
 </AuthLayout>
 
+<script>
+	import { supabase } from '../../lib/supabaseClient';
+
+	document.querySelectorAll('[data-invitation-sign-out-form]').forEach((form) => {
+		form.addEventListener('submit', async (event) => {
+			event.preventDefault();
+			await supabase.auth.signOut();
+			document.cookie = 'wt-access-token=; path=/; max-age=0; SameSite=Lax';
+			document.cookie = 'wt-refresh-token=; path=/; max-age=0; SameSite=Lax';
+			if (form instanceof HTMLFormElement) form.submit();
+		});
+	});
+</script>
+
 <style>
+	:global(.auth-page) {
+		align-items: start;
+		padding-block: clamp(2rem, 6vw, 4rem);
+	}
+
 	.invitation-accept-card {
-		inline-size: min(680px, 100%);
+		--accept-bg: #ffffff;
+		--accept-text: #102033;
+		--accept-muted: #475569;
+		--accept-border: #cbd5e1;
+		--accept-panel: #f8fafc;
+		--accept-focus: #0f5f99;
+		--accept-error-bg: #fff1f2;
+		--accept-error-border: #b91c1c;
+		--accept-error-text: #7f1d1d;
+		display: grid;
+		gap: 1rem;
+		inline-size: min(100%, 42rem);
 		margin-inline: auto;
-		padding: 2rem;
-		border: 1px solid var(--color-border, #d9e2ec);
+		padding: clamp(1.25rem, 4vw, 2rem);
+		border: 1px solid var(--accept-border);
 		border-radius: 8px;
-		background: var(--color-surface, #fff);
+		background: var(--accept-bg);
 		box-shadow: 0 16px 42px rgba(15, 23, 42, 0.08);
+		color: var(--accept-text);
+		overflow-wrap: anywhere;
 	}
 
 	.invitation-accept-card h1 {
-		margin-block: 0.35rem 0.75rem;
+		margin: 0;
+		color: var(--accept-text);
+		font-size: clamp(1.75rem, 4vw, 2.4rem);
+		line-height: 1.15;
+		letter-spacing: 0;
+	}
+
+	.invitation-accept-card p {
+		margin: 0;
+		color: var(--accept-text);
+	}
+
+	.invitation-accept-card .eyebrow {
+		color: #155e75;
 	}
 
 	.invitation-accept-card__summary {
 		display: grid;
-		gap: 0.75rem;
-		margin-block: 1.25rem;
+		gap: 0;
+		margin: 0;
+		border: 1px solid var(--accept-border);
+		border-radius: 8px;
+		background: var(--accept-panel);
 	}
 
-	.invitation-accept-card__summary span {
+	.invitation-accept-card__summary div {
 		display: grid;
-		gap: 0.15rem;
-		padding-block-end: 0.75rem;
-		border-block-end: 1px solid var(--color-border, #d9e2ec);
+		gap: 0.25rem;
+		padding: 0.85rem 1rem;
+		border-block-end: 1px solid var(--accept-border);
 	}
 
-	.invitation-accept-card__summary strong {
-		color: var(--color-muted, #526070);
+	.invitation-accept-card__summary div:last-child {
+		border-block-end: 0;
+	}
+
+	.invitation-accept-card__summary dt {
+		color: var(--accept-muted);
 		font-size: 0.82rem;
+		font-weight: 700;
+	}
+
+	.invitation-accept-card__summary dd {
+		margin: 0;
+		color: var(--accept-text);
+		font-weight: 700;
+	}
+
+	.invitation-accept-card__status,
+	.invitation-accept-card__note {
+		color: var(--accept-muted);
+		line-height: 1.6;
 	}
 
 	.invitation-accept-card__error {
-		padding: 0.75rem;
-		border: 1px solid #f6b6b6;
+		padding: 0.85rem 1rem;
+		border: 1px solid var(--accept-error-border);
 		border-radius: 8px;
-		background: #fff1f1;
-		color: #8f1d1d;
+		background: var(--accept-error-bg);
+		color: var(--accept-error-text);
+		line-height: 1.5;
 	}
 
-	.invitation-accept-card__note {
-		margin-block-start: 1rem;
-		color: var(--color-muted, #526070);
+	.invitation-accept-card__error strong {
+		color: inherit;
+	}
+
+	.invitation-accept-card__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.75rem;
+		align-items: center;
+	}
+
+	.invitation-accept-card .button {
+		min-height: 44px;
+		border-radius: 8px;
+		justify-content: center;
+		text-align: center;
+	}
+
+	.invitation-accept-card .button:focus-visible,
+	.invitation-accept-card a:focus-visible {
+		outline: 3px solid var(--accept-focus);
+		outline-offset: 3px;
+	}
+
+	.invitation-accept-card .button--secondary {
+		border-color: #64748b;
+		background: #ffffff;
+		color: var(--accept-text);
+		box-shadow: none;
+	}
+
+	.invitation-accept-card .button--secondary:hover,
+	.invitation-accept-card .button--secondary:focus-visible {
+		border-color: var(--accept-focus);
+		background: #e0f2fe;
+		color: var(--accept-text);
+	}
+
+	@media (max-width: 34rem) {
+		.invitation-accept-card__actions,
+		.invitation-accept-card__actions form,
+		.invitation-accept-card__actions .button,
+		.invitation-accept-card form .button {
+			inline-size: 100%;
+		}
 	}
 </style>
