@@ -2,7 +2,12 @@ import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { buildWorkspaceTeamPath, getWorkspaceBySlug } from '../../../../../../lib/projects.ts';
 import { isWorkspaceRole } from '../../../../../../lib/permissions.ts';
-import { createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer.ts';
+import { createSupabaseAdminClient, createSupabaseServerClient, getServerAccessToken } from '../../../../../../lib/supabaseServer.ts';
+import {
+	WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE,
+	provisionWorkspaceInvitationAuthIdentities,
+	type WorkspaceInvitationAuthIdentityRepairCandidate,
+} from '../../../../../../lib/workspaceInvitationAuthProvisioning.ts';
 import {
 	sendWorkspaceInvitationEmail,
 	workspaceInvitationEmailConfigDiagnostics,
@@ -68,6 +73,17 @@ function personName(row: DirectoryRow) {
 	return fullName || row.display_name || row.login_name || 'Workspace user';
 }
 
+function safeLogMessage(error: SupabaseError | Error | unknown, fallback = 'Invitation delivery operation failed') {
+	const supabaseError = error as SupabaseError;
+	const message = error instanceof Error ? error.message : supabaseError?.message ?? fallback;
+	return String(message)
+		.replace(/https?:\/\/\S+/gi, '[redacted-link]')
+		.replace(/[^\s@]+@[^\s@]+/g, '[redacted-email]')
+		.replace(/re_[a-z0-9_-]+/gi, '[redacted-secret]')
+		.replace(/\b(?:token|password|authorization)\b/gi, '[redacted]')
+		.slice(0, 240) || fallback;
+}
+
 function logInvitationDeliveryOperationError(eventName: string, workspaceId: string, invitationId: string | null, error: SupabaseError | Error | unknown) {
 	const supabaseError = error as SupabaseError;
 	console.error(eventName, {
@@ -75,9 +91,9 @@ function logInvitationDeliveryOperationError(eventName: string, workspaceId: str
 		workspaceId,
 		invitationId,
 		code: supabaseError?.code,
-		message: error instanceof Error ? error.message : supabaseError?.message,
-		details: supabaseError?.details,
-		hint: supabaseError?.hint,
+		message: safeLogMessage(error),
+		details: supabaseError?.details ? safeLogMessage(supabaseError.details, 'Invitation delivery detail redacted') : undefined,
+		hint: supabaseError?.hint ? safeLogMessage(supabaseError.hint, 'Invitation delivery hint redacted') : undefined,
 	});
 }
 
@@ -167,15 +183,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 			p_invitation_id: invitationId,
 		});
 		if (error) {
-			console.error('workspace_team_invitation_cancel_failed', {
-				routeName: 'workspace_team_invitation_send',
-				workspaceId: organisation.id,
-				invitationId,
-				code: error.code,
-				message: error.message,
-				details: error.details,
-				hint: error.hint,
-			});
+			logInvitationDeliveryOperationError('workspace_team_invitation_cancel_failed', organisation.id, invitationId, error);
 			return redirectToTeam(workspaceSlug, {
 				invitation_delivery: 'error',
 				invitation_delivery_error: invitationErrorCode(error),
@@ -212,15 +220,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 	});
 
 	if (error) {
-		console.error('workspace_team_invitation_prepare_failed', {
-			routeName: 'workspace_team_invitation_send',
-			workspaceId: organisation.id,
-			action: requestedAction,
-			code: error.code,
-			message: error.message,
-			details: error.details,
-			hint: error.hint,
-		});
+		logInvitationDeliveryOperationError('workspace_team_invitation_prepare_failed', organisation.id, null, error);
 		return redirectToTeam(workspaceSlug, {
 			invitation_delivery: 'error',
 			invitation_delivery_error: invitationErrorCode(error),
@@ -228,7 +228,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 	}
 
 	const prepared = (data ?? []) as PreparedInvitation[];
-	const deliverable = prepared.filter((invitation) => invitation.status === 'pending_delivery');
+	let deliverable = prepared.filter((invitation) => invitation.status === 'pending_delivery');
 	const deliveryResults: InvitationDeliveryResult[] = prepared
 		.filter((invitation) => invitation.status === 'delivery_failed')
 		.map((invitation) => ({
@@ -239,6 +239,58 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 			failureMessage: invitation.failure_message ?? 'Invitation could not be prepared.',
 		}));
 
+	if (deliverable.length > 0) {
+		const adminSupabase = createSupabaseAdminClient(invitationDeliveryEnv as Record<string, unknown>);
+		let candidates: WorkspaceInvitationAuthIdentityRepairCandidate[] = [];
+		try {
+			const { data: candidateData, error: candidateError } = await adminSupabase.rpc('get_workspace_invitation_auth_identity_repair_candidates', {
+				p_invitation_ids: deliverable.map((invitation) => invitation.invitation_id),
+				p_membership_ids: null,
+				p_token_hash: null,
+			});
+			if (candidateError) throw candidateError;
+			candidates = (candidateData ?? []) as WorkspaceInvitationAuthIdentityRepairCandidate[];
+		} catch (error) {
+			logInvitationDeliveryOperationError('workspace_team_invitation_auth_identity_candidates_failed', organisation.id, null, error);
+			return redirectToTeam(workspaceSlug, {
+				invitation_delivery: 'error',
+				invitation_delivery_error: 'failed',
+			});
+		}
+
+		const identityResults = await provisionWorkspaceInvitationAuthIdentities({
+			adminClient: adminSupabase,
+			candidates,
+		});
+		const failedIdentityResults = new Map(
+			identityResults
+				.filter((result) => result.status === 'failed')
+				.map((result) => [result.invitationId, result]),
+		);
+		for (const invitation of deliverable) {
+			const failedIdentity = failedIdentityResults.get(invitation.invitation_id);
+			if (!failedIdentity) continue;
+			const result: InvitationDeliveryResult = {
+				invitationId: invitation.invitation_id,
+				membershipId: invitation.membership_id,
+				status: 'delivery_failed',
+				failureCode: failedIdentity.failureCode ?? WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE,
+				failureMessage: 'Invitation account setup could not be completed safely. Retry is available.',
+			};
+			try {
+				await markDeliveryResult(serverSupabase, result);
+			} catch (error) {
+				logInvitationDeliveryOperationError('workspace_team_invitation_delivery_result_record_failed', organisation.id, invitation.invitation_id, error);
+				return redirectToTeam(workspaceSlug, {
+					invitation_delivery: 'error',
+					invitation_delivery_error: 'failed',
+				});
+			}
+			deliveryResults.push(result);
+		}
+		deliverable = deliverable.filter((invitation) => !failedIdentityResults.has(invitation.invitation_id));
+	}
+
 	const { data: directoryData, error: directoryError } = deliverable.length > 0
 		? await serverSupabase
 			.from('workspace_member_admin_directory')
@@ -247,14 +299,7 @@ export const POST: APIRoute = async ({ cookies, params, request, url }) => {
 			.in('organisation_membership_id', deliverable.map((invitation) => invitation.membership_id))
 		: { data: [], error: null };
 	if (directoryError) {
-		console.error('workspace_team_invitation_directory_lookup_failed', {
-			routeName: 'workspace_team_invitation_send',
-			workspaceId: organisation.id,
-			code: directoryError.code,
-			message: directoryError.message,
-			details: directoryError.details,
-			hint: directoryError.hint,
-		});
+		logInvitationDeliveryOperationError('workspace_team_invitation_directory_lookup_failed', organisation.id, null, directoryError);
 	}
 	const directoryByMembership = new Map((directoryData ?? []).map((row: DirectoryRow) => [row.organisation_membership_id, row]));
 	let loggedProviderConfigDiagnostics = false;

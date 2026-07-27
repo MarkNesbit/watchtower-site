@@ -36,6 +36,12 @@ function isConstraintViolation(error: DatabaseError | null, constraintName: stri
 	return [error.message, error.details, error.hint].filter(Boolean).join(' ').includes(constraintName);
 }
 
+function filterSignedInMembership(query, userId: string) {
+	return typeof query.or === 'function'
+		? query.or(`user_id.eq.${userId},auth_user_id.eq.${userId}`)
+		: query.eq('user_id', userId);
+}
+
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
 export const PROJECT_TYPES = ['delivery', 'transformation', 'technology', 'operational', 'compliance', 'other'] as const;
@@ -160,11 +166,11 @@ export async function getCurrentWorkspace(client, accessToken?: string) {
 	const user = userData.user;
 	if (!user) return null;
 
-	const { data, error } = await client
+	const currentWorkspaceQuery = filterSignedInMembership(client
 		.from('organisation_members')
 		.select('role, joined_at, created_at, organisations(id, name, slug)')
-		.eq('status', 'active')
-		.eq('user_id', user.id)
+		.eq('status', 'active'), user.id);
+	const { data, error } = await currentWorkspaceQuery
 		.order('joined_at', { ascending: true, nullsFirst: false })
 		.order('created_at', { ascending: true })
 		.limit(1)
@@ -182,11 +188,11 @@ export async function getWorkspaceBySlug(client, workspaceSlug: string, accessTo
 	const user = userData.user;
 	if (!user) return null;
 
-	const { data, error } = await client
+	const workspaceQuery = filterSignedInMembership(client
 		.from('organisation_members')
 		.select('role, joined_at, created_at, organisations!inner(id, name, slug)')
-		.eq('status', 'active')
-		.eq('user_id', user.id)
+		.eq('status', 'active'), user.id);
+	const { data, error } = await workspaceQuery
 		.eq('organisations.slug', workspaceSlug)
 		.limit(1)
 		.maybeSingle();
@@ -203,11 +209,11 @@ export async function getAccessibleProjectsBySlug(client, projectSlug: string, a
 	const user = userData.user;
 	if (!user) return [];
 
-	const { data: memberships, error: membershipError } = await client
+	const membershipsQuery = filterSignedInMembership(client
 		.from('organisation_members')
 		.select('role, organisations!inner(id, name, slug)')
-		.eq('status', 'active')
-		.eq('user_id', user.id);
+		.eq('status', 'active'), user.id);
+	const { data: memberships, error: membershipError } = await membershipsQuery;
 	if (membershipError) throw membershipError;
 
 	const activeWorkspaces = [];
