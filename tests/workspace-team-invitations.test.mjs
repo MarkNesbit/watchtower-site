@@ -5,6 +5,10 @@ import test from 'node:test';
 import {
 	WORKSPACE_INVITATION_EXPIRY_HOURS,
 	buildWorkspaceInvitationAcceptPath,
+	buildWorkspaceInvitationAcceptRelativePath,
+	buildWorkspaceInvitationLoginPath,
+	buildWorkspaceInvitationResetPasswordPath,
+	buildWorkspaceInvitationSetupPath,
 	generateInvitationToken,
 	hashInvitationToken,
 	invitationDeliveryMode,
@@ -25,14 +29,31 @@ const controlledIdentityMigrationUrl = new URL('../supabase/migrations/202607230
 const outboundEmailMigrationUrl = new URL('../supabase/migrations/20260723001500_workspace_invitation_outbound_email_delivery.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
+const setupRouteUrl = new URL('../src/pages/invitations/setup.ts', import.meta.url);
+const resetPasswordFormUrl = new URL('../src/components/auth/ResetPasswordForm.astro', import.meta.url);
 const teamPageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const docsUrl = new URL('../docs/access-foundation.md', import.meta.url);
 const schemaDocsUrl = new URL('../docs/architecture/database-schema-v1.md', import.meta.url);
 const cloudflareDeploymentDocsUrl = new URL('../docs/cloudflare-workers-deployment.md', import.meta.url);
 const wranglerConfigUrl = new URL('../wrangler.toml', import.meta.url);
 const cloudflareDeployWorkflowUrl = new URL('../.github/workflows/deploy-cloudflare-worker.yml', import.meta.url);
+const envExampleUrl = new URL('../.env.example', import.meta.url);
 const migrationsDir = new URL('../supabase/migrations/', import.meta.url);
 const productionAppliedInvitationMigrationHash = '5b588a7284c4238e18b06f83d91d101790eb19a865e663abfb7e5a8b6133a5c9';
+
+function contrastRatio(foreground, background) {
+	const relativeLuminance = (hex) => {
+		const [, r, g, b] = hex.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i) ?? [];
+		const channels = [r, g, b].map((value) => {
+			const normalised = Number.parseInt(value, 16) / 255;
+			return normalised <= 0.03928 ? normalised / 12.92 : ((normalised + 0.055) / 1.055) ** 2.4;
+		});
+		return (0.2126 * channels[0]) + (0.7152 * channels[1]) + (0.0722 * channels[2]);
+	};
+	const lighter = Math.max(relativeLuminance(foreground), relativeLuminance(background));
+	const darker = Math.min(relativeLuminance(foreground), relativeLuminance(background));
+	return (lighter + 0.05) / (darker + 0.05);
+}
 
 function sqlConstraintValues(sql, constraintName) {
 	const escapedName = constraintName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -86,6 +107,10 @@ test('Workspace Team invitation route helpers and token helpers are opaque and s
 	assert.match(tokenHash, /^[a-f0-9]{64}$/);
 	assert.notEqual(tokenHash, token);
 	assert.equal(buildWorkspaceInvitationAcceptPath(token, 'https://watchtower.example').startsWith('https://watchtower.example/invitations/accept?token='), true);
+	assert.equal(buildWorkspaceInvitationAcceptRelativePath(token), `/invitations/accept?token=${token}`);
+	assert.equal(buildWorkspaceInvitationSetupPath(token), `/invitations/setup?token=${token}`);
+	assert.equal(buildWorkspaceInvitationLoginPath(token), `/login?redirectTo=%2Finvitations%2Faccept%3Ftoken%3D${token}`);
+	assert.equal(buildWorkspaceInvitationResetPasswordPath(token), `/reset-password?returnTo=%2Finvitations%2Faccept%3Ftoken%3D${token}`);
 	assert.equal(WORKSPACE_INVITATION_EXPIRY_HOURS, 72);
 	assert.equal(invitationDeliveryMode(), 'provider_required');
 });
@@ -263,6 +288,7 @@ test('Workspace invitation Cloudflare deployment preserves non-secret email bind
 	const wrangler = await readFile(wranglerConfigUrl, 'utf8');
 	const workflow = await readFile(cloudflareDeployWorkflowUrl, 'utf8');
 	const docs = await readFile(cloudflareDeploymentDocsUrl, 'utf8');
+	const envExample = await readFile(envExampleUrl, 'utf8');
 	const varsBlock = wrangler.match(/\[vars\][\s\S]*?(?=\n\[|$)/)?.[0] ?? '';
 
 	assert.match(workflow, /npx wrangler deploy/);
@@ -271,11 +297,14 @@ test('Workspace invitation Cloudflare deployment preserves non-secret email bind
 	assert.match(varsBlock, /WATCHTOWER_EMAIL_FROM_NAME = "Watchtower"/);
 	assert.match(varsBlock, /WATCHTOWER_INVITATION_REPLY_TO = "mark\.nesbit\.professional@gmail\.com"/);
 	assert.match(varsBlock, /WATCHTOWER_SITE_URL = "https:\/\/watch-tower\.co\.uk"/);
-	assert.doesNotMatch(wrangler, /WATCHTOWER_RESEND_API_KEY|re_[a-z0-9]/i);
+	assert.doesNotMatch(wrangler, /WATCHTOWER_RESEND_API_KEY|SUPABASE_SERVICE_ROLE_KEY|re_[a-z0-9]/i);
 	assert.doesNotMatch(wrangler, /keep_vars\s*=\s*true/i);
 	assert.match(docs, /non-secret Worker variables are committed in `wrangler\.toml` under `\[vars\]`/);
 	assert.match(docs, /`keep_vars` is intentionally not enabled/);
 	assert.match(docs, /`WATCHTOWER_RESEND_API_KEY` as a Worker secret/);
+	assert.match(docs, /`SUPABASE_SERVICE_ROLE_KEY`/);
+	assert.match(docs, /Do not commit it to Wrangler plaintext variables/);
+	assert.match(envExample, /SUPABASE_SERVICE_ROLE_KEY=/);
 });
 
 test('Workspace invitation delivery uses runtime Worker bindings for Resend without browser-controlled origin', async () => {
@@ -612,10 +641,62 @@ test('Workspace invitation acceptance page validates before disclosure and block
 
 	assert.match(page, /get_workspace_membership_invitation_by_token/);
 	assert.match(page, /accept_workspace_membership_invitation/);
+	assert.match(page, /currentAuthUserId/);
+	assert.match(page, /accountState === 'matching'/);
+	assert.match(page, /accountState === 'wrong_account'/);
 	assert.match(page, /This invitation link is invalid, expired, cancelled or has already been used/);
-	assert.match(page, /This invitation belongs to another account/);
-	assert.match(page, /Password setup is completed through the secure provider invitation email/);
+	assert.match(page, /Set up or sign in to the account created for this invitation before accepting it/);
+	assert.match(page, /You are currently signed in with a different Watchtower account/);
+	assert.match(page, /You are signed in as the invited person/);
+	assert.match(page, /Sign out and continue with this invitation/);
+	assert.match(page, /data-invitation-sign-out-form/);
+	assert.match(page, /supabase\.auth\.signOut\(\)/);
+	assert.match(page, /<dl class="invitation-accept-card__summary" aria-label="Invitation details">/);
+	assert.match(page, /<dt>Workspace<\/dt>[\s\S]*<dd>\{invitation\.workspace_name\}<\/dd>/);
+	assert.match(page, /role="alert" aria-live="assertive"/);
+	assert.match(page, /buildWorkspaceInvitationSetupPath\(token\)/);
+	assert.match(page, /buildWorkspaceInvitationLoginPath\(token\)/);
+	assert.doesNotMatch(page, /Password setup is completed through the secure provider invitation email/);
 	assert.doesNotMatch(page, /from\('workspace_membership_invitations'\)\.select|auth\.admin|service_role/i);
+});
+
+test('Workspace invitation acceptance page meets static accessibility guardrails', async () => {
+	const page = await readFile(acceptPageUrl, 'utf8');
+
+	assert.match(page, /font-size: clamp\(1\.75rem, 4vw, 2\.4rem\)/);
+	assert.match(page, /letter-spacing: 0/);
+	assert.match(page, /min-height: 44px/);
+	assert.match(page, /focus-visible/);
+	assert.match(page, /overflow-wrap: anywhere/);
+	assert.match(page, /@media \(max-width: 34rem\)/);
+	assert.match(page, /inline-size: min\(100%, 42rem\)/);
+	assert.ok(contrastRatio('#102033', '#ffffff') >= 4.5, 'main text on white should meet WCAG AA');
+	assert.ok(contrastRatio('#475569', '#ffffff') >= 4.5, 'muted text on white should meet WCAG AA');
+	assert.ok(contrastRatio('#7f1d1d', '#fff1f2') >= 4.5, 'error text should meet WCAG AA');
+	assert.ok(contrastRatio('#00111e', '#39c2ff') >= 4.5, 'primary button text should meet WCAG AA');
+});
+
+test('Workspace invitation setup route generates setup link for exact invited auth user only', async () => {
+	const route = await readFile(setupRouteUrl, 'utf8');
+	const resetForm = await readFile(resetPasswordFormUrl, 'utf8');
+
+	assert.match(route, /import \{ env \} from 'cloudflare:workers'/);
+	assert.match(route, /get_workspace_membership_invitation_by_token/);
+	assert.match(route, /createSupabaseAdminClient\(runtimeEnv\)/);
+	assert.match(route, /auth\.admin\.getUserById\(invitation\.auth_user_id\)/);
+	assert.match(route, /auth\.admin\.generateLink\(\{/);
+	assert.match(route, /type: 'recovery'/);
+	assert.match(route, /buildWorkspaceInvitationResetPasswordPath\(token\)/);
+	assert.match(route, /watchtowerReturnOrigin\(runtimeEnv, url\.origin\)/);
+	assert.match(route, /WATCHTOWER_SITE_URL/);
+	assert.match(route, /safeSupabaseActionLink/);
+	assert.match(route, /clearAuthCookies\(response\.headers\)/);
+	assert.doesNotMatch(route, /formData\.get\('auth_user_id'\)|formData\.get\('email'\)|contact_email|login_name/);
+	assert.doesNotMatch(route, /console\.(?:log|warn|error)\([^)]*(?:token|authEmail|actionLink|email)/i);
+	assert.match(resetForm, /getSafeRedirectPath\(new URLSearchParams\(window\.location\.search\)\.get\('returnTo'\)\)/);
+	assert.match(resetForm, /document\.cookie = `wt-access-token=\$\{session\.access_token\}/);
+	assert.match(resetForm, /window\.location\.assign\(returnTo\)/);
+	assert.doesNotMatch(resetForm, /window\.location\.assign\('\/app'\)/);
 });
 
 test('Workspace invitation UI and documentation describe delivery without activation', async () => {

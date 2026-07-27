@@ -139,6 +139,26 @@ export function buildWorkspaceInvitationAcceptPath(token: string, baseUrl: URL |
 	return url.toString();
 }
 
+export function isWorkspaceInvitationToken(value: unknown): value is string {
+	return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value.trim());
+}
+
+export function buildWorkspaceInvitationAcceptRelativePath(token: string): string {
+	return `/invitations/accept?token=${encodeURIComponent(token)}`;
+}
+
+export function buildWorkspaceInvitationSetupPath(token: string): string {
+	return `/invitations/setup?token=${encodeURIComponent(token)}`;
+}
+
+export function buildWorkspaceInvitationLoginPath(token: string): string {
+	return `/login?redirectTo=${encodeURIComponent(buildWorkspaceInvitationAcceptRelativePath(token))}`;
+}
+
+export function buildWorkspaceInvitationResetPasswordPath(token: string): string {
+	return `/reset-password?returnTo=${encodeURIComponent(buildWorkspaceInvitationAcceptRelativePath(token))}`;
+}
+
 export function generateInvitationToken(): string {
 	const bytes = new Uint8Array(WORKSPACE_INVITATION_TOKEN_BYTES);
 	crypto.getRandomValues(bytes);

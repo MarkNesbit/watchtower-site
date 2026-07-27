@@ -35,6 +35,12 @@ Configure the same Supabase values in the Cloudflare Worker environment:
 
 These are needed at runtime by server-rendered routes.
 
+Configure this Supabase value as a Cloudflare Worker secret:
+
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+This server-only key is required to generate single-use password setup links for pre-created invited accounts. Do not commit it to Wrangler plaintext variables, browser code, or logs.
+
 ## Invitation email delivery
 
 WT-WORKSPACE-TEAM-008A uses Resend through a direct HTTPS request from the Cloudflare Worker. The production sender is:
