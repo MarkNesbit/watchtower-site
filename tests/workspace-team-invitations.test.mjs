@@ -33,6 +33,7 @@ const retryPolicyMigrationUrl = new URL('../supabase/migrations/20260723001300_w
 const controlledIdentityMigrationUrl = new URL('../supabase/migrations/20260723001400_workspace_invitation_controlled_identity_preparation.sql', import.meta.url);
 const outboundEmailMigrationUrl = new URL('../supabase/migrations/20260723001500_workspace_invitation_outbound_email_delivery.sql', import.meta.url);
 const validAuthIdentityMigrationUrl = new URL('../supabase/migrations/20260723001600_workspace_invitation_valid_auth_identity_provisioning.sql', import.meta.url);
+const authRepairRetryStateMigrationUrl = new URL('../supabase/migrations/20260723001700_workspace_invitation_auth_repair_retry_state.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const setupRouteUrl = new URL('../src/pages/invitations/setup.ts', import.meta.url);
@@ -46,6 +47,7 @@ const cloudflareDeployWorkflowUrl = new URL('../.github/workflows/deploy-cloudfl
 const envExampleUrl = new URL('../.env.example', import.meta.url);
 const migrationsDir = new URL('../supabase/migrations/', import.meta.url);
 const productionAppliedInvitationMigrationHash = '5b588a7284c4238e18b06f83d91d101790eb19a865e663abfb7e5a8b6133a5c9';
+const productionAppliedValidAuthIdentityMigrationHash = 'a3a29e25b0c908f7c4beac654954888fcdaffe51db697751e095b8f6dd5723ec';
 
 function contrastRatio(foreground, background) {
 	const relativeLuminance = (hex) => {
@@ -117,6 +119,14 @@ test('Production-applied WT-008 invitation migration remains unchanged', async (
 	assert.doesNotMatch(sql, /workspace_invitation_internal_alias_base_email\(\)/);
 	assert.doesNotMatch(sql, /insert into public\.workspace_invitation_delivery_policies[\s\S]*internal_gmail_alias/);
 	assert.doesNotMatch(sql, /prevent_workspace_invitation_delivery_policy_mutation/);
+});
+
+test('Production-applied WT-008A valid Auth identity migration remains unchanged', async () => {
+	const sql = await readFile(validAuthIdentityMigrationUrl, 'utf8');
+	const hash = createHash('sha256').update(sql).digest('hex');
+
+	assert.equal(hash, productionAppliedValidAuthIdentityMigrationHash);
+	assert.doesNotMatch(sql, /auth_email_matches_invitation|previous_auth_user_id|join auth\.users current_au/);
 });
 
 test('Workspace Team invitation route helpers and token helpers are opaque and stable', async () => {
@@ -219,6 +229,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	const controlledIdentityIndex = files.indexOf('20260723001400_workspace_invitation_controlled_identity_preparation.sql');
 	const outboundEmailIndex = files.indexOf('20260723001500_workspace_invitation_outbound_email_delivery.sql');
 	const validAuthIdentityIndex = files.indexOf('20260723001600_workspace_invitation_valid_auth_identity_provisioning.sql');
+	const authRepairRetryStateIndex = files.indexOf('20260723001700_workspace_invitation_auth_repair_retry_state.sql');
 	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
 	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
 
@@ -228,6 +239,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.equal(controlledIdentityIndex, retryIndex + 1, 'controlled identity migration should follow the retry policy-resolution migration');
 	assert.equal(outboundEmailIndex, controlledIdentityIndex + 1, 'outbound email delivery migration should follow controlled identity preparation');
 	assert.equal(validAuthIdentityIndex, outboundEmailIndex + 1, 'valid Auth identity provisioning migration should follow outbound email delivery');
+	assert.equal(authRepairRetryStateIndex, validAuthIdentityIndex + 1, 'Auth repair retry-state migration should follow valid Auth identity provisioning');
 	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
 	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
@@ -534,12 +546,8 @@ test('Workspace invitation valid Auth identity migration separates profile UUID 
 	assert.match(reportSql, /from auth\.identities identity[\s\S]*identity\.user_id = invitation\.auth_user_id[\s\S]*identity\.provider = 'email'/);
 	assert.match(reportSql, /split_part\(lower\(coalesce\(au\.email, invitation\.auth_email, ''\)\), '@', 2\)/);
 	assert.match(candidateSql, /coalesce\(auth\.role\(\), ''\) <> 'service_role'/);
-	assert.match(candidateSql, /join auth\.users current_au[\s\S]*on current_au\.id = invitation\.auth_user_id/);
-	assert.match(candidateSql, /auth_email_matches_invitation/);
-	assert.match(candidateSql, /lower\(current_au\.email\) = lower\(invitation\.auth_email\) as auth_email_matches_invitation/);
 	assert.match(candidateSql, /existing_valid_auth_user_id/);
-	assert.match(candidateSql, /previous_auth_user_id/);
-	assert.match(candidateSql, /repair\.new_auth_user_id = invitation\.auth_user_id/);
+	assert.doesNotMatch(candidateSql, /auth_email_matches_invitation|previous_auth_user_id|join auth\.users current_au/);
 	assert.match(recordSql, /coalesce\(auth\.role\(\), ''\) <> 'service_role'/);
 	assert.match(recordSql, /not v_new_has_identity[\s\S]*WT_INVITATION_AUTH_IDENTITY_REPAIR_INVALID/);
 	assert.match(recordSql, /update public\.profiles profile[\s\S]*set auth_user_id = p_new_auth_user_id/);
@@ -552,6 +560,22 @@ test('Workspace invitation valid Auth identity migration separates profile UUID 
 	assert.match(sql, /om\.auth_user_id = target_user_id[\s\S]*or \(om\.auth_user_id is null and om\.user_id = target_user_id\)/);
 	assert.doesNotMatch(sql, /insert into auth\.users|insert into auth\.identities|update auth\.identities|delete from auth\.identities/i);
 	assert.doesNotMatch(recordSql, /status = 'active'/);
+});
+
+test('Workspace invitation Auth repair retry-state migration advances the deployed candidate function', async () => {
+	const sql = await readFile(authRepairRetryStateMigrationUrl, 'utf8');
+	const candidateSql = sqlFunctionDefinition(sql, 'get_workspace_invitation_auth_identity_repair_candidates');
+
+	assert.match(sql, /drop function if exists public\.get_workspace_invitation_auth_identity_repair_candidates\(uuid\[\], uuid\[\], text\)/);
+	assert.match(candidateSql, /returns table \([\s\S]*auth_email_matches_invitation boolean,[\s\S]*existing_valid_auth_user_id uuid,[\s\S]*previous_auth_user_id uuid/);
+	assert.match(candidateSql, /coalesce\(auth\.role\(\), ''\) <> 'service_role'/);
+	assert.match(candidateSql, /join auth\.users current_au[\s\S]*on current_au\.id = invitation\.auth_user_id/);
+	assert.match(candidateSql, /lower\(current_au\.email\) = lower\(invitation\.auth_email\) as auth_email_matches_invitation/);
+	assert.match(candidateSql, /repair\.new_auth_user_id = invitation\.auth_user_id/);
+	assert.match(candidateSql, /repair\.outcome in \('remapped_existing_user', 'remapped_created_user'\)/);
+	assert.match(sql, /revoke all on function public\.get_workspace_invitation_auth_identity_repair_candidates\(uuid\[\], uuid\[\], text\) from authenticated/);
+	assert.match(sql, /grant execute on function public\.get_workspace_invitation_auth_identity_repair_candidates\(uuid\[\], uuid\[\], text\) to service_role/);
+	assert.doesNotMatch(sql, /insert into auth\.users|insert into auth\.identities|update auth\.identities/i);
 });
 
 test('Workspace invitation Auth provisioning source and remediation are documented', async () => {

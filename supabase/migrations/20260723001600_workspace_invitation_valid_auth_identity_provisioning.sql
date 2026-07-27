@@ -272,9 +272,7 @@ returns table (
   membership_status text,
   invitation_status text,
   has_email_identity boolean,
-  auth_email_matches_invitation boolean,
-  existing_valid_auth_user_id uuid,
-  previous_auth_user_id uuid
+  existing_valid_auth_user_id uuid
 )
 language plpgsql
 stable
@@ -303,7 +301,6 @@ begin
       where identity.user_id = invitation.auth_user_id
         and identity.provider = 'email'
     ) as has_email_identity,
-    lower(current_au.email) = lower(invitation.auth_email) as auth_email_matches_invitation,
     (
       select au_valid.id
       from auth.users au_valid
@@ -317,25 +314,11 @@ begin
         )
       order by au_valid.created_at asc
       limit 1
-    ) as existing_valid_auth_user_id,
-    (
-      select repair.old_auth_user_id
-      from public.workspace_invitation_auth_identity_repairs repair
-      where repair.organisation_id = invitation.organisation_id
-        and repair.invitation_id = invitation.id
-        and repair.membership_id = invitation.membership_id
-        and repair.profile_id = invitation.profile_id
-        and repair.new_auth_user_id = invitation.auth_user_id
-        and repair.outcome in ('remapped_existing_user', 'remapped_created_user')
-      order by repair.created_at desc
-      limit 1
-    ) as previous_auth_user_id
+    ) as existing_valid_auth_user_id
   from public.workspace_membership_invitations invitation
   join public.organisation_members om
     on om.id = invitation.membership_id
     and om.organisation_id = invitation.organisation_id
-  join auth.users current_au
-    on current_au.id = invitation.auth_user_id
   where invitation.is_current
     and om.status in ('invited', 'invite_expired')
     and invitation.auth_email is not null
