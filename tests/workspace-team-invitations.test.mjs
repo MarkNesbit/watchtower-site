@@ -34,6 +34,7 @@ const controlledIdentityMigrationUrl = new URL('../supabase/migrations/202607230
 const outboundEmailMigrationUrl = new URL('../supabase/migrations/20260723001500_workspace_invitation_outbound_email_delivery.sql', import.meta.url);
 const validAuthIdentityMigrationUrl = new URL('../supabase/migrations/20260723001600_workspace_invitation_valid_auth_identity_provisioning.sql', import.meta.url);
 const authRepairRetryStateMigrationUrl = new URL('../supabase/migrations/20260723001700_workspace_invitation_auth_repair_retry_state.sql', import.meta.url);
+const authPlaceholderReleaseMigrationUrl = new URL('../supabase/migrations/20260723001800_workspace_invitation_auth_placeholder_release.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const setupRouteUrl = new URL('../src/pages/invitations/setup.ts', import.meta.url);
@@ -230,6 +231,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	const outboundEmailIndex = files.indexOf('20260723001500_workspace_invitation_outbound_email_delivery.sql');
 	const validAuthIdentityIndex = files.indexOf('20260723001600_workspace_invitation_valid_auth_identity_provisioning.sql');
 	const authRepairRetryStateIndex = files.indexOf('20260723001700_workspace_invitation_auth_repair_retry_state.sql');
+	const authPlaceholderReleaseIndex = files.indexOf('20260723001800_workspace_invitation_auth_placeholder_release.sql');
 	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
 	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
 
@@ -240,6 +242,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.equal(outboundEmailIndex, controlledIdentityIndex + 1, 'outbound email delivery migration should follow controlled identity preparation');
 	assert.equal(validAuthIdentityIndex, outboundEmailIndex + 1, 'valid Auth identity provisioning migration should follow outbound email delivery');
 	assert.equal(authRepairRetryStateIndex, validAuthIdentityIndex + 1, 'Auth repair retry-state migration should follow valid Auth identity provisioning');
+	assert.equal(authPlaceholderReleaseIndex, authRepairRetryStateIndex + 1, 'Auth placeholder release migration should follow retry-state migration');
 	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
 	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
@@ -578,6 +581,31 @@ test('Workspace invitation Auth repair retry-state migration advances the deploy
 	assert.doesNotMatch(sql, /insert into auth\.users|insert into auth\.identities|update auth\.identities/i);
 });
 
+test('Workspace invitation Auth placeholder release migration gates hard deletion safely', async () => {
+	const sql = await readFile(authPlaceholderReleaseMigrationUrl, 'utf8');
+	const releaseSql = sqlFunctionDefinition(sql, 'verify_workspace_invitation_auth_placeholder_release');
+
+	assert.match(sql, /alter table public\.organisation_members[\s\S]*drop constraint if exists organisation_members_user_id_fkey/);
+	assert.match(sql, /alter table public\.profiles[\s\S]*drop constraint if exists profiles_id_fkey/);
+	assert.match(sql, /drop constraint if exists workspace_invitation_auth_identity_repairs_old_auth_user_id_fkey/);
+	assert.match(sql, /organisation_members_user_id_profile_fkey[\s\S]*foreign key \(user_id\) references public\.profiles\(id\) on delete cascade/);
+	assert.match(releaseSql, /coalesce\(auth\.role\(\), ''\) <> 'service_role'/);
+	assert.match(releaseSql, /v_invitation\.profile_id is distinct from p_old_auth_user_id/);
+	assert.match(releaseSql, /v_invitation\.auth_user_id is distinct from p_new_auth_user_id[\s\S]*v_invitation\.profile_auth_user_id is distinct from p_new_auth_user_id[\s\S]*v_invitation\.membership_auth_user_id is distinct from p_new_auth_user_id/);
+	assert.match(releaseSql, /profile\.auth_user_id = p_old_auth_user_id/);
+	assert.match(releaseSql, /om\.auth_user_id = p_old_auth_user_id/);
+	assert.match(releaseSql, /invitation\.auth_user_id = p_old_auth_user_id/);
+	assert.match(releaseSql, /om\.status = 'active'[\s\S]*om\.auth_user_id = p_old_auth_user_id or om\.user_id = p_old_auth_user_id/);
+	assert.match(releaseSql, /project_people[\s\S]*user_id = p_old_auth_user_id/);
+	assert.match(releaseSql, /internal_role_simulations[\s\S]*user_id = p_old_auth_user_id/);
+	assert.match(releaseSql, /project_narrative_read_states[\s\S]*user_id = p_old_auth_user_id/);
+	assert.match(releaseSql, /repair\.old_auth_user_id = p_old_auth_user_id[\s\S]*repair\.new_auth_user_id = p_new_auth_user_id/);
+	assert.match(releaseSql, /coalesce\(v_old_auth_user\.encrypted_password, ''\) <> ''/);
+	assert.match(releaseSql, /from auth\.identities identity[\s\S]*identity\.user_id = p_old_auth_user_id/);
+	assert.match(sql, /grant execute on function public\.verify_workspace_invitation_auth_placeholder_release\(uuid, uuid, uuid\) to service_role/);
+	assert.doesNotMatch(sql, /delete from auth\.users|insert into auth\.users|insert into auth\.identities|update auth\.identities/i);
+});
+
 test('Workspace invitation Auth provisioning source and remediation are documented', async () => {
 	const releaseCheckoutSql = await readFile(new URL('../supabase/migrations/20260723001000_workspace_membership_application_release_source_checkout.sql', import.meta.url), 'utf8');
 	const fixSql = await readFile(validAuthIdentityMigrationUrl, 'utf8');
@@ -591,8 +619,10 @@ test('Workspace invitation Auth provisioning source and remediation are document
 	assert.match(fixSql, /workspace_invitation_identityless_auth_user_report/);
 	assert.match(docs, /Historical WT-007 migrations created a pending Supabase Auth identity by inserting a minimal placeholder `auth\.users` row directly/);
 	assert.match(docs, /creates a valid temporary internal Auth user, transactionally remaps only explicit `auth_user_id` links/);
-	assert.match(docs, /soft-deletes the malformed placeholder Auth user, and then assigns the deterministic invitation alias to the replacement/);
+	assert.match(docs, /hard-deletes that placeholder to release the deterministic alias, and then assigns the alias to the replacement/);
 	assert.match(docs, /never writes to `auth\.identities` directly/);
+	assert.match(schemaDocs, /verify_workspace_invitation_auth_placeholder_release/);
+	assert.match(schemaDocs, /hard-deletes a historical identity-less Auth placeholder to free the deterministic invitation alias/);
 	assert.match(schemaDocs, /placeholder-only Auth rows as requiring Supabase Auth Admin provisioning/);
 	assert.match(schemaDocs, /profile\/person UUIDs after invitation Auth repair/);
 });
@@ -682,8 +712,13 @@ test('Workspace invitation Auth provisioning helper uses Supabase Admin without 
 	assert.equal(calls[1][2].p_old_auth_user_id, candidate.current_auth_user_id);
 	assert.equal(calls[1][2].p_new_auth_user_id, replacementAuthUserId);
 	assert.equal(calls[1][2].p_correlation_id, '66666666-6666-4666-8666-666666666666');
-	assert.deepEqual(calls[2], ['deleteUser', candidate.current_auth_user_id, true]);
-	assert.deepEqual(calls[3], ['updateUserById', replacementAuthUserId, {
+	assert.equal(calls[2][0], 'rpc');
+	assert.equal(calls[2][1], 'verify_workspace_invitation_auth_placeholder_release');
+	assert.equal(calls[2][2].p_invitation_id, candidate.invitation_id);
+	assert.equal(calls[2][2].p_old_auth_user_id, candidate.current_auth_user_id);
+	assert.equal(calls[2][2].p_new_auth_user_id, replacementAuthUserId);
+	assert.deepEqual(calls[3], ['deleteUser', candidate.current_auth_user_id, false]);
+	assert.deepEqual(calls[4], ['updateUserById', replacementAuthUserId, {
 		email: candidate.auth_email,
 		user_metadata: {
 			watchtower_invitation_auth_provisioned: true,
@@ -693,8 +728,8 @@ test('Workspace invitation Auth provisioning helper uses Supabase Admin without 
 			watchtower_invitation_id: candidate.invitation_id,
 		},
 	}]);
-	assert.deepEqual(calls[4], ['getUserById', replacementAuthUserId]);
-	assert.equal(calls[5][1], 'get_workspace_invitation_auth_identity_repair_candidates');
+	assert.deepEqual(calls[5], ['getUserById', replacementAuthUserId]);
+	assert.equal(calls[6][1], 'get_workspace_invitation_auth_identity_repair_candidates');
 	assert.equal(calls.filter((call) => call[0] === 'updateUserById' && call[1] === candidate.current_auth_user_id).length, 0);
 });
 
@@ -886,7 +921,7 @@ test('Workspace invitation Auth provisioning rolls back replacement user when re
 	assert.equal(entries.at(-1)[2].stage, 'record_created_user_remap');
 });
 
-test('Workspace invitation Auth provisioning stops before alias move when placeholder soft delete fails', async () => {
+test('Workspace invitation Auth provisioning stops before alias move when placeholder hard delete fails', async () => {
 	const calls = [];
 	const replacementAuthUserId = '99999999-9999-4999-8999-999999999999';
 	const failingCandidate = {
@@ -914,10 +949,10 @@ test('Workspace invitation Auth provisioning stops before alias move when placeh
 				},
 				async deleteUser(...args) {
 					calls.push(['deleteUser', ...args]);
-					return { data: null, error: new Error('soft delete denied') };
+					return { data: null, error: new Error('hard delete denied') };
 				},
 				async getUserById() {
-					throw new Error('getUserById should not run after soft delete failure');
+					throw new Error('getUserById should not run after hard delete failure');
 				},
 			},
 		},
@@ -935,10 +970,69 @@ test('Workspace invitation Auth provisioning stops before alias move when placeh
 
 	assert.equal(result[0].status, 'failed');
 	assert.equal(result[0].authUserId, replacementAuthUserId);
-	assert.equal(entries.at(-1)[2].stage, 'soft_delete_placeholder_auth_user');
-	assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', failingCandidate.current_auth_user_id, true]]);
+	assert.equal(entries.at(-1)[2].stage, 'hard_delete_identityless_placeholder');
+	assert.equal(calls.find((call) => call[0] === 'rpc' && call[1] === 'verify_workspace_invitation_auth_placeholder_release')[2].p_old_auth_user_id, failingCandidate.current_auth_user_id);
+	assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', failingCandidate.current_auth_user_id, false]]);
 	assert.equal(calls.filter((call) => call[0] === 'updateUserById').length, 0);
 	assert.equal(calls.filter((call) => call[0] === 'rpc').at(-1)[2].p_old_auth_user_id, replacementAuthUserId);
+});
+
+test('Workspace invitation Auth provisioning blocks hard delete when placeholder verification fails', async () => {
+	const calls = [];
+	const replacementAuthUserId = '99999999-9999-4999-8999-999999999999';
+	const failingCandidate = {
+		invitation_id: '77777777-7777-4777-8777-777777777777',
+		organisation_id: '22222222-2222-4222-8222-222222222222',
+		membership_id: '33333333-3333-4333-8333-333333333333',
+		profile_id: '44444444-4444-4444-8444-444444444444',
+		current_auth_user_id: '55555555-5555-4555-8555-555555555555',
+		auth_email: 'secret@example.test',
+		membership_status: 'invited',
+		invitation_status: 'delivery_failed',
+		has_email_identity: false,
+		existing_valid_auth_user_id: null,
+	};
+	const client = {
+		auth: {
+			admin: {
+				async updateUserById(...args) {
+					calls.push(['updateUserById', ...args]);
+					return { data: {}, error: null };
+				},
+				async createUser() {
+					calls.push(['createUser']);
+					return { data: { user: { id: replacementAuthUserId } }, error: null };
+				},
+				async deleteUser(...args) {
+					calls.push(['deleteUser', ...args]);
+					return { data: {}, error: null };
+				},
+				async getUserById() {
+					throw new Error('getUserById should not run after placeholder verification failure');
+				},
+			},
+		},
+		async rpc(name, args) {
+			calls.push(['rpc', name, args]);
+			if (name === 'verify_workspace_invitation_auth_placeholder_release') {
+				return { data: null, error: new Error('WT_INVITATION_AUTH_PLACEHOLDER_RELEASE_REFERENCED: old user still referenced') };
+			}
+			return { data: 'repair-id', error: null };
+		},
+	};
+
+	const { entries, result } = await captureConsole(() => provisionWorkspaceInvitationAuthIdentities({
+		adminClient: client,
+		candidates: [failingCandidate],
+		correlationId: '88888888-8888-4888-8888-888888888888',
+	}));
+
+	assert.equal(result[0].status, 'failed');
+	assert.equal(result[0].authUserId, replacementAuthUserId);
+	assert.equal(entries.at(-1)[2].stage, 'verify_placeholder_unreferenced');
+	assert.equal(calls.find((call) => call[0] === 'rpc' && call[1] === 'verify_workspace_invitation_auth_placeholder_release')[2].p_old_auth_user_id, failingCandidate.current_auth_user_id);
+	assert.equal(calls.filter((call) => call[0] === 'deleteUser').length, 0);
+	assert.equal(calls.filter((call) => call[0] === 'updateUserById').length, 0);
 });
 
 test('Workspace invitation Auth provisioning records incomplete repair when final alias assignment fails', async () => {
@@ -993,6 +1087,8 @@ test('Workspace invitation Auth provisioning records incomplete repair when fina
 	assert.equal(result[0].failureCode, WORKSPACE_INVITATION_AUTH_IDENTITY_ALIAS_FAILURE_CODE);
 	assert.doesNotMatch(result[0].failureMessage, /secret@example\.test/i);
 	assert.equal(entries.at(-1)[2].stage, 'assign_deterministic_alias');
+	assert.equal(calls.find((call) => call[0] === 'rpc' && call[1] === 'verify_workspace_invitation_auth_placeholder_release')[2].p_old_auth_user_id, failingCandidate.current_auth_user_id);
+	assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', failingCandidate.current_auth_user_id, false]]);
 	assert.equal(calls.filter((call) => call[0] === 'rpc').at(-1)[2].p_old_auth_user_id, replacementAuthUserId);
 });
 
@@ -1070,7 +1166,8 @@ test('Workspace invitation Auth provisioning reuses temporary replacement users 
 	assert.equal(result[0].authUserId, replacementAuthUserId);
 	assert.equal(calls.filter((call) => call[0] === 'listUsers').length, 1);
 	assert.equal(calls.filter((call) => call[0] === 'createUser').length, 0);
-	assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', retryCandidate.current_auth_user_id, true]]);
+	assert.equal(calls.find((call) => call[0] === 'rpc' && call[1] === 'verify_workspace_invitation_auth_placeholder_release')[2].p_old_auth_user_id, retryCandidate.current_auth_user_id);
+	assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', retryCandidate.current_auth_user_id, false]]);
 });
 
 test('Workspace invitation Auth provisioning finalises an already-remapped temporary user without duplicate records', async () => {
@@ -1137,7 +1234,8 @@ test('Workspace invitation Auth provisioning finalises an already-remapped tempo
 	assert.equal(result[0].authUserId, temporaryAuthUserId);
 	assert.equal(calls.filter((call) => call[0] === 'createUser').length, 0);
 	assert.equal(calls.filter((call) => call[0] === 'rpc' && call[1] === 'record_workspace_invitation_auth_identity_repair').length, 0);
-	assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', placeholderAuthUserId, true]]);
+	assert.equal(calls.find((call) => call[0] === 'rpc' && call[1] === 'verify_workspace_invitation_auth_placeholder_release')[2].p_old_auth_user_id, placeholderAuthUserId);
+	assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', placeholderAuthUserId, false]]);
 	assert.equal(calls.filter((call) => call[0] === 'updateUserById').length, 1);
 });
 

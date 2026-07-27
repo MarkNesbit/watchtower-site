@@ -170,6 +170,24 @@ async function softDeleteAuthUser(client: SupabaseAdminClient, authUserId: strin
 	if (error && !isMissingUserError(error)) throw error;
 }
 
+async function hardDeleteAuthUser(client: SupabaseAdminClient, authUserId: string) {
+	const { error } = await client.auth.admin.deleteUser(authUserId, false);
+	if (error && !isMissingUserError(error)) throw error;
+}
+
+async function verifyPlaceholderRelease(
+	client: SupabaseAdminClient,
+	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
+	replacementAuthUserId: string,
+) {
+	const { error } = await client.rpc('verify_workspace_invitation_auth_placeholder_release', {
+		p_invitation_id: candidate.invitation_id,
+		p_old_auth_user_id: placeholderAuthUserIdFor(candidate),
+		p_new_auth_user_id: replacementAuthUserId,
+	});
+	if (error) throw error;
+}
+
 async function verifyFinalAuthIdentity(
 	client: SupabaseAdminClient,
 	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
@@ -279,8 +297,11 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 				}
 			}
 
-			repairStage = 'soft_delete_placeholder_auth_user';
-			await softDeleteAuthUser(input.adminClient, placeholderAuthUserIdFor(candidate));
+			repairStage = 'verify_placeholder_unreferenced';
+			await verifyPlaceholderRelease(input.adminClient, candidate, replacementAuthUserId);
+
+			repairStage = 'hard_delete_identityless_placeholder';
+			await hardDeleteAuthUser(input.adminClient, placeholderAuthUserIdFor(candidate));
 
 			repairStage = 'assign_deterministic_alias';
 			if (!candidate.existing_valid_auth_user_id || !authEmailMatchesInvitation) {
