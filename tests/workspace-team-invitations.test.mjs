@@ -1883,6 +1883,42 @@ test('Workspace invitation acceptance page validates before disclosure and block
 	assert.doesNotMatch(page, /from\('workspace_membership_invitations'\)\.select|auth\.admin|service_role/i);
 });
 
+test('Workspace invitation acceptance page logs safe acceptance outcomes', async () => {
+	const page = await readFile(acceptPageUrl, 'utf8');
+	const failureLog = page.match(/console\.error\('workspace_invitation_acceptance_failed'[\s\S]*?\n\t\}\);/)?.[0] ?? '';
+	const successLog = page.match(/console\.info\('workspace_invitation_acceptance_completed'[\s\S]*?\n\t\}\);/)?.[0] ?? '';
+
+	assert.match(page, /type AcceptanceOutcome = 'wrong_account' \| 'invalid' \| 'failed'/);
+	assert.match(page, /const routeName = 'workspace_invitation_acceptance'/);
+	assert.match(page, /safeLogText/);
+	assert.match(page, /https\?:\\\/\\\/\[\^\\s\]\+/);
+	assert.match(page, /\[redacted-email\]/);
+	assert.match(page, /\[redacted-token\]/);
+	assert.match(page, /\[redacted-token-hash\]/);
+	assert.match(page, /\[redacted\]/);
+	assert.match(page, /WRONG_ACCOUNT[\s\S]*return 'wrong_account'/);
+	assert.match(page, /INVALID\|NOT_ACCEPTABLE\|EXPIRED\|CANCELLED\|SUPERSEDED[\s\S]*return 'invalid'/);
+	assert.match(page, /return 'failed'/);
+	assert.match(page, /const acceptanceLogIds[\s\S]*invitationId: currentInvitation\?\.invitation_id \?\? null/);
+	assert.match(page, /const acceptanceLogIds[\s\S]*membershipId: currentInvitation\?\.membership_id \?\? null/);
+	assert.match(page, /const acceptanceLogIds[\s\S]*profileId: currentInvitation\?\.profile_id \?\? null/);
+	assert.match(failureLog, /routeName/);
+	assert.match(failureLog, /\.\.\.acceptanceLogIds\(currentInvitation\)/);
+	assert.match(failureLog, /signedInAuthUserId/);
+	assert.match(failureLog, /supabaseErrorCode: safeLogText\(error\.code\)/);
+	assert.match(failureLog, /safeErrorMessage: safeLogText\(error\.message\)/);
+	assert.match(failureLog, /safeDetails: safeLogText\(error\.details\)/);
+	assert.match(failureLog, /safeHint: safeLogText\(error\.hint\)/);
+	assert.match(failureLog, /outcome/);
+	assert.match(successLog, /\.\.\.acceptanceLogIds\(currentInvitation\)/);
+	assert.match(successLog, /signedInAuthUserId/);
+	assert.match(successLog, /resultingWorkspaceSlug/);
+	assert.match(page, /logAcceptanceFailed\(\{[\s\S]*currentInvitation,[\s\S]*signedInAuthUserId,[\s\S]*error,[\s\S]*outcome: code/);
+	assert.match(page, /logAcceptanceCompleted\(\{[\s\S]*currentInvitation,[\s\S]*signedInAuthUserId,[\s\S]*resultingWorkspaceSlug: slug \?\? null/);
+	assert.doesNotMatch(failureLog, /tokenHash|p_token_hash|token|Astro\.url|email|password|accessToken|refreshToken|url\.href/i);
+	assert.doesNotMatch(successLog, /tokenHash|p_token_hash|token|Astro\.url|email|password|accessToken|refreshToken|url\.href/i);
+});
+
 test('Workspace invitation acceptance page meets static accessibility guardrails', async () => {
 	const page = await readFile(acceptPageUrl, 'utf8');
 

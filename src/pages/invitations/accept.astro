@@ -29,6 +29,16 @@ type InvitationInfo = {
 	status: string;
 };
 
+type AcceptanceOutcome = 'wrong_account' | 'invalid' | 'failed';
+
+type SafeSupabaseError = {
+	code?: string | null;
+	message?: string | null;
+	details?: string | null;
+	hint?: string | null;
+};
+
+const routeName = 'workspace_invitation_acceptance';
 const token = String(Astro.url.searchParams.get('token') ?? '').trim();
 const errorCode = String(Astro.url.searchParams.get('error') ?? '').trim();
 const success = String(Astro.url.searchParams.get('accepted') ?? '') === 'true';
@@ -40,6 +50,71 @@ let accountState: 'signed_out' | 'matching' | 'wrong_account' | 'unavailable' = 
 const formatDateTime = (value: string | null) => value
 	? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(new Date(value))
 	: 'Not available';
+
+const safeLogText = (value: unknown) => {
+	if (value === null || value === undefined) return null;
+	return String(value)
+		.replace(/https?:\/\/[^\s]+/gi, '[redacted-url]')
+		.replace(/[^\s@]+@[^\s@]+/g, '[redacted-email]')
+		.replace(/\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b/gi, '[redacted-token]')
+		.replace(/\b(?:access|refresh)[_-]?token\b\s*[:=]\s*[^\s,;]+/gi, '[redacted-token]')
+		.replace(/\btoken[_-]?hash\b\s*[:=]\s*[a-f0-9]+/gi, '[redacted-token-hash]')
+		.replace(/\b[a-f0-9]{48,}\b/gi, '[redacted-token]')
+		.replace(/\bpassword\b/gi, '[redacted]');
+};
+
+const classifyAcceptanceOutcome = (error: SafeSupabaseError): AcceptanceOutcome => {
+	const text = [error.code, error.message, error.details, error.hint].filter(Boolean).join(' ');
+	if (/WRONG_ACCOUNT/i.test(text)) return 'wrong_account';
+	if (/INVALID|NOT_ACCEPTABLE|EXPIRED|CANCELLED|SUPERSEDED/i.test(text)) return 'invalid';
+	return 'failed';
+};
+
+const acceptanceLogIds = (currentInvitation: InvitationInfo | null | undefined) => ({
+	invitationId: currentInvitation?.invitation_id ?? null,
+	membershipId: currentInvitation?.membership_id ?? null,
+	profileId: currentInvitation?.profile_id ?? null,
+});
+
+const logAcceptanceFailed = ({
+	currentInvitation,
+	signedInAuthUserId,
+	error,
+	outcome,
+}: {
+	currentInvitation: InvitationInfo | null | undefined;
+	signedInAuthUserId: string | null;
+	error: SafeSupabaseError;
+	outcome: AcceptanceOutcome;
+}) => {
+	console.error('workspace_invitation_acceptance_failed', {
+		routeName,
+		...acceptanceLogIds(currentInvitation),
+		signedInAuthUserId,
+		supabaseErrorCode: safeLogText(error.code),
+		safeErrorMessage: safeLogText(error.message),
+		safeDetails: safeLogText(error.details),
+		safeHint: safeLogText(error.hint),
+		outcome,
+	});
+};
+
+const logAcceptanceCompleted = ({
+	currentInvitation,
+	signedInAuthUserId,
+	resultingWorkspaceSlug,
+}: {
+	currentInvitation: InvitationInfo | null | undefined;
+	signedInAuthUserId: string | null;
+	resultingWorkspaceSlug: string | null;
+}) => {
+	console.info('workspace_invitation_acceptance_completed', {
+		routeName,
+		...acceptanceLogIds(currentInvitation),
+		signedInAuthUserId,
+		resultingWorkspaceSlug,
+	});
+};
 
 const errorMessage = ({
 	signin: 'Set up or sign in to the account created for this invitation before accepting it.',
@@ -71,6 +146,13 @@ if (!isWorkspaceInvitationToken(token)) {
 		return Astro.redirect(`${buildWorkspaceInvitationAcceptRelativePath(token)}&error=signin`, 303);
 	}
 	const serverSupabase = createSupabaseServerClient(accessToken);
+	let signedInAuthUserId: string | null = null;
+	try {
+		const { data: userData, error: userError } = await serverSupabase.auth.getUser();
+		if (!userError) signedInAuthUserId = userData.user?.id ?? null;
+	} catch {
+		signedInAuthUserId = null;
+	}
 	const tokenHash = await hashInvitationToken(token);
 	const { data: invitationData } = await serverSupabase.rpc('get_workspace_membership_invitation_by_token', {
 		p_token_hash: tokenHash,
@@ -80,15 +162,21 @@ if (!isWorkspaceInvitationToken(token)) {
 		p_token_hash: tokenHash,
 	});
 	if (error) {
-		const text = [error.message, error.details, error.hint].filter(Boolean).join(' ');
-		const code = /WRONG_ACCOUNT/i.test(text)
-			? 'wrong_account'
-			: /INVALID|NOT_ACCEPTABLE|EXPIRED|CANCELLED|SUPERSEDED/i.test(text)
-				? 'invalid'
-				: 'failed';
+		const code = classifyAcceptanceOutcome(error);
+		logAcceptanceFailed({
+			currentInvitation,
+			signedInAuthUserId,
+			error,
+			outcome: code,
+		});
 		return Astro.redirect(`${buildWorkspaceInvitationAcceptRelativePath(token)}&error=${code}`, 303);
 	}
 	const slug = currentInvitation?.workspace_slug;
+	logAcceptanceCompleted({
+		currentInvitation,
+		signedInAuthUserId,
+		resultingWorkspaceSlug: slug ?? null,
+	});
 	return Astro.redirect(slug ? `/app/workspaces/${encodeURIComponent(slug)}/team?invitation_acceptance=success` : '/app?invitation_acceptance=success', 303);
 } else {
 	try {
@@ -111,8 +199,8 @@ if (!isWorkspaceInvitationToken(token)) {
 		}
 	} catch (error) {
 		console.error('workspace_invitation_acceptance_lookup_failed', {
-			routeName: 'workspace_invitation_acceptance',
-			message: error instanceof Error ? error.message : 'Invitation lookup failed',
+			routeName,
+			message: safeLogText(error instanceof Error ? error.message : 'Invitation lookup failed'),
 		});
 		loadError = 'This invitation could not be validated. Try the link again, or ask the workspace Owner to resend it.';
 	}
