@@ -36,6 +36,7 @@ const validAuthIdentityMigrationUrl = new URL('../supabase/migrations/2026072300
 const authRepairRetryStateMigrationUrl = new URL('../supabase/migrations/20260723001700_workspace_invitation_auth_repair_retry_state.sql', import.meta.url);
 const authPlaceholderReleaseMigrationUrl = new URL('../supabase/migrations/20260723001800_workspace_invitation_auth_placeholder_release.sql', import.meta.url);
 const apiInvisibleAuthPlaceholderReleaseMigrationUrl = new URL('../supabase/migrations/20260723001900_workspace_invitation_api_invisible_placeholder_release.sql', import.meta.url);
+const acceptanceLifecycleGuardMigrationUrl = new URL('../supabase/migrations/20260723002000_workspace_invitation_acceptance_lifecycle_guard.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const setupRouteUrl = new URL('../src/pages/invitations/setup.ts', import.meta.url);
@@ -234,6 +235,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	const authRepairRetryStateIndex = files.indexOf('20260723001700_workspace_invitation_auth_repair_retry_state.sql');
 	const authPlaceholderReleaseIndex = files.indexOf('20260723001800_workspace_invitation_auth_placeholder_release.sql');
 	const apiInvisibleAuthPlaceholderReleaseIndex = files.indexOf('20260723001900_workspace_invitation_api_invisible_placeholder_release.sql');
+	const acceptanceLifecycleGuardIndex = files.indexOf('20260723002000_workspace_invitation_acceptance_lifecycle_guard.sql');
 	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
 	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
 
@@ -246,6 +248,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.equal(authRepairRetryStateIndex, validAuthIdentityIndex + 1, 'Auth repair retry-state migration should follow valid Auth identity provisioning');
 	assert.equal(authPlaceholderReleaseIndex, authRepairRetryStateIndex + 1, 'Auth placeholder release migration should follow retry-state migration');
 	assert.equal(apiInvisibleAuthPlaceholderReleaseIndex, authPlaceholderReleaseIndex + 1, 'API-invisible placeholder release migration should follow placeholder release migration');
+	assert.equal(acceptanceLifecycleGuardIndex, apiInvisibleAuthPlaceholderReleaseIndex + 1, 'acceptance lifecycle-guard migration should follow API-invisible placeholder release migration');
 	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
 	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
@@ -1803,6 +1806,61 @@ test('Workspace invitation controlled identity preparation extends the lifecycle
 	assert.doesNotMatch(controlledIdentitySql, /disable trigger|session_replication_role/i);
 	assert.doesNotMatch(controlledIdentitySql, /grant update .*public\.organisation_members to authenticated|grant update .*public\.profiles to authenticated/i);
 	assert.doesNotMatch(baselineSql, /on public\.profiles for update|grant update .*public\.profiles to authenticated/i);
+});
+
+test('Workspace invitation acceptance is authorised through the lifecycle guard only for exact activation', async () => {
+	const sql = await readFile(acceptanceLifecycleGuardMigrationUrl, 'utf8');
+	const docs = await readFile(docsUrl, 'utf8');
+	const schemaDocs = await readFile(schemaDocsUrl, 'utf8');
+	const guardSql = sqlFunctionDefinition(sql, 'prevent_unsafe_workspace_membership_update');
+	const acceptSql = sqlFunctionDefinition(sql, 'accept_workspace_membership_invitation');
+	const sqlWithoutAccept = sql.replace(acceptSql, '');
+	const membershipActivationSet = acceptSql.match(/update public\.organisation_members as om[\s\S]*?where om\.id = v_invitation\.membership_id/)?.[0] ?? '';
+
+	assert.match(guardSql, /lifecycle_operation text := coalesce\(current_setting\('watchtower\.membership_lifecycle_operation', true\), ''\)/);
+	assert.match(guardSql, /invitation_acceptance boolean := lifecycle_operation = 'workspace_invitation_acceptance'/);
+	assert.match(guardSql, /old\.auth_user_id is distinct from new\.auth_user_id/);
+	assert.match(guardSql, /if invitation_acceptance then[\s\S]*marker_auth_user_id := nullif\(current_setting\('watchtower\.membership_lifecycle_auth_user_id', true\), ''\)/);
+	assert.match(guardSql, /old\.organisation_id <> marker_organisation_id::uuid[\s\S]*old\.id <> marker_membership_id::uuid[\s\S]*old\.user_id <> marker_profile_id::uuid[\s\S]*old\.auth_user_id <> marker_auth_user_id::uuid/);
+	assert.match(guardSql, /old\.status <> 'invited'[\s\S]*new\.status <> 'active'/);
+	assert.match(guardSql, /old\.accepted_at is not null[\s\S]*new\.accepted_at is null/);
+	assert.match(guardSql, /new\.role is distinct from old\.role/);
+	assert.match(guardSql, /new\.invited_by is distinct from old\.invited_by/);
+	assert.match(guardSql, /new\.invitation_expires_at is distinct from old\.invitation_expires_at/);
+	assert.match(guardSql, /old\.joined_at is not null and new\.joined_at is distinct from old\.joined_at/);
+	assert.match(guardSql, /new\.joined_at is null/);
+	assert.match(guardSql, /new\.deactivated_at is distinct from old\.deactivated_at/);
+	assert.match(guardSql, /new\.reactivated_at is distinct from old\.reactivated_at/);
+	assert.match(guardSql, /WT_INVITATION_ACCEPTANCE_SCOPE/);
+	assert.match(guardSql, /Use controlled workspace membership lifecycle functions for membership lifecycle changes/);
+	assert.match(acceptSql, /v_actor_auth_user_id uuid := auth\.uid\(\)/);
+	assert.match(acceptSql, /where invitation\.token_hash = p_token_hash[\s\S]*and invitation\.is_current[\s\S]*for update/);
+	assert.match(acceptSql, /where om\.id = v_invitation\.membership_id[\s\S]*for update/);
+	assert.match(acceptSql, /v_actor_auth_user_id <> v_invitation\.auth_user_id[\s\S]*WT_INVITATION_WRONG_ACCOUNT/);
+	assert.match(acceptSql, /v_invitation\.status in \('cancelled', 'superseded'\)[\s\S]*cancelled_at is not null[\s\S]*superseded_at is not null/);
+	assert.match(acceptSql, /v_invitation\.expires_at <= v_accepted_at[\s\S]*WT_INVITATION_EXPIRED/);
+	assert.match(acceptSql, /v_invitation\.status not in \('opened', 'delivered'\)/);
+	assert.match(acceptSql, /v_membership\.organisation_id <> v_invitation\.organisation_id[\s\S]*v_membership\.id <> v_invitation\.membership_id[\s\S]*v_membership\.user_id <> v_invitation\.profile_id[\s\S]*v_membership\.role <> v_invitation\.intended_role/);
+	assert.match(acceptSql, /v_membership\.status <> 'invited'/);
+	assert.match(acceptSql, /v_membership\.auth_user_id is null or v_membership\.auth_user_id <> v_actor_auth_user_id/);
+	assert.match(acceptSql, /set_config\('watchtower\.membership_lifecycle_operation', 'workspace_invitation_acceptance', true\)/);
+	assert.match(acceptSql, /set_config\('watchtower\.membership_lifecycle_organisation_id', v_invitation\.organisation_id::text, true\)/);
+	assert.match(acceptSql, /set_config\('watchtower\.membership_lifecycle_membership_id', v_invitation\.membership_id::text, true\)/);
+	assert.match(acceptSql, /set_config\('watchtower\.membership_lifecycle_profile_id', v_invitation\.profile_id::text, true\)/);
+	assert.match(acceptSql, /set_config\('watchtower\.membership_lifecycle_auth_user_id', v_actor_auth_user_id::text, true\)/);
+	assert.match(acceptSql, /set_config\('watchtower\.membership_lifecycle_invitation_id', v_invitation\.id::text, true\)/);
+	assert.match(acceptSql, /update public\.workspace_membership_invitations as invitation[\s\S]*set status = 'accepted'[\s\S]*accepted_at = v_accepted_at[\s\S]*accepted_by = v_actor_auth_user_id[\s\S]*token_hash = null/);
+	assert.match(acceptSql, /where invitation\.id = v_invitation\.id[\s\S]*and invitation\.is_current[\s\S]*and invitation\.status in \('opened', 'delivered'\)[\s\S]*and invitation\.auth_user_id = v_actor_auth_user_id/);
+	assert.match(acceptSql, /update public\.organisation_members as om[\s\S]*set status = 'active',[\s\S]*accepted_at = v_accepted_at,[\s\S]*joined_at = coalesce\(om\.joined_at, v_accepted_at\),[\s\S]*updated_by = v_actor_auth_user_id/);
+	assert.match(acceptSql, /where om\.id = v_invitation\.membership_id[\s\S]*and om\.organisation_id = v_invitation\.organisation_id[\s\S]*and om\.user_id = v_invitation\.profile_id[\s\S]*and om\.auth_user_id = v_actor_auth_user_id[\s\S]*and om\.role = v_invitation\.intended_role[\s\S]*and om\.status = 'invited'/);
+	assert.match(acceptSql, /workspace_invitation_replay_rejected/);
+	assert.match(acceptSql, /workspace_invitation_accepted/);
+	assert.match(acceptSql, /workspace_membership_activated/);
+	assert.doesNotMatch(membershipActivationSet, /\brole\s*=|\buser_id\s*=|\bauth_user_id\s*=|\borganisation_id\s*=/);
+	assert.doesNotMatch(sqlWithoutAccept, /set_config\('watchtower\.membership_lifecycle_operation', 'workspace_invitation_acceptance'/);
+	assert.doesNotMatch(sql, /disable trigger|session_replication_role|grant update .*public\.organisation_members to authenticated/i);
+	assert.match(docs, /Invitation acceptance is the only user-facing activation path through the membership lifecycle guard/);
+	assert.match(schemaDocs, /Acceptance is authorised by a transaction-local `workspace_invitation_acceptance` lifecycle marker/);
 });
 
 test('Workspace invitation RPCs enforce admin delivery and linked-account acceptance', async () => {
