@@ -30,6 +30,27 @@ const PROJECT_NAME_CONSTRAINT = 'projects_organisation_project_name_key';
 const MAX_PROJECT_REF_INSERT_ATTEMPTS = 3;
 
 type DatabaseError = { code?: string; message?: string; details?: string; hint?: string };
+type WorkspaceMembershipRow = {
+	id?: string | null;
+	user_id?: string | null;
+	auth_user_id?: string | null;
+	role?: string | null;
+	joined_at?: string | null;
+	created_at?: string | null;
+	organisations?: {
+		id?: string | null;
+		name?: string | null;
+		slug?: string | null;
+		type?: string | null;
+		created_by?: string | null;
+	} | Array<{
+		id?: string | null;
+		name?: string | null;
+		slug?: string | null;
+		type?: string | null;
+		created_by?: string | null;
+	}> | null;
+};
 
 function isConstraintViolation(error: DatabaseError | null, constraintName: string): boolean {
 	if (!error || error.code !== '23505') return false;
@@ -38,8 +59,50 @@ function isConstraintViolation(error: DatabaseError | null, constraintName: stri
 
 function filterSignedInMembership(query, userId: string) {
 	return typeof query.or === 'function'
-		? query.or(`user_id.eq.${userId},auth_user_id.eq.${userId}`)
+		? query.or(`auth_user_id.eq.${userId},and(auth_user_id.is.null,user_id.eq.${userId})`)
 		: query.eq('user_id', userId);
+}
+
+function getMembershipOrganisation(membership: WorkspaceMembershipRow | null | undefined) {
+	return Array.isArray(membership?.organisations)
+		? membership?.organisations[0]
+		: membership?.organisations;
+}
+
+function membershipTime(value: string | null | undefined): number {
+	if (!value) return Number.POSITIVE_INFINITY;
+	const time = new Date(value).getTime();
+	return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
+}
+
+function workspaceResolutionPath(membership: WorkspaceMembershipRow | null | undefined, signedInAuthUserId: string): string {
+	if (!membership) return 'none';
+	const organisation = getMembershipOrganisation(membership);
+	const isPersonalFallback = organisation?.type === 'personal'
+		&& organisation.created_by === signedInAuthUserId
+		&& membership.user_id === signedInAuthUserId;
+	if (membership.auth_user_id === signedInAuthUserId && membership.user_id && membership.user_id !== signedInAuthUserId) {
+		return 'accepted_invitation_membership';
+	}
+	if (isPersonalFallback) return 'personal_workspace_membership';
+	if (membership.auth_user_id === signedInAuthUserId) return 'explicit_auth_membership';
+	return 'legacy_profile_membership';
+}
+
+function compareWorkspaceMembershipsForCurrentUser(a: WorkspaceMembershipRow, b: WorkspaceMembershipRow, signedInAuthUserId: string): number {
+	const pathPriority = (membership: WorkspaceMembershipRow) => {
+		const path = workspaceResolutionPath(membership, signedInAuthUserId);
+		if (path === 'accepted_invitation_membership') return 0;
+		return 1;
+	};
+	return pathPriority(a) - pathPriority(b)
+		|| membershipTime(a.joined_at) - membershipTime(b.joined_at)
+		|| membershipTime(a.created_at) - membershipTime(b.created_at)
+		|| String(a.id ?? '').localeCompare(String(b.id ?? ''));
+}
+
+function logWorkspaceResolution(event: 'workspace_resolution_completed' | 'workspace_resolution_fallback_used' | 'workspace_resolution_failed', details: Record<string, unknown>) {
+	console.info(event, details);
 }
 
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
@@ -168,16 +231,40 @@ export async function getCurrentWorkspace(client, accessToken?: string) {
 
 	const currentWorkspaceQuery = filterSignedInMembership(client
 		.from('organisation_members')
-		.select('role, joined_at, created_at, organisations(id, name, slug)')
+		.select('id, user_id, auth_user_id, role, joined_at, created_at, organisations(id, name, slug, type, created_by)')
 		.eq('status', 'active'), user.id);
 	const { data, error } = await currentWorkspaceQuery
 		.order('joined_at', { ascending: true, nullsFirst: false })
-		.order('created_at', { ascending: true })
-		.limit(1)
-		.maybeSingle();
+		.order('created_at', { ascending: true });
 
 	if (error) throw error;
-	return applyRoleSimulationToMembership(data, client, user.id);
+	const memberships = (data ?? []) as WorkspaceMembershipRow[];
+	if (memberships.length === 0) {
+		logWorkspaceResolution('workspace_resolution_failed', {
+			signedInAuthUserId: user.id,
+			resolvedProfileId: null,
+			resolvedMembershipId: null,
+			resolvedWorkspaceId: null,
+			activeMembershipCount: 0,
+			resolutionPath: 'no_active_membership',
+		});
+		return null;
+	}
+	const selected = [...memberships].sort((a, b) => compareWorkspaceMembershipsForCurrentUser(a, b, user.id))[0];
+	const organisation = getMembershipOrganisation(selected);
+	const resolutionPath = workspaceResolutionPath(selected, user.id);
+	logWorkspaceResolution(
+		resolutionPath === 'personal_workspace_membership' ? 'workspace_resolution_fallback_used' : 'workspace_resolution_completed',
+		{
+			signedInAuthUserId: user.id,
+			resolvedProfileId: selected?.user_id ?? null,
+			resolvedMembershipId: selected?.id ?? null,
+			resolvedWorkspaceId: organisation?.id ?? null,
+			activeMembershipCount: memberships.length,
+			resolutionPath,
+		},
+	);
+	return applyRoleSimulationToMembership(selected, client, user.id);
 }
 
 export async function getWorkspaceBySlug(client, workspaceSlug: string, accessToken?: string) {
@@ -190,7 +277,7 @@ export async function getWorkspaceBySlug(client, workspaceSlug: string, accessTo
 
 	const workspaceQuery = filterSignedInMembership(client
 		.from('organisation_members')
-		.select('role, joined_at, created_at, organisations!inner(id, name, slug)')
+		.select('id, user_id, auth_user_id, role, joined_at, created_at, organisations!inner(id, name, slug)')
 		.eq('status', 'active'), user.id);
 	const { data, error } = await workspaceQuery
 		.eq('organisations.slug', workspaceSlug)

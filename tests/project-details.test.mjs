@@ -4,7 +4,9 @@ import test from 'node:test';
 import {
 	PROJECT_PEOPLE_ROLES,
 	isProjectPeopleRole,
+	listProjectPersonOptions,
 	parseProjectPersonSelection,
+	projectPersonProfileName,
 	projectPeopleRoleLabel,
 } from '../src/lib/projectPeople.ts';
 import {
@@ -134,6 +136,83 @@ test('Project people roles are controlled and human-readable', () => {
 	assert.deepEqual(parseProjectPersonSelection('user:profile-1'), { source: 'user', id: 'profile-1' });
 	assert.deepEqual(parseProjectPersonSelection('demo:demo-1'), { source: 'demo', id: 'demo-1' });
 	assert.equal(parseProjectPersonSelection('owner:profile-1'), null);
+	assert.equal(projectPersonProfileName({ id: 'ruby-profile', first_name: 'Ruby', last_name: 'Atkinson', display_name: null, login_name: 'ruby.atkinson' }), 'Ruby Atkinson');
+	assert.equal(projectPersonProfileName({ id: 'fallback-profile', first_name: null, last_name: null, display_name: null, login_name: null }), 'Workspace member');
+});
+
+test('Project people options resolve accepted invitees through workspace directory profiles', async () => {
+	const calls = [];
+	class Query {
+		constructor(table) {
+			this.table = table;
+			this.filters = [];
+			this.orders = [];
+		}
+		select(value) {
+			this.selection = value;
+			return this;
+		}
+		eq(field, value) {
+			this.filters.push({ field, value });
+			return this;
+		}
+		order(field, options) {
+			this.orders.push({ field, options });
+			return this;
+		}
+		then(resolve, reject) {
+			calls.push({ table: this.table, selection: this.selection, filters: this.filters, orders: this.orders });
+			if (this.table === 'workspace_member_directory') {
+				return Promise.resolve({
+					data: [
+						{
+							organisation_membership_id: 'cd58905f-958d-46f8-8ea8-dc45594ba9be',
+							profile_id: 'df702c09-60ec-44df-b262-b5902726dc76',
+							display_name: null,
+							first_name: 'Ruby',
+							last_name: 'Atkinson',
+							login_name: 'ruby.atkinson',
+							role: 'viewer',
+							membership_status: 'active',
+						},
+						{
+							organisation_membership_id: 'fallback-membership',
+							profile_id: 'fallback-profile',
+							display_name: null,
+							first_name: null,
+							last_name: null,
+							login_name: null,
+							role: 'member',
+							membership_status: 'active',
+						},
+					],
+					error: null,
+				}).then(resolve, reject);
+			}
+			if (this.table === 'workspace_demo_people') return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+			return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+		}
+	}
+	const options = await listProjectPersonOptions('mark-workspace', 'member', { from: (table) => new Query(table) });
+	assert.deepEqual(options[0], {
+		source: 'user',
+		id: 'df702c09-60ec-44df-b262-b5902726dc76',
+		displayName: 'Ruby Atkinson',
+		email: null,
+		membershipId: 'cd58905f-958d-46f8-8ea8-dc45594ba9be',
+		workspaceRole: 'viewer',
+		projectRole: null,
+		isDemoPerson: false,
+	});
+	assert.equal(options[1].displayName, 'Workspace member');
+	assert.equal(calls.some((call) => call.table === 'profiles'), false);
+	assert.equal(calls[0].table, 'workspace_member_directory');
+	assert.match(calls[0].selection, /profile_id/);
+	assert.match(calls[0].selection, /first_name/);
+	assert.deepEqual(calls[0].filters, [
+		{ field: 'organisation_id', value: 'mark-workspace' },
+		{ field: 'membership_status', value: 'active' },
+	]);
 });
 
 test('Project date types and derived status are controlled and timeline-ready', () => {
@@ -484,6 +563,7 @@ test('Project people helper enforces central RBAC and scopes assignment writes t
 	assert.match(source, /getWorkspaceBySlug\(client, workspaceSlug, accessToken\)/);
 	assert.match(source, /\.eq\('slug', projectSlug\)/);
 	assert.match(source, /\.eq\('organisation_id', organisation\.id\)/);
+	assert.match(source, /\.from\('workspace_member_directory'\)[\s\S]*profile_id[\s\S]*first_name[\s\S]*last_name[\s\S]*login_name/);
 	assert.match(source, /\.from\('organisation_members'\)[\s\S]*\.eq\('status', 'active'\)/);
 	assert.match(source, /\.from\('workspace_demo_people'\)[\s\S]*\.eq\('status', 'active'\)[\s\S]*\.eq\('is_demo_person', true\)/);
 	assert.match(source, /parseProjectPersonSelection\(input\.personSelection\)/);

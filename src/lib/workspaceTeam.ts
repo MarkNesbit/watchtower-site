@@ -8,6 +8,7 @@ export type WorkspaceTeamMember = {
 	organisation_id: string;
 	organisation_membership_id: string;
 	profile_id: string;
+	auth_user_id?: string | null;
 	display_name?: string | null;
 	first_name?: string | null;
 	last_name?: string | null;
@@ -238,7 +239,7 @@ export function buildWorkspaceTeamDisplayMembers(
 				loginLabel: workspaceTeamLoginLabel(member),
 				lifecycleDateLabel: lifecycle.lifecycleDateLabel,
 				lifecycleDateValue: lifecycle.lifecycleDateValue,
-				isCurrentUser: member.profile_id === currentUserId,
+				isCurrentUser: Boolean(currentUserId && member.auth_user_id === currentUserId),
 			};
 		});
 }

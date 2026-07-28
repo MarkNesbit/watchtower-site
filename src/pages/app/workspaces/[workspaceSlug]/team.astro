@@ -192,8 +192,8 @@ try {
 		const canUseAdminDirectory = workspaceRole === 'owner' || workspaceRole === 'admin';
 		const directoryTable = canUseAdminDirectory ? 'workspace_member_admin_directory' : 'workspace_member_directory';
 		const selectColumns = canUseAdminDirectory
-			? 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, invited_at, invitation_expires_at, joined_at, accepted_at, deactivated_at, reactivated_at, invitation_id, invitation_status, invitation_delivered_at, invitation_opened_at, invitation_accepted_at, invitation_cancelled_at, invitation_superseded_at, invitation_delivery_attempt_count, invitation_last_delivery_attempt_at, invitation_failure_code, invitation_failure_message, invitation_delivery_strategy'
-			: 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, is_deactivated, joined_at, deactivated_at, reactivated_at';
+			? 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, invited_at, invitation_expires_at, joined_at, accepted_at, deactivated_at, reactivated_at, invitation_id, invitation_status, invitation_delivered_at, invitation_opened_at, invitation_accepted_at, invitation_cancelled_at, invitation_superseded_at, invitation_delivery_attempt_count, invitation_last_delivery_attempt_at, invitation_failure_code, invitation_failure_message, invitation_delivery_strategy, auth_user_id'
+			: 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, is_deactivated, joined_at, deactivated_at, reactivated_at, auth_user_id';
 		const { data, error } = await serverSupabase
 			.from(directoryTable)
 			.select(selectColumns)
