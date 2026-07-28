@@ -17,6 +17,7 @@ export type WorkspaceTeamMember = {
 	is_deactivated?: boolean | null;
 	invited_at?: string | null;
 	invitation_expires_at?: string | null;
+	joined_at?: string | null;
 	accepted_at?: string | null;
 	deactivated_at?: string | null;
 	reactivated_at?: string | null;
@@ -213,7 +214,7 @@ export function lifecycleDate(member: WorkspaceTeamMember): Pick<WorkspaceTeamDi
 	if (member.membership_status === 'invite_expired') return { lifecycleDateLabel: 'Expired', lifecycleDateValue: member.invitation_expires_at ?? member.invited_at ?? null };
 	if (member.membership_status === 'deactivated') return { lifecycleDateLabel: 'Deactivated', lifecycleDateValue: member.deactivated_at ?? null };
 	if (member.membership_status === 'suspended') return { lifecycleDateLabel: 'Suspended', lifecycleDateValue: null };
-	return { lifecycleDateLabel: 'Joined', lifecycleDateValue: member.accepted_at ?? member.reactivated_at ?? null };
+	return { lifecycleDateLabel: 'Joined', lifecycleDateValue: member.joined_at ?? member.accepted_at ?? member.reactivated_at ?? null };
 }
 
 export function buildWorkspaceTeamDisplayMembers(

@@ -330,7 +330,7 @@ Access is constrained by `is_active_organisation_member(organisation_id)`.
 
 # View: `workspace_member_admin_directory`
 
-Provides Owner/Admin-only membership administration display identity for future team administration. It includes the safe directory fields plus `contact_email`, `auth_email` and lifecycle timestamps.
+Provides Owner/Admin-only membership administration display identity for future team administration. It includes the safe directory fields plus `contact_email`, `auth_email`, `joined_at` and lifecycle timestamps. The Team page's Joined value reads `organisation_members.joined_at`, with invitation acceptance populating that field when it was previously null.
 
 Access is constrained by `has_real_active_organisation_role(organisation_id, array['owner', 'admin'])`, which uses the real stored membership role rather than internal role simulation.
 
