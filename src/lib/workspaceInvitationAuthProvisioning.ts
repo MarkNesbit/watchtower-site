@@ -54,6 +54,8 @@ type SupabaseAdminClient = {
 export const WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE = 'auth_identity_provisioning_failed';
 export const WORKSPACE_INVITATION_AUTH_IDENTITY_ALIAS_FAILURE_CODE = 'auth_identity_alias_assignment_failed';
 
+type PlaceholderDeleteResult = 'deleted' | 'admin_missing';
+
 function safeFailureMessage(error: unknown, fallback: string) {
 	const message = error instanceof Error ? error.message : String(error ?? fallback);
 	return message
@@ -192,9 +194,11 @@ async function softDeleteAuthUser(client: SupabaseAdminClient, authUserId: strin
 	if (error && !isMissingUserError(error)) throw error;
 }
 
-async function hardDeleteAuthUser(client: SupabaseAdminClient, authUserId: string) {
+async function hardDeleteAuthUser(client: SupabaseAdminClient, authUserId: string): Promise<PlaceholderDeleteResult> {
 	const { error } = await client.auth.admin.deleteUser(authUserId, false);
-	if (error && !isMissingUserError(error)) throw error;
+	if (error && isMissingUserError(error)) return 'admin_missing';
+	if (error) throw error;
+	return 'deleted';
 }
 
 async function getAuthUserById(client: SupabaseAdminClient, authUserId: string) {
@@ -222,6 +226,26 @@ async function verifyPlaceholderRelease(
 		p_new_auth_user_id: replacementAuthUserId,
 	});
 	if (error) throw error;
+}
+
+async function releaseApiInvisiblePlaceholder(
+	client: SupabaseAdminClient,
+	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
+	replacementAuthUserId: string,
+	correlationId: string,
+) {
+	const { data, error } = await client.rpc('release_workspace_invitation_auth_placeholder', {
+		p_invitation_id: candidate.invitation_id,
+		p_old_auth_user_id: placeholderAuthUserIdFor(candidate),
+		p_new_auth_user_id: replacementAuthUserId,
+		p_correlation_id: correlationId,
+	});
+	if (error) throw error;
+
+	const [release] = (Array.isArray(data) ? data : [data]) as Array<{ result?: string; reason?: string } | null>;
+	if (release?.result === 'deleted' || release?.result === 'already_absent') return release.result;
+
+	throw new Error(`Controlled invitation Auth placeholder release was blocked: ${release?.reason ?? 'unknown_reason'}.`);
 }
 
 async function verifyFinalAuthIdentity(
@@ -343,9 +367,16 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 			repairStage = 'placeholder_delete_started';
 			logRepairStage(candidate, repairStage, replacementAuthUserId);
 			try {
-				await hardDeleteAuthUser(input.adminClient, placeholderAuthUserId);
+				const deleteResult = await hardDeleteAuthUser(input.adminClient, placeholderAuthUserId);
 				repairStage = 'placeholder_delete_api_completed';
 				logRepairStage(candidate, repairStage, replacementAuthUserId);
+				if (deleteResult === 'admin_missing') {
+					repairStage = 'placeholder_sql_release_started';
+					logRepairStage(candidate, repairStage, replacementAuthUserId);
+					await releaseApiInvisiblePlaceholder(input.adminClient, candidate, replacementAuthUserId, correlationId);
+					repairStage = 'placeholder_sql_release_verified';
+					logRepairStage(candidate, repairStage, replacementAuthUserId);
+				}
 				await verifyAuthUserDeleted(input.adminClient, placeholderAuthUserId);
 				repairStage = 'placeholder_delete_verified';
 				logRepairStage(candidate, repairStage, replacementAuthUserId);
