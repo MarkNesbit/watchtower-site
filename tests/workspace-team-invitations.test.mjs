@@ -861,6 +861,8 @@ test('Workspace invitation Auth provisioning logs safe repair lifecycle diagnost
 		invitationId: candidate.invitation_id,
 		oldAuthUserId: candidate.current_auth_user_id,
 		newAuthUserId: replacementAuthUserId,
+		remapOperationName: 'record_workspace_invitation_auth_identity_repair',
+		cleanupRequired: false,
 		outcome: 'remapped_created_user',
 	}]);
 	for (const entry of entries.slice(1, 6)) {
@@ -937,6 +939,16 @@ test('Workspace invitation Auth provisioning helper is idempotent for existing v
 test('Workspace invitation Auth provisioning rolls back replacement user when remap recording fails', async () => {
 	const calls = [];
 	const replacementAuthUserId = '99999999-9999-4999-8999-999999999999';
+	const jwtLikeToken = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXRAZXhhbXBsZS50ZXN0In0.signature123';
+	const longHexSecret = 'abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789';
+	const remapError = Object.assign(
+		new Error(`remap transaction failed for secret@example.test with token ${jwtLikeToken} https://example.test/action?token_hash=${longHexSecret}`),
+		{
+			code: '23503',
+			details: `Key (auth_user_id)=(99999999-9999-4999-8999-999999999999) failed for secret@example.test password=topsecret secret ${longHexSecret}`,
+			hint: `Check service_role key re_secret and invitation token ${jwtLikeToken} before retry`,
+		},
+	);
 	const failingCandidate = {
 		invitation_id: '77777777-7777-4777-8777-777777777777',
 		organisation_id: '22222222-2222-4222-8222-222222222222',
@@ -972,7 +984,7 @@ test('Workspace invitation Auth provisioning rolls back replacement user when re
 		async rpc(name, args) {
 			calls.push(['rpc', name, args]);
 			if (name === 'record_workspace_invitation_auth_identity_repair' && args.p_outcome === 'remapped_created_user') {
-				return { data: null, error: new Error('remap transaction failed') };
+				return { data: null, error: remapError };
 			}
 			return { data: 'repair-id', error: null };
 		},
@@ -988,7 +1000,172 @@ test('Workspace invitation Auth provisioning rolls back replacement user when re
 	assert.equal(result[0].authUserId, failingCandidate.current_auth_user_id);
 	assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', replacementAuthUserId, true]]);
 	assert.equal(calls.filter((call) => call[0] === 'updateUserById').length, 0);
-	assert.equal(entries.at(-1)[2].stage, 'record_created_user_remap');
+	const failureLog = entries.at(-1);
+	assert.equal(failureLog[0], 'error');
+	assert.equal(failureLog[1], 'auth_identity_repair_failed');
+	assert.deepEqual(failureLog[2], {
+		failureCode: WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE,
+		stage: 'record_created_user_remap',
+		profileId: failingCandidate.profile_id,
+		membershipId: failingCandidate.membership_id,
+		invitationId: failingCandidate.invitation_id,
+		supabaseErrorCode: '23503',
+		safeErrorMessage: 'remap transaction failed for [redacted-email] with [redacted] [redacted-jwt] [redacted-link]',
+		safeDetails: 'Key (auth_user_id)=(99999999-9999-4999-8999-999999999999) failed for [redacted-email] [redacted]=[redacted] secret [redacted-secret]',
+		safeHint: 'Check [redacted-secret] [redacted-secret] and invitation [redacted] [redacted-jwt] before retry',
+		oldAuthUserId: failingCandidate.current_auth_user_id,
+		newAuthUserId: replacementAuthUserId,
+		remapOperationName: 'record_workspace_invitation_auth_identity_repair',
+		cleanupAttempted: true,
+		cleanupOutcome: 'deleted_new_auth_user',
+		newAuthUserRetained: false,
+		requiresManualRepair: false,
+	});
+	assert.doesNotMatch(JSON.stringify(entries), /secret@example\.test|example\.test\/action|re_secret|service[_ -]?role key|eyJ|abcdef0123456789|topsecret/i);
+});
+
+test('Workspace invitation Auth provisioning logs cleanup outcome when remap rollback cannot delete replacement', async () => {
+	const calls = [];
+	const replacementAuthUserId = '99999999-9999-4999-8999-999999999999';
+	const cleanupError = Object.assign(
+		new Error('rollback delete failed for secret@example.test access_token=abc123'),
+		{
+			code: '500',
+			details: 'delete failed with password=topsecret',
+			hint: 'retry without token abc123',
+		},
+	);
+	const failingCandidate = {
+		invitation_id: '77777777-7777-4777-8777-777777777777',
+		organisation_id: '22222222-2222-4222-8222-222222222222',
+		membership_id: '33333333-3333-4333-8333-333333333333',
+		profile_id: '44444444-4444-4444-8444-444444444444',
+		current_auth_user_id: '55555555-5555-4555-8555-555555555555',
+		auth_email: 'secret@example.test',
+		membership_status: 'invited',
+		invitation_status: 'delivery_failed',
+		has_email_identity: false,
+		existing_valid_auth_user_id: null,
+	};
+	const client = {
+		auth: {
+			admin: {
+				async updateUserById(...args) {
+					calls.push(['updateUserById', ...args]);
+					return { data: {}, error: null };
+				},
+				async createUser(input) {
+					calls.push(['createUser', input]);
+					return { data: { user: { id: replacementAuthUserId } }, error: null };
+				},
+				async deleteUser(...args) {
+					calls.push(['deleteUser', ...args]);
+					return { data: null, error: cleanupError };
+				},
+				async getUserById() {
+					throw new Error('getUserById should not run after remap failure');
+				},
+			},
+		},
+		async rpc(name, args) {
+			calls.push(['rpc', name, args]);
+			if (name === 'record_workspace_invitation_auth_identity_repair' && args.p_outcome === 'remapped_created_user') {
+				return { data: null, error: Object.assign(new Error('remap transaction failed'), { code: '23503' }) };
+			}
+			return { data: 'repair-id', error: null };
+		},
+	};
+
+	const { entries, result } = await captureConsole(() => provisionWorkspaceInvitationAuthIdentities({
+		adminClient: client,
+		candidates: [failingCandidate],
+		correlationId: '88888888-8888-4888-8888-888888888888',
+	}));
+
+	assert.equal(result[0].status, 'failed');
+	assert.equal(result[0].authUserId, failingCandidate.current_auth_user_id);
+	assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', replacementAuthUserId, true]]);
+	assert.equal(calls.filter((call) => call[0] === 'updateUserById').length, 0);
+	const failureLog = entries.at(-1);
+	assert.equal(failureLog[2].stage, 'record_created_user_remap');
+	assert.equal(failureLog[2].newAuthUserId, replacementAuthUserId);
+	assert.equal(failureLog[2].remapOperationName, 'record_workspace_invitation_auth_identity_repair');
+	assert.equal(failureLog[2].cleanupAttempted, true);
+	assert.equal(failureLog[2].cleanupOutcome, 'delete_failed');
+	assert.equal(failureLog[2].newAuthUserRetained, true);
+	assert.equal(failureLog[2].requiresManualRepair, true);
+	assert.equal(failureLog[2].cleanupErrorCode, '500');
+	assert.equal(failureLog[2].safeCleanupErrorMessage, 'rollback delete failed for [redacted-email] [redacted]=[redacted]');
+	assert.equal(failureLog[2].safeCleanupDetails, 'delete failed with [redacted]=[redacted]');
+	assert.equal(failureLog[2].safeCleanupHint, 'retry without [redacted] abc123');
+	assert.doesNotMatch(JSON.stringify(entries), /secret@example\.test|topsecret/);
+});
+
+test('Workspace invitation Auth provisioning logs retained replacement when reused Auth remap fails', async () => {
+	const calls = [];
+	const replacementAuthUserId = '99999999-9999-4999-8999-999999999999';
+	const failingCandidate = {
+		invitation_id: '77777777-7777-4777-8777-777777777777',
+		organisation_id: '22222222-2222-4222-8222-222222222222',
+		membership_id: '33333333-3333-4333-8333-333333333333',
+		profile_id: '44444444-4444-4444-8444-444444444444',
+		current_auth_user_id: '55555555-5555-4555-8555-555555555555',
+		auth_email: 'secret@example.test',
+		membership_status: 'invited',
+		invitation_status: 'delivery_failed',
+		has_email_identity: false,
+		existing_valid_auth_user_id: replacementAuthUserId,
+	};
+	const client = {
+		auth: {
+			admin: {
+				async updateUserById(...args) {
+					calls.push(['updateUserById', ...args]);
+					return { data: {}, error: null };
+				},
+				async createUser(...args) {
+					calls.push(['createUser', ...args]);
+					throw new Error('createUser should not run when replacement exists');
+				},
+				async deleteUser(...args) {
+					calls.push(['deleteUser', ...args]);
+					return { data: {}, error: null };
+				},
+				async getUserById() {
+					throw new Error('getUserById should not run after remap failure');
+				},
+			},
+		},
+		async rpc(name, args) {
+			calls.push(['rpc', name, args]);
+			if (name === 'record_workspace_invitation_auth_identity_repair' && args.p_outcome === 'remapped_existing_user') {
+				return { data: null, error: Object.assign(new Error('remap failed for secret@example.test'), { code: '23514' }) };
+			}
+			return { data: 'repair-id', error: null };
+		},
+	};
+
+	const { entries, result } = await captureConsole(() => provisionWorkspaceInvitationAuthIdentities({
+		adminClient: client,
+		candidates: [failingCandidate],
+		correlationId: '88888888-8888-4888-8888-888888888888',
+	}));
+
+	assert.equal(result[0].status, 'failed');
+	assert.equal(result[0].authUserId, failingCandidate.current_auth_user_id);
+	assert.equal(calls.filter((call) => call[0] === 'createUser').length, 0);
+	assert.equal(calls.filter((call) => call[0] === 'deleteUser').length, 0);
+	assert.equal(calls.filter((call) => call[0] === 'updateUserById').length, 0);
+	const failureLog = entries.at(-1);
+	assert.equal(failureLog[2].stage, 'record_created_user_remap');
+	assert.equal(failureLog[2].oldAuthUserId, failingCandidate.current_auth_user_id);
+	assert.equal(failureLog[2].newAuthUserId, replacementAuthUserId);
+	assert.equal(failureLog[2].remapOperationName, 'record_workspace_invitation_auth_identity_repair');
+	assert.equal(failureLog[2].cleanupAttempted, false);
+	assert.equal(failureLog[2].cleanupOutcome, 'retained_existing_auth_user');
+	assert.equal(failureLog[2].newAuthUserRetained, true);
+	assert.equal(failureLog[2].requiresManualRepair, true);
+	assert.doesNotMatch(JSON.stringify(entries), /secret@example\.test/);
 });
 
 test('Workspace invitation Auth provisioning stops before alias move when placeholder hard delete fails', async () => {
@@ -1687,6 +1864,7 @@ test('Workspace invitation Auth provisioning logs safe failure stage without raw
 test('Workspace invitation send and setup routes repair Auth identity before delivery and recovery', async () => {
 	const route = await readFile(sendRouteUrl, 'utf8');
 	const setupRoute = await readFile(setupRouteUrl, 'utf8');
+	const failedIdentityBlock = route.match(/const failedIdentityResults = new Map[\s\S]*?deliverable = deliverable\.filter\(\(invitation\) => !failedIdentityResults\.has\(invitation\.invitation_id\)\);/)?.[0] ?? '';
 
 	assert.match(route, /createSupabaseAdminClient\(invitationDeliveryEnv as Record<string, unknown>\)/);
 	assert.match(route, /get_workspace_invitation_auth_identity_repair_candidates/);
@@ -1695,6 +1873,12 @@ test('Workspace invitation send and setup routes repair Auth identity before del
 	assert.match(route, /Invitation account setup could not be completed safely\. Retry is available\./);
 	assert.match(route, /markDeliveryResult\(serverSupabase, result\)/);
 	assert.match(route, /deliverable = deliverable\.filter\(\(invitation\) => !failedIdentityResults\.has\(invitation\.invitation_id\)\)/);
+	assert.match(failedIdentityBlock, /status: 'delivery_failed'/);
+	assert.match(failedIdentityBlock, /failureCode: failedIdentity\.failureCode \?\? WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE/);
+	assert.match(failedIdentityBlock, /failureMessage: 'Invitation account setup could not be completed safely\. Retry is available\.'/);
+	assert.match(failedIdentityBlock, /markDeliveryResult\(serverSupabase, result\)/);
+	assert.doesNotMatch(failedIdentityBlock, /sendWorkspaceInvitationEmail/);
+	assert.ok(route.indexOf('deliverable = deliverable.filter((invitation) => !failedIdentityResults.has(invitation.invitation_id))') < route.indexOf('result = await sendWorkspaceInvitationEmail'));
 	assert.match(setupRoute, /get_workspace_invitation_auth_identity_repair_candidates/);
 	assert.match(setupRoute, /provisionWorkspaceInvitationAuthIdentities/);
 	assert.match(setupRoute, /candidate\.has_email_identity && candidate\.auth_email_matches_invitation !== false/);

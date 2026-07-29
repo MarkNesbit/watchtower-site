@@ -55,6 +55,7 @@ export const WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE = 'auth_identity_pr
 export const WORKSPACE_INVITATION_AUTH_IDENTITY_ALIAS_FAILURE_CODE = 'auth_identity_alias_assignment_failed';
 
 type PlaceholderDeleteResult = 'deleted' | 'admin_missing';
+type SupabaseLikeError = Error & { code?: string; details?: string; hint?: string };
 
 function safeFailureMessage(error: unknown, fallback: string) {
 	const message = error instanceof Error ? error.message : String(error ?? fallback);
@@ -62,8 +63,51 @@ function safeFailureMessage(error: unknown, fallback: string) {
 		.replace(/https?:\/\/\S+/gi, '[redacted-link]')
 		.replace(/[^\s@]+@[^\s@]+/g, '[redacted-email]')
 		.replace(/re_[a-z0-9_-]+/gi, '[redacted-secret]')
-		.replace(/\b(?:token|password|authorization)\b/gi, '[redacted]')
+		.replace(/\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b/gi, '[redacted-jwt]')
+		.replace(/\b[a-f0-9]{48,}\b/gi, '[redacted-secret]')
+		.replace(/\b(password|token|access_token|refresh_token|authorization|service[_ -]?role(?: key)?)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]')
+		.replace(/\bservice[_ -]?role(?: key)?\b/gi, '[redacted-secret]')
+		.replace(/\b(?:token|password|authorization|access_token|refresh_token)\b/gi, '[redacted]')
 		.slice(0, 240) || fallback;
+}
+
+function safeOptionalFailureMessage(value: unknown) {
+	if (value === null || value === undefined || value === '') return undefined;
+	return safeFailureMessage(value, 'Invitation Auth repair detail redacted.');
+}
+
+function safeSupabaseErrorDiagnostics(error: unknown) {
+	const supabaseError = error instanceof Error ? error as SupabaseLikeError : null;
+	return {
+		supabaseErrorCode: safeOptionalFailureMessage(supabaseError?.code),
+		safeErrorMessage: safeFailureMessage(error, 'Invitation Auth identity could not be provisioned.'),
+		safeDetails: safeOptionalFailureMessage(supabaseError?.details),
+		safeHint: safeOptionalFailureMessage(supabaseError?.hint),
+	};
+}
+
+function remapFailureCleanupDiagnostics(input: {
+	attempted: boolean;
+	outcome: string | null;
+	newAuthUserRetained: boolean | null;
+	requiresManualRepair: boolean;
+	cleanupError?: unknown;
+}) {
+	const cleanupErrorDiagnostics = input.cleanupError
+		? {
+			cleanupErrorCode: safeOptionalFailureMessage((input.cleanupError as SupabaseLikeError).code),
+			safeCleanupErrorMessage: safeFailureMessage(input.cleanupError, 'Invitation Auth repair cleanup failed.'),
+			safeCleanupDetails: safeOptionalFailureMessage((input.cleanupError as SupabaseLikeError).details),
+			safeCleanupHint: safeOptionalFailureMessage((input.cleanupError as SupabaseLikeError).hint),
+		}
+		: {};
+	return {
+		cleanupAttempted: input.attempted,
+		cleanupOutcome: input.outcome,
+		newAuthUserRetained: input.newAuthUserRetained,
+		requiresManualRepair: input.requiresManualRepair,
+		...cleanupErrorDiagnostics,
+	};
 }
 
 function temporaryEmailFor(candidate: WorkspaceInvitationAuthIdentityRepairCandidate) {
@@ -97,6 +141,8 @@ function logRepairCompleted(
 	console.info('auth_identity_repair_completed', {
 		...repairLogContext(candidate),
 		newAuthUserId,
+		remapOperationName: 'record_workspace_invitation_auth_identity_repair',
+		cleanupRequired: false,
 		outcome,
 	});
 }
@@ -105,6 +151,7 @@ function logRepairFailed(
 	candidate: WorkspaceInvitationAuthIdentityRepairCandidate,
 	stage: string,
 	failureCode = WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE,
+	extra: Record<string, unknown> = {},
 ) {
 	console.error('auth_identity_repair_failed', {
 		failureCode,
@@ -112,6 +159,7 @@ function logRepairFailed(
 		profileId: candidate.profile_id,
 		membershipId: candidate.membership_id,
 		invitationId: candidate.invitation_id,
+		...extra,
 	});
 }
 
@@ -308,6 +356,7 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 			? candidate.current_auth_user_id
 			: candidate.existing_valid_auth_user_id ?? null;
 		let createdReplacementThisAttempt = false;
+		let repairFailureLogContext: Record<string, unknown> = {};
 		let watchtowerLinkageRemapped = candidate.has_email_identity && !authEmailMatchesInvitation;
 		try {
 			if (!replacementAuthUserId) {
@@ -349,13 +398,44 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 					);
 					watchtowerLinkageRemapped = true;
 				} catch (error) {
+					let cleanupAttempted = false;
+					let cleanupOutcome: string | null = replacementAuthUserId ? 'not_attempted' : null;
+					let newAuthUserRetained: boolean | null = replacementAuthUserId ? true : null;
+					let requiresManualRepair = false;
+					let cleanupError: unknown;
 					if (createdReplacementThisAttempt) {
+						cleanupAttempted = true;
 						try {
 							await softDeleteAuthUser(input.adminClient, replacementAuthUserId);
-						} catch {
+							cleanupOutcome = 'deleted_new_auth_user';
+							newAuthUserRetained = false;
+						} catch (caughtCleanupError) {
+							cleanupError = caughtCleanupError;
+							cleanupOutcome = 'delete_failed';
+							newAuthUserRetained = true;
+							requiresManualRepair = true;
 							// Best-effort cleanup only. The original Watchtower linkage was not changed.
 						}
+					} else if (replacementAuthUserId) {
+						cleanupOutcome = 'retained_existing_auth_user';
+						requiresManualRepair = true;
 					}
+					repairFailureLogContext = {
+						...safeSupabaseErrorDiagnostics(error),
+						profileId: candidate.profile_id,
+						membershipId: candidate.membership_id,
+						invitationId: candidate.invitation_id,
+						oldAuthUserId: placeholderAuthUserIdFor(candidate),
+						newAuthUserId: replacementAuthUserId,
+						remapOperationName: 'record_workspace_invitation_auth_identity_repair',
+						...remapFailureCleanupDiagnostics({
+							attempted: cleanupAttempted,
+							outcome: cleanupOutcome,
+							newAuthUserRetained,
+							requiresManualRepair,
+							cleanupError,
+						}),
+					};
 					throw error;
 				}
 			}
@@ -420,7 +500,7 @@ export async function provisionWorkspaceInvitationAuthIdentities(input: {
 			const failureCode = repairStage.startsWith('deterministic_alias_assignment')
 				? WORKSPACE_INVITATION_AUTH_IDENTITY_ALIAS_FAILURE_CODE
 				: WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE;
-			logRepairFailed(candidate, repairStage, failureCode);
+			logRepairFailed(candidate, repairStage, failureCode, repairFailureLogContext);
 			try {
 				await recordRepairFailure(
 					input.adminClient,
