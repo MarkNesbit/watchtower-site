@@ -252,9 +252,9 @@ select
   om.role,
   om.status as membership_status,
   (om.status = 'deactivated') as is_deactivated,
-  om.joined_at,
   om.deactivated_at,
-  om.reactivated_at
+  om.reactivated_at,
+  om.joined_at
 from public.organisation_members om
 join public.profiles p on p.id = om.user_id
 where public.is_active_organisation_member(om.organisation_id);
@@ -274,7 +274,6 @@ select
   om.role,
   om.status as membership_status,
   om.invited_at,
-  om.joined_at,
   om.accepted_at,
   om.suspended_at,
   om.deactivated_at,
@@ -291,7 +290,8 @@ select
   invitation.expires_at as invitation_expires_at,
   invitation.failure_code as invitation_failure_code,
   invitation.failure_message as invitation_failure_message,
-  invitation.delivery_strategy as invitation_delivery_strategy
+  invitation.delivery_strategy as invitation_delivery_strategy,
+  om.joined_at
 from public.organisation_members om
 join public.profiles p on p.id = om.user_id
 left join public.workspace_membership_invitations invitation
