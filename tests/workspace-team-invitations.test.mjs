@@ -1927,8 +1927,8 @@ test('Workspace invitation acceptance populates and exposes membership joined_at
 	assert.match(backfillBlock, /om\.joined_at is null/);
 	assert.match(backfillBlock, /invitation\.profile_id = om\.user_id[\s\S]*invitation\.auth_user_id = om\.auth_user_id/);
 	assert.doesNotMatch(backfillSet, /\brole\s*=|\buser_id\s*=|\bauth_user_id\s*=|\borganisation_id\s*=/i);
-	assert.match(memberView, /om\.joined_at/);
-	assert.match(adminView, /om\.joined_at/);
+	assert.match(memberView, /om\.deactivated_at,[\s\S]*om\.reactivated_at,[\s\S]*om\.joined_at/);
+	assert.match(adminView, /invitation\.delivery_strategy as invitation_delivery_strategy,[\s\S]*om\.joined_at/);
 	assert.match(sql, /comment on view public\.workspace_member_admin_directory[\s\S]*joined_at/);
 });
 
@@ -1937,8 +1937,8 @@ test('Workspace invitation workspace-resolution migration exposes Auth UUID for 
 	const memberView = sql.match(/create or replace view public\.workspace_member_directory[\s\S]*?where public\.is_active_organisation_member\(om\.organisation_id\);/)?.[0] ?? '';
 	const adminView = sql.match(/create or replace view public\.workspace_member_admin_directory[\s\S]*?where public\.has_real_active_organisation_role/)?.[0] ?? '';
 
-	assert.match(memberView, /p\.id as profile_id[\s\S]*om\.auth_user_id/);
-	assert.match(adminView, /p\.id as profile_id[\s\S]*invitation\.delivery_strategy as invitation_delivery_strategy,[\s\S]*om\.auth_user_id/);
+	assert.match(memberView, /om\.deactivated_at,[\s\S]*om\.reactivated_at,[\s\S]*om\.joined_at,[\s\S]*om\.auth_user_id/);
+	assert.match(adminView, /invitation\.delivery_strategy as invitation_delivery_strategy,[\s\S]*om\.joined_at,[\s\S]*om\.auth_user_id/);
 	assert.match(sql, /auth_user_id is exposed for server-side current-member resolution only/);
 	assert.match(sql, /grant select on public\.workspace_member_directory to authenticated/);
 	assert.match(sql, /grant select on public\.workspace_member_admin_directory to authenticated/);

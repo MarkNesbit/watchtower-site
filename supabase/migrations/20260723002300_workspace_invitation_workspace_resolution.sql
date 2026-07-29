@@ -15,9 +15,9 @@ select
   om.role,
   om.status as membership_status,
   (om.status = 'deactivated') as is_deactivated,
-  om.joined_at,
   om.deactivated_at,
   om.reactivated_at,
+  om.joined_at,
   om.auth_user_id
 from public.organisation_members om
 join public.profiles p on p.id = om.user_id
@@ -38,7 +38,6 @@ select
   om.role,
   om.status as membership_status,
   om.invited_at,
-  om.joined_at,
   om.accepted_at,
   om.suspended_at,
   om.deactivated_at,
@@ -56,6 +55,7 @@ select
   invitation.failure_code as invitation_failure_code,
   invitation.failure_message as invitation_failure_message,
   invitation.delivery_strategy as invitation_delivery_strategy,
+  om.joined_at,
   om.auth_user_id
 from public.organisation_members om
 join public.profiles p on p.id = om.user_id
