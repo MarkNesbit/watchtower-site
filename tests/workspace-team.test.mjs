@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
 	buildWorkspaceTeamDisplayMembers,
+	lifecycleDate,
 	memberMatchesFilter,
 	membershipStateCounts,
 	membershipStatusLabel,
@@ -43,10 +44,12 @@ test('Workspace Team route selects the correct membership directory by role', as
 
 	assert.match(route, /const canUseAdminDirectory = workspaceRole === 'owner' \|\| workspaceRole === 'admin'/);
 	assert.match(route, /const directoryTable = canUseAdminDirectory \? 'workspace_member_admin_directory' : 'workspace_member_directory'/);
+	assert.match(route, /joined_at/);
 	assert.match(route, /\.from\(directoryTable\)/);
 	assert.match(route, /\.eq\('organisation_id', organisation\.id\)/);
 	assert.match(route, /organisation_membership_id/);
 	assert.match(route, /profile_id/);
+	assert.match(route, /auth_user_id/);
 	assert.match(route, /\{member\.loginLabel\}/);
 	assert.doesNotMatch(route, /auth_email|data-email|email as/i);
 });
@@ -81,6 +84,8 @@ test('Workspace Team route renders roles states filters search and accessible re
 	assert.match(route, /data-membership-id=\{member\.organisation_membership_id\}/);
 	assert.match(route, /data-profile-id=\{member\.profile_id\}/);
 	assert.match(route, /aria-label=\{\`\$\{member\.displayStatus\}\. \$\{member\.statusDescription\}\`\}/);
+	assert.match(route, /\{formatDate\(member\.lifecycleDateValue\)\}/);
+	assert.doesNotMatch(route, /formatDate\(member\.invitation_expires_at \?\? member\.lifecycleDateValue\)/);
 	assert.match(route, /@media \(max-width: 900px\)/);
 	assert.match(route, /content: attr\(data-label\)/);
 });
@@ -134,6 +139,79 @@ test('Workspace Team login display uses backfilled login names before Not set fa
 	assert.equal(workspaceTeamLoginLabel({ login_name: 'mark.nesbit', display_name: 'Mark Nesbit' }), 'mark.nesbit');
 	assert.equal(workspaceTeamLoginLabel({ login_name: '   ', display_name: 'Mark Nesbit' }), 'Mark Nesbit');
 	assert.equal(workspaceTeamLoginLabel({ login_name: null, display_name: null }), 'Not set');
+});
+
+test('Workspace Team helper displays joined_at for active accepted members', () => {
+	assert.deepEqual(lifecycleDate({
+		organisation_id: 'org',
+		organisation_membership_id: 'ruby-membership',
+		profile_id: 'ruby-profile',
+		role: 'viewer',
+		membership_status: 'active',
+		joined_at: '2026-07-28T06:55:00.000Z',
+		accepted_at: '2026-07-28T06:54:00.000Z',
+		invitation_expires_at: '2026-07-31T06:54:00.000Z',
+	}), {
+		lifecycleDateLabel: 'Joined',
+		lifecycleDateValue: '2026-07-28T06:55:00.000Z',
+	});
+	assert.deepEqual(lifecycleDate({
+		organisation_id: 'org',
+		organisation_membership_id: 'mark-membership',
+		profile_id: 'mark-profile',
+		role: 'owner',
+		membership_status: 'active',
+		joined_at: '2026-07-01T09:00:00.000Z',
+		accepted_at: null,
+	}), {
+		lifecycleDateLabel: 'Joined',
+		lifecycleDateValue: '2026-07-01T09:00:00.000Z',
+	});
+	assert.deepEqual(lifecycleDate({
+		organisation_id: 'org',
+		organisation_membership_id: 'legacy-membership',
+		profile_id: 'legacy-profile',
+		role: 'viewer',
+		membership_status: 'active',
+		joined_at: null,
+		accepted_at: '2026-07-28T06:54:00.000Z',
+	}), {
+		lifecycleDateLabel: 'Joined',
+		lifecycleDateValue: '2026-07-28T06:54:00.000Z',
+	});
+});
+
+test('Workspace Team current-user marker compares Auth UUID to membership Auth UUID', async () => {
+	const route = await routeSource();
+	assert.match(route, /currentUserId = userData\.user\?\.id/);
+	assert.match(route, /auth_user_id/);
+	assert.doesNotMatch(route, /isCurrentUser: member\.profile_id === currentUserId/);
+
+	const members = buildWorkspaceTeamDisplayMembers([
+		{
+			organisation_id: 'org',
+			organisation_membership_id: 'mark-membership',
+			profile_id: 'mark-profile',
+			auth_user_id: 'mark-auth-user',
+			first_name: 'Mark',
+			last_name: 'Nesbit',
+			role: 'owner',
+			membership_status: 'active',
+		},
+		{
+			organisation_id: 'org',
+			organisation_membership_id: 'ruby-membership',
+			profile_id: 'df702c09-60ec-44df-b262-b5902726dc76',
+			auth_user_id: 'fb483350-23d9-4eac-a056-54b4afbfad96',
+			first_name: 'Ruby',
+			last_name: 'Atkinson',
+			role: 'viewer',
+			membership_status: 'active',
+		},
+	], { currentUserId: 'fb483350-23d9-4eac-a056-54b4afbfad96' });
+
+	assert.equal(members.find((member) => member.profile_id === 'mark-profile')?.isCurrentUser, false);
+	assert.equal(members.find((member) => member.profile_id === 'df702c09-60ec-44df-b262-b5902726dc76')?.isCurrentUser, true);
 });
 
 test('Workspace Team helper sorts by last first login and membership UUID', () => {

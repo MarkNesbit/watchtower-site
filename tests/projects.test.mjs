@@ -28,6 +28,7 @@ import {
 	buildProjectRisksPath,
 	buildProjectTimelinePath,
 } from '../src/lib/projectRoutes.ts';
+import { getCurrentWorkspace } from '../src/lib/projects.ts';
 
 const migrationPath = new URL('../supabase/migrations/20260617000100_create_projects.sql', import.meta.url);
 const projectPolicyFixMigrationPath = new URL(
@@ -440,13 +441,123 @@ test('Current workspace lookup is scoped to the signed-in user membership', asyn
 	assert.match(source, /const user = userData\.user/);
 	assert.match(source, /if \(!user\) return null/);
 	assert.match(source, /function filterSignedInMembership\(query, userId: string\)/);
-	assert.match(source, /query\.or\(`user_id\.eq\.\$\{userId\},auth_user_id\.eq\.\$\{userId\}`\)/);
+	assert.match(source, /query\.or\(`auth_user_id\.eq\.\$\{userId\},and\(auth_user_id\.is\.null,user_id\.eq\.\$\{userId\}\)`\)/);
 	assert.match(source, /filterSignedInMembership\([\s\S]*\.eq\('status', 'active'\), user\.id\)/);
+	assert.match(source, /workspaceResolutionPath\(membership[\s\S]*accepted_invitation_membership/);
+	assert.match(source, /compareWorkspaceMembershipsForCurrentUser/);
+});
+
+test('Current workspace lookup prefers accepted invitation membership over personal fallback', async () => {
+	const signedInAuthUserId = 'fb483350-23d9-4eac-a056-54b4afbfad96';
+	const rubyProfileId = 'df702c09-60ec-44df-b262-b5902726dc76';
+	const calls = [];
+	class Query {
+		constructor(table) {
+			this.table = table;
+			this.filters = [];
+		}
+		select(value) {
+			this.selection = value;
+			return this;
+		}
+		eq(field, value) {
+			this.filters.push({ field, value });
+			return this;
+		}
+		or(value) {
+			this.orFilter = value;
+			return this;
+		}
+		order(field, options) {
+			this.orderBy = [...(this.orderBy ?? []), { field, options }];
+			return this;
+		}
+		limit() {
+			return this;
+		}
+		async maybeSingle() {
+			if (this.table === 'profiles') return { data: { is_internal_tester: false }, error: null };
+			return { data: null, error: null };
+		}
+		then(resolve, reject) {
+			calls.push({ table: this.table, selection: this.selection, filters: this.filters, orFilter: this.orFilter });
+			if (this.table === 'organisation_members') {
+				return Promise.resolve({
+					data: [
+						{
+							id: 'personal-membership',
+							user_id: signedInAuthUserId,
+							auth_user_id: signedInAuthUserId,
+							role: 'owner',
+							joined_at: '2026-07-20T09:00:00.000Z',
+							created_at: '2026-07-20T09:00:00.000Z',
+							organisations: {
+								id: 'ruby-fallback-org',
+								name: 'Mark Nesbit Professional Wt Ruby Atkinson Df702c0960ec Workspace',
+								slug: 'ruby-fallback',
+								type: 'personal',
+								created_by: signedInAuthUserId,
+							},
+						},
+						{
+							id: 'cd58905f-958d-46f8-8ea8-dc45594ba9be',
+							user_id: rubyProfileId,
+							auth_user_id: signedInAuthUserId,
+							role: 'viewer',
+							joined_at: '2026-07-28T06:55:00.000Z',
+							created_at: '2026-07-23T11:00:00.000Z',
+							organisations: {
+								id: 'mark-workspace',
+								name: 'Mark Nesbit Professional Workspace',
+								slug: 'mark-nesbit-professional-workspace',
+								type: 'personal',
+								created_by: 'mark-auth-user',
+							},
+						},
+					],
+					error: null,
+				}).then(resolve, reject);
+			}
+			return Promise.resolve({ data: null, error: null }).then(resolve, reject);
+		}
+	}
+	const client = {
+		auth: { getUser: async () => ({ data: { user: { id: signedInAuthUserId } }, error: null }) },
+		from: (table) => new Query(table),
+	};
+	const logs = [];
+	const originalInfo = console.info;
+	console.info = (event, details) => logs.push({ event, details });
+	try {
+		const workspace = await getCurrentWorkspace(client);
+		const organisation = Array.isArray(workspace.organisations) ? workspace.organisations[0] : workspace.organisations;
+		assert.equal(organisation.name, 'Mark Nesbit Professional Workspace');
+		assert.equal(workspace.role, 'viewer');
+		assert.equal(workspace.id, 'cd58905f-958d-46f8-8ea8-dc45594ba9be');
+		assert.equal(workspace.user_id, rubyProfileId);
+		assert.equal(calls[0].orFilter, `auth_user_id.eq.${signedInAuthUserId},and(auth_user_id.is.null,user_id.eq.${signedInAuthUserId})`);
+		assert.equal(calls.some((call) => call.action === 'insert'), false);
+		assert.deepEqual(logs.at(-1), {
+			event: 'workspace_resolution_completed',
+			details: {
+				signedInAuthUserId,
+				resolvedProfileId: rubyProfileId,
+				resolvedMembershipId: 'cd58905f-958d-46f8-8ea8-dc45594ba9be',
+				resolvedWorkspaceId: 'mark-workspace',
+				activeMembershipCount: 2,
+				resolutionPath: 'accepted_invitation_membership',
+			},
+		});
+		assert.equal(JSON.stringify(logs).includes('@'), false);
+	} finally {
+		console.info = originalInfo;
+	}
 });
 
 test('Project list and detail render database values with safe Astro templates', async () => {
 	const listSource = await readFile(new URL('../src/pages/app/projects/index.astro', import.meta.url), 'utf8');
 	const detailSource = await readFile(new URL('../src/pages/app/workspaces/[workspaceSlug]/projects/[projectId].astro', import.meta.url), 'utf8');
+	const projectListQuery = listSource.match(/const \{ data, error \} = await serverSupabase[\s\S]*?\.order\('updated_at', \{ ascending: false \}\);/)?.[0] ?? '';
 	for (const source of [listSource, detailSource]) {
 		assert.doesNotMatch(source, /innerHTML\s*=/);
 		assert.doesNotMatch(source, /<script[\s>]/);
@@ -455,6 +566,8 @@ test('Project list and detail render database values with safe Astro templates',
 	assert.match(detailSource, /{project\.name}/);
 	assert.match(listSource, /buildProjectPath\(workspaceSlug, project\.slug\)/);
 	assert.match(listSource, /workspaceSlug = organisation\.slug/);
+	assert.match(projectListQuery, /\.from\('projects'\)[\s\S]*\.eq\('organisation_id', organisation\.id\)[\s\S]*\.is\('deleted_at', null\)[\s\S]*\.is\('archived_at', null\)/);
+	assert.doesNotMatch(projectListQuery, /\.in\('id'|assigned|assignment|project_people/i);
 	assert.match(detailSource, /\.eq\('slug', projectSlug\)/);
 	assert.match(detailSource, /label=\{projectHealthLabel\}/);
 });

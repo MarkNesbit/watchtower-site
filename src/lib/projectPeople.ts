@@ -20,6 +20,9 @@ export type ProjectPeopleRole = (typeof PROJECT_PEOPLE_ROLES)[number];
 export type ProjectPersonProfile = {
 	id: string;
 	display_name?: string | null;
+	first_name?: string | null;
+	last_name?: string | null;
+	login_name?: string | null;
 	email?: string | null;
 };
 
@@ -54,6 +57,7 @@ export type ProjectPersonOption = {
 	id: string;
 	displayName: string;
 	email?: string | null;
+	membershipId?: string | null;
 	workspaceRole?: string | null;
 	projectRole?: string | null;
 	isDemoPerson: boolean;
@@ -70,6 +74,20 @@ function uniqueValues(values: Array<string | null | undefined>): string[] {
 
 function cleanOptionalText(value: unknown): string | null {
 	return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function cleanProfileText(value: unknown): string {
+	return typeof value === 'string' ? value.trim() : '';
+}
+
+export function projectPersonProfileName(profile: ProjectPersonProfile | null | undefined, fallback = 'Workspace member'): string {
+	if (!profile) return fallback;
+	const fullName = [cleanProfileText(profile.first_name), cleanProfileText(profile.last_name)].filter(Boolean).join(' ').trim();
+	return fullName
+		|| cleanProfileText(profile.display_name)
+		|| cleanProfileText(profile.login_name)
+		|| cleanProfileText(profile.email)
+		|| fallback;
 }
 
 export function isProjectPeopleRole(value: unknown): value is ProjectPeopleRole {
@@ -104,10 +122,19 @@ async function enrichAssignments(assignments: ProjectPersonAssignment[], client)
 	if (userIds.length > 0) {
 		try {
 			const { data: profiles } = await client
-				.from('profiles')
-				.select('id, display_name, email')
-				.in('id', userIds);
-			for (const profile of profiles ?? []) profilesById.set(profile.id, profile);
+				.from('workspace_member_directory')
+				.select('profile_id, display_name, first_name, last_name, login_name')
+				.in('profile_id', userIds);
+			for (const profile of profiles ?? []) {
+				profilesById.set(profile.profile_id, {
+					id: profile.profile_id,
+					display_name: profile.display_name,
+					first_name: profile.first_name,
+					last_name: profile.last_name,
+					login_name: profile.login_name,
+					email: null,
+				});
+			}
 		} catch {
 			// Assignment rows remain usable even when profile labels cannot be enriched.
 		}
@@ -162,29 +189,16 @@ export async function listProjectPersonOptions(
 	assertCan(workspaceRole, 'project.editDetails', 'Your workspace role does not permit project people assignment.');
 
 	const { data: memberships, error: membershipError } = await client
-		.from('organisation_members')
-		.select('user_id, role')
+		.from('workspace_member_directory')
+		.select('organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status')
 		.eq('organisation_id', organisationId)
-		.eq('status', 'active')
+		.eq('membership_status', 'active')
 		.order('joined_at', { ascending: true, nullsFirst: false })
-		.order('created_at', { ascending: true });
+		.order('organisation_membership_id', { ascending: true });
 
 	if (membershipError) throw membershipError;
 
 	const memberRows = memberships ?? [];
-	const memberIds = uniqueValues(memberRows.map((membership) => membership.user_id));
-	const profilesById = new Map<string, ProjectPersonProfile>();
-	if (memberIds.length > 0) {
-		try {
-			const { data: profiles } = await client
-				.from('profiles')
-				.select('id, display_name, email')
-				.in('id', memberIds);
-			for (const profile of profiles ?? []) profilesById.set(profile.id, profile);
-		} catch {
-			// Member IDs remain valid options even when display labels cannot be enriched.
-		}
-	}
 
 	let demoOptions: ProjectPersonOption[] = [];
 	try {
@@ -209,12 +223,20 @@ export async function listProjectPersonOptions(
 	}
 
 	const memberOptions = memberRows.map((membership) => {
-		const profile = profilesById.get(membership.user_id);
+		const profile = {
+			id: membership.profile_id,
+			display_name: membership.display_name,
+			first_name: membership.first_name,
+			last_name: membership.last_name,
+			login_name: membership.login_name,
+			email: null,
+		};
 		return {
 			source: 'user' as const,
-			id: membership.user_id,
-			displayName: profile?.display_name || profile?.email || 'Workspace member',
-			email: profile?.email ?? null,
+			id: membership.profile_id,
+			displayName: projectPersonProfileName(profile),
+			email: null,
+			membershipId: membership.organisation_membership_id ?? null,
 			workspaceRole: membership.role,
 			projectRole: null,
 			isDemoPerson: false,

@@ -322,7 +322,7 @@ WT-WORKSPACE-TEAM-002 adds database functions for controlled lifecycle transitio
 
 # View: `workspace_member_directory`
 
-Provides safe same-workspace display identity for active workspace users. It includes profile UUID, membership UUID, workspace UUID, display name, first name, last name, login name, role, membership status and deactivated presentation fields. It deliberately excludes `contact_email` and the auth email mirror.
+Provides safe same-workspace display identity for active workspace users. It includes profile UUID, membership UUID, workspace UUID, linked Auth UUID, display name, first name, last name, login name, role, membership status and deactivated presentation fields. It deliberately excludes `contact_email` and the auth email mirror.
 
 Access is constrained by `is_active_organisation_member(organisation_id)`.
 
@@ -330,7 +330,7 @@ Access is constrained by `is_active_organisation_member(organisation_id)`.
 
 # View: `workspace_member_admin_directory`
 
-Provides Owner/Admin-only membership administration display identity for future team administration. It includes the safe directory fields plus `contact_email`, `auth_email` and lifecycle timestamps.
+Provides Owner/Admin-only membership administration display identity for future team administration. It includes the safe directory fields plus linked Auth UUID, `contact_email`, `auth_email`, `joined_at` and lifecycle timestamps. The Team page's Joined value reads `organisation_members.joined_at`, with invitation acceptance populating that field when it was previously null.
 
 Access is constrained by `has_real_active_organisation_role(organisation_id, array['owner', 'admin'])`, which uses the real stored membership role rather than internal role simulation.
 

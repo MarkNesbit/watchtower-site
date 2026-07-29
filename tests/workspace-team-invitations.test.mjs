@@ -38,6 +38,8 @@ const authPlaceholderReleaseMigrationUrl = new URL('../supabase/migrations/20260
 const apiInvisibleAuthPlaceholderReleaseMigrationUrl = new URL('../supabase/migrations/20260723001900_workspace_invitation_api_invisible_placeholder_release.sql', import.meta.url);
 const acceptanceLifecycleGuardMigrationUrl = new URL('../supabase/migrations/20260723002000_workspace_invitation_acceptance_lifecycle_guard.sql', import.meta.url);
 const acceptanceAuditIdentityMigrationUrl = new URL('../supabase/migrations/20260723002100_workspace_invitation_acceptance_audit_identity.sql', import.meta.url);
+const acceptanceJoinedAtMigrationUrl = new URL('../supabase/migrations/20260723002200_workspace_invitation_acceptance_joined_at.sql', import.meta.url);
+const workspaceResolutionMigrationUrl = new URL('../supabase/migrations/20260723002300_workspace_invitation_workspace_resolution.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const setupRouteUrl = new URL('../src/pages/invitations/setup.ts', import.meta.url);
@@ -238,6 +240,8 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	const apiInvisibleAuthPlaceholderReleaseIndex = files.indexOf('20260723001900_workspace_invitation_api_invisible_placeholder_release.sql');
 	const acceptanceLifecycleGuardIndex = files.indexOf('20260723002000_workspace_invitation_acceptance_lifecycle_guard.sql');
 	const acceptanceAuditIdentityIndex = files.indexOf('20260723002100_workspace_invitation_acceptance_audit_identity.sql');
+	const acceptanceJoinedAtIndex = files.indexOf('20260723002200_workspace_invitation_acceptance_joined_at.sql');
+	const workspaceResolutionIndex = files.indexOf('20260723002300_workspace_invitation_workspace_resolution.sql');
 	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
 	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
 
@@ -252,6 +256,8 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.equal(apiInvisibleAuthPlaceholderReleaseIndex, authPlaceholderReleaseIndex + 1, 'API-invisible placeholder release migration should follow placeholder release migration');
 	assert.equal(acceptanceLifecycleGuardIndex, apiInvisibleAuthPlaceholderReleaseIndex + 1, 'acceptance lifecycle-guard migration should follow API-invisible placeholder release migration');
 	assert.equal(acceptanceAuditIdentityIndex, acceptanceLifecycleGuardIndex + 1, 'acceptance audit identity migration should follow acceptance lifecycle guard migration');
+	assert.equal(acceptanceJoinedAtIndex, acceptanceAuditIdentityIndex + 1, 'acceptance joined-at migration should follow acceptance audit identity migration');
+	assert.equal(workspaceResolutionIndex, acceptanceJoinedAtIndex + 1, 'workspace resolution migration should follow acceptance joined-at migration');
 	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
 	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
@@ -1896,6 +1902,48 @@ test('Workspace invitation acceptance audit records Auth user identity rather th
 	assert.match(acceptSql, /workspace_invitation_replay_rejected/);
 	assert.ok(invitationAcceptedIndex > 0 && membershipActivatedIndex > invitationAcceptedIndex && auditAcceptedIndex > membershipActivatedIndex);
 	assert.match(schemaDocs, /`target_user_id` and `actor_user_id` reference `auth\.users\.id`; profile UUIDs are recorded only in JSON payload fields/);
+});
+
+test('Workspace invitation acceptance populates and exposes membership joined_at safely', async () => {
+	const sql = await readFile(acceptanceJoinedAtMigrationUrl, 'utf8');
+	const acceptSql = sqlFunctionDefinition(sql, 'accept_workspace_membership_invitation');
+	const replayBlock = acceptSql.match(/if v_invitation\.status = 'accepted' or v_membership\.status = 'active' then[\s\S]*?return v_invitation\.membership_id;\n  end if;/)?.[0] ?? '';
+	const memberView = sql.match(/create or replace view public\.workspace_member_directory[\s\S]*?where public\.is_active_organisation_member\(om\.organisation_id\);/)?.[0] ?? '';
+	const adminView = sql.match(/create or replace view public\.workspace_member_admin_directory[\s\S]*?where public\.has_real_active_organisation_role/)?.[0] ?? '';
+	const backfillBlock = sql.match(/do \$\$[\s\S]*?WT_INVITATION_JOINED_AT_BACKFILL[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
+	const backfillSet = backfillBlock.match(/update public\.organisation_members as om[\s\S]*?from public\.workspace_membership_invitations/)?.[0] ?? '';
+
+	assert.match(acceptSql, /v_accepted_at timestamptz := now\(\)/);
+	assert.match(acceptSql, /update public\.workspace_membership_invitations as invitation[\s\S]*accepted_at = v_accepted_at[\s\S]*accepted_by = v_actor_auth_user_id/);
+	assert.match(acceptSql, /update public\.organisation_members as om[\s\S]*accepted_at = v_accepted_at,[\s\S]*joined_at = coalesce\(om\.joined_at, v_accepted_at\),[\s\S]*updated_at = v_accepted_at/);
+	assert.match(acceptSql, /and om\.role = v_invitation\.intended_role[\s\S]*and om\.status = 'invited'/);
+	assert.doesNotMatch(replayBlock, /update public\.organisation_members|joined_at =/);
+	assert.match(acceptSql, /'joined_at', coalesce\(v_membership\.joined_at, v_accepted_at\)/);
+	assert.match(backfillBlock, /set_config\('watchtower\.membership_lifecycle_rpc', 'true', true\)/);
+	assert.match(backfillBlock, /joined_at = coalesce\(om\.joined_at, om\.accepted_at, invitation\.accepted_at\)/);
+	assert.match(backfillBlock, /accepted_at = coalesce\(om\.accepted_at, invitation\.accepted_at\)/);
+	assert.match(backfillBlock, /invitation\.status = 'accepted'/);
+	assert.match(backfillBlock, /om\.status = 'active'/);
+	assert.match(backfillBlock, /om\.joined_at is null/);
+	assert.match(backfillBlock, /invitation\.profile_id = om\.user_id[\s\S]*invitation\.auth_user_id = om\.auth_user_id/);
+	assert.doesNotMatch(backfillSet, /\brole\s*=|\buser_id\s*=|\bauth_user_id\s*=|\borganisation_id\s*=/i);
+	assert.match(memberView, /om\.joined_at/);
+	assert.match(adminView, /om\.joined_at/);
+	assert.match(sql, /comment on view public\.workspace_member_admin_directory[\s\S]*joined_at/);
+});
+
+test('Workspace invitation workspace-resolution migration exposes Auth UUID for server-side current member checks', async () => {
+	const sql = await readFile(workspaceResolutionMigrationUrl, 'utf8');
+	const memberView = sql.match(/create or replace view public\.workspace_member_directory[\s\S]*?where public\.is_active_organisation_member\(om\.organisation_id\);/)?.[0] ?? '';
+	const adminView = sql.match(/create or replace view public\.workspace_member_admin_directory[\s\S]*?where public\.has_real_active_organisation_role/)?.[0] ?? '';
+
+	assert.match(memberView, /p\.id as profile_id[\s\S]*om\.auth_user_id/);
+	assert.match(adminView, /p\.id as profile_id[\s\S]*invitation\.delivery_strategy as invitation_delivery_strategy,[\s\S]*om\.auth_user_id/);
+	assert.match(sql, /auth_user_id is exposed for server-side current-member resolution only/);
+	assert.match(sql, /grant select on public\.workspace_member_directory to authenticated/);
+	assert.match(sql, /grant select on public\.workspace_member_admin_directory to authenticated/);
+	assert.doesNotMatch(memberView, /contact_email|auth_email|p\.email/i);
+	assert.doesNotMatch(sql, /drop view|drop table|delete from auth\.users|insert into auth\.users/i);
 });
 
 test('Workspace invitation RPCs enforce admin delivery and linked-account acceptance', async () => {

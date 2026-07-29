@@ -22,6 +22,7 @@ import {
 	PROJECT_PEOPLE_ROLES,
 	listProjectPeople,
 	listProjectPersonOptions,
+	projectPersonProfileName,
 	projectPeopleRoleLabel,
 	saveProjectPersonForRole,
 } from '../../../../../../lib/projectPeople';
@@ -74,7 +75,7 @@ const formatDateRange = (startDate, endDate) => {
 const projectHealthLabel = 'Unknown';
 const assignmentName = (assignment) => {
 	if (assignment.demo_person_id) return assignment.demoPerson?.display_name || 'Demo persona';
-	return assignment.profile?.display_name || assignment.profile?.email || 'Workspace member';
+	return projectPersonProfileName(assignment.profile, 'Workspace member');
 };
 const assignmentMeta = (assignment) => {
 	if (assignment.demo_person_id) {
