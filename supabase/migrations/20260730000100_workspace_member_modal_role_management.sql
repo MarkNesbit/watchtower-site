@@ -93,24 +93,19 @@ select
   om.organisation_id,
   om.id as organisation_membership_id,
   p.id as profile_id,
-  om.auth_user_id,
   p.display_name,
   p.first_name,
   p.last_name,
   p.login_name,
   p.contact_email,
   p.email as auth_email,
-  p.last_login_at,
   om.role,
   om.status as membership_status,
   om.invited_at,
-  om.invitation_expires_at,
   om.accepted_at,
-  om.joined_at,
   om.suspended_at,
   om.deactivated_at,
   om.reactivated_at,
-  om.updated_at,
   invitation.id as invitation_id,
   invitation.status as invitation_status,
   invitation.delivered_at as invitation_delivered_at,
@@ -123,7 +118,11 @@ select
   invitation.expires_at as invitation_expires_at,
   invitation.failure_code as invitation_failure_code,
   invitation.failure_message as invitation_failure_message,
-  invitation.delivery_strategy as invitation_delivery_strategy
+  invitation.delivery_strategy as invitation_delivery_strategy,
+  om.joined_at,
+  om.auth_user_id,
+  p.last_login_at,
+  om.updated_at
 from public.organisation_members om
 join public.profiles p on p.id = om.user_id
 left join public.workspace_membership_invitations invitation

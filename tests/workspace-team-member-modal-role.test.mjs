@@ -82,10 +82,45 @@ test('Workspace Team member modal page exposes accessible modal fields controls 
 	assert.match(page, /data-member-role-select/);
 	assert.match(page, /data-member-save/);
 	assert.match(page, /memberDialogDirty/);
+	assert.match(page, /resetMemberRoleSelection/);
+	assert.match(page, /normalizeMemberRole\(select\.value\) !== normalizeMemberRole\(form\.dataset\.memberInitialRole\)/);
+	assert.match(page, /select\.addEventListener\('input', onRoleChange\)/);
+	assert.match(page, /select\.addEventListener\('change', onRoleChange\)/);
 	assert.match(page, /Discard the unsaved role change/);
 	assert.match(page, /dialog\.addEventListener\('cancel'/);
 	assert.match(page, /setMemberError/);
 	assert.doesNotMatch(page, />Profile ID<|>Membership ID<|profile UUID|membership UUID/i);
+});
+
+test('Workspace Team member modal keeps editable role control in primary membership content', async () => {
+	const page = await pageSource();
+	const membershipSection = page.match(/<section class="workspace-team-member-modal__section" aria-labelledby=\{`\$\{modalId\}-membership-heading`\}>[\s\S]*?<\/section>/)?.[0] ?? '';
+
+	assert.match(membershipSection, /<dt id=\{roleLabelId\}>Workspace role<\/dt>[\s\S]*data-member-role-select/);
+	assert.match(membershipSection, /aria-labelledby=\{roleLabelId\}/);
+	assert.match(membershipSection, /aria-describedby=\{`\$\{roleHelpId\} \$\{errorId\}`\}/);
+	assert.match(membershipSection, /Membership status/);
+	assert.doesNotMatch(page, /id=\{`\$\{modalId\}-role-heading`\}>Workspace role/);
+	assert.doesNotMatch(page, /data-member-current-role-label/);
+});
+
+test('Workspace Team member modal save state follows role changes and edit availability', async () => {
+	const page = await pageSource();
+	const updateFunction = page.match(/function updateMemberSaveState\(dialog\) \{[\s\S]*?\n\t\}/)?.[0] ?? '';
+	const acquireFunction = page.match(/async function acquireMemberSession\(dialog\) \{[\s\S]*?function closeMemberDialog/)?.[0] ?? '';
+	const submitHandler = page.match(/form\.addEventListener\('submit', async \(event\) => \{[\s\S]*?window\.location\.reload\(\)/)?.[0] ?? '';
+
+	assert.match(updateFunction, /const hasChanged = select instanceof HTMLSelectElement[\s\S]*normalizeMemberRole\(select\.value\) !== normalizeMemberRole\(form\.dataset\.memberInitialRole\)/);
+	assert.match(updateFunction, /const hasSession = Boolean\(form\.dataset\.memberSessionId\)/);
+	assert.match(updateFunction, /dialog\.dataset\.memberEditState === 'editable'/);
+	assert.match(updateFunction, /save\.disabled = !canEdit \|\| !hasChanged \|\| !hasSession/);
+	assert.match(page, /select\.value = normalizeMemberRole\(form\.dataset\.memberInitialRole\)/);
+	assert.match(acquireFunction, /setMemberEditState\(dialog, 'checking'\)/);
+	assert.match(acquireFunction, /setMemberEditState\(dialog, payload\.session_id \? 'editable' : 'unavailable'\)/);
+	assert.match(acquireFunction, /setMemberEditState\(dialog, 'locked'\)/);
+	assert.match(page, /select\.disabled = true/);
+	assert.match(submitHandler, /body: new FormData\(form\)/);
+	assert.match(submitHandler, /window\.location\.reload\(\)/);
 });
 
 test('Workspace Team member session and role routes use workspace-scoped secure RPCs', async () => {
@@ -156,6 +191,10 @@ test('Workspace Team member role migration records audit evidence without changi
 	assert.match(sql, /create or replace view public\.workspace_member_admin_directory/);
 	assert.match(sql, /p\.last_login_at/);
 	assert.match(sql, /om\.updated_at/);
+	const adminView = sql.match(/create or replace view public\.workspace_member_admin_directory[\s\S]*?where public\.has_real_active_organisation_role/)?.[0] ?? '';
+	assert.match(adminView, /p\.display_name[\s\S]*om\.joined_at,[\s\S]*om\.auth_user_id,[\s\S]*p\.last_login_at,[\s\S]*om\.updated_at/);
+	assert.doesNotMatch(adminView, /om\.auth_user_id,\s*p\.display_name/);
+	assert.equal(adminView.match(/\binvitation_expires_at\b/g)?.length, 1);
 	assert.doesNotMatch(sql, /update public\.profiles[\s\S]*first_name|update public\.profiles[\s\S]*last_name|update public\.profiles[\s\S]*contact_email|update public\.profiles[\s\S]*login_name/);
 });
 

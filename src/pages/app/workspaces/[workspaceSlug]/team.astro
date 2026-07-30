@@ -1238,6 +1238,8 @@ const invitationOperationKey = crypto.randomUUID();
 						const memberTitleId = `${modalId}-title`;
 						const memberDescriptionId = `${modalId}-description`;
 						const roleSelectId = `${modalId}-role`;
+						const roleLabelId = `${modalId}-role-label`;
+						const roleHelpId = `${modalId}-role-help`;
 						const errorId = `${modalId}-error`;
 						return (
 							<dialog
@@ -1277,7 +1279,29 @@ const invitationOperationKey = crypto.randomUUID();
 										<section class="workspace-team-member-modal__section" aria-labelledby={`${modalId}-membership-heading`}>
 											<h4 id={`${modalId}-membership-heading`}>Membership</h4>
 											<dl class="workspace-team-member-modal__details">
-												<div><dt>Workspace role</dt><dd data-member-current-role-label>{member.displayRole}</dd></div>
+												<div class="workspace-team-member-modal__role-row">
+													<dt id={roleLabelId}>Workspace role</dt>
+													<dd>
+														{roleAuthority.canEdit ? (
+															<select
+																id={roleSelectId}
+																name="target_role"
+																aria-labelledby={roleLabelId}
+																aria-describedby={`${roleHelpId} ${errorId}`}
+																data-member-role-select
+															>
+																{roleAuthority.options.map((role) => (
+																	<option value={role} selected={member.role === role}>{workspaceRoleLabel(role)}</option>
+																))}
+															</select>
+														) : (
+															<div class="workspace-team-member-modal__readonly" data-member-readonly-reason>
+																<strong>{member.displayRole}</strong>
+																<p>{roleAuthority.reason}</p>
+															</div>
+														)}
+													</dd>
+												</div>
 												<div><dt>Membership status</dt><dd>{member.displayStatus}</dd></div>
 												<div><dt>Invitation status</dt><dd>{member.membership_status === 'active' ? 'Accepted' : workspaceInvitationStatusLabel(member.invitation_status)}</dd></div>
 												<div><dt>Joined date</dt><dd>{formatDate(member.joined_at ?? member.accepted_at ?? null)}</dd></div>
@@ -1285,25 +1309,7 @@ const invitationOperationKey = crypto.randomUUID();
 												<div><dt>Accepted date</dt><dd>{formatDate(member.accepted_at ?? member.invitation_accepted_at ?? null)}</dd></div>
 												<div><dt>Last login</dt><dd>{formatDateTime(member.last_login_at ?? null)}</dd></div>
 											</dl>
-										</section>
-										<section class="workspace-team-member-modal__section" aria-labelledby={`${modalId}-role-heading`}>
-											<h4 id={`${modalId}-role-heading`}>Workspace role</h4>
-											{roleAuthority.canEdit ? (
-												<label class="workspace-team-member-modal__role">
-													<span>Role</span>
-													<select id={roleSelectId} name="target_role" aria-describedby={errorId} data-member-role-select>
-														{roleAuthority.options.map((role) => (
-															<option value={role} selected={member.role === role}>{workspaceRoleLabel(role)}</option>
-														))}
-													</select>
-												</label>
-											) : (
-												<div class="workspace-team-member-modal__readonly" data-member-readonly-reason>
-													<strong>Role is read-only</strong>
-													<p>{roleAuthority.reason}</p>
-												</div>
-											)}
-											<p class="workspace-team-member-modal__hint">{roleAuthority.reason}</p>
+											<p class="workspace-team-member-modal__hint" id={roleHelpId}>{roleAuthority.reason}</p>
 										</section>
 									</div>
 									<div class="workspace-team-member-modal__actions">
@@ -1401,12 +1407,23 @@ const invitationOperationKey = crypto.randomUUID();
 		});
 	});
 
+	function normalizeMemberRole(value) {
+		return String(value || '').trim().toLowerCase();
+	}
+
 	function memberDialogDirty(dialog) {
 		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
 		const select = dialog.querySelector('[data-member-role-select]');
 		return form instanceof HTMLFormElement
 			&& select instanceof HTMLSelectElement
-			&& select.value !== String(form.dataset.memberInitialRole || '');
+			&& normalizeMemberRole(select.value) !== normalizeMemberRole(form.dataset.memberInitialRole);
+	}
+
+	function resetMemberRoleSelection(dialog) {
+		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
+		const select = dialog.querySelector('[data-member-role-select]');
+		if (!(form instanceof HTMLFormElement) || !(select instanceof HTMLSelectElement)) return;
+		select.value = normalizeMemberRole(form.dataset.memberInitialRole);
 	}
 
 	function setMemberError(dialog, message) {
@@ -1430,14 +1447,32 @@ const invitationOperationKey = crypto.randomUUID();
 		if (input instanceof HTMLInputElement) input.value = sessionId || '';
 	}
 
+	function setMemberEditState(dialog, state) {
+		if (!(dialog instanceof HTMLElement)) return;
+		dialog.dataset.memberEditState = state;
+		if (state === 'readonly' || state === 'locked' || state === 'unavailable') {
+			dialog.dataset.memberLocked = 'true';
+		} else {
+			dialog.removeAttribute('data-member-locked');
+		}
+		const select = dialog.querySelector('[data-member-role-select]');
+		if (select instanceof HTMLSelectElement) {
+			select.disabled = state !== 'editable';
+		}
+	}
+
 	function updateMemberSaveState(dialog) {
 		const save = dialog.querySelector('[data-member-save]');
 		const select = dialog.querySelector('[data-member-role-select]');
 		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
 		if (!(save instanceof HTMLButtonElement) || !(form instanceof HTMLFormElement)) return;
-		const hasChanged = select instanceof HTMLSelectElement && select.value !== String(form.dataset.memberInitialRole || '');
+		const hasChanged = select instanceof HTMLSelectElement
+			&& normalizeMemberRole(select.value) !== normalizeMemberRole(form.dataset.memberInitialRole);
 		const hasSession = Boolean(form.dataset.memberSessionId);
-		const canEdit = dialog instanceof HTMLElement && dialog.dataset.memberCanEdit === 'true' && !dialog.dataset.memberLocked;
+		const canEdit = dialog instanceof HTMLElement
+			&& dialog.dataset.memberCanEdit === 'true'
+			&& dialog.dataset.memberEditState === 'editable'
+			&& !dialog.dataset.memberLocked;
 		save.disabled = !canEdit || !hasChanged || !hasSession;
 	}
 
@@ -1464,7 +1499,9 @@ const invitationOperationKey = crypto.randomUUID();
 		if (!sessionAction || !membershipId) return;
 		setMemberError(dialog, '');
 		setMemberLockNotice(dialog, 'Checking edit availability...');
-		dialog.removeAttribute('data-member-locked');
+		setMemberEditState(dialog, 'checking');
+		setMemberSession(dialog, '');
+		updateMemberSaveState(dialog);
 		const body = new FormData();
 		body.set('membership_id', membershipId);
 		body.set('session_action', 'start');
@@ -1474,14 +1511,17 @@ const invitationOperationKey = crypto.randomUUID();
 			if (!response.ok) throw new Error(payload?.message || 'Member edit availability could not be checked.');
 			if (payload.session_id) setMemberSession(dialog, payload.session_id);
 			if (payload.can_edit) {
-				setMemberLockNotice(dialog, payload.message || 'You can edit this member role.');
+				setMemberEditState(dialog, payload.session_id ? 'editable' : 'unavailable');
+				setMemberLockNotice(dialog, payload.session_id
+					? payload.message || 'You can edit this member role.'
+					: 'An edit session could not be started. Close and reopen this member before saving.');
 			} else {
-				dialog.dataset.memberLocked = 'true';
+				setMemberEditState(dialog, 'locked');
 				setMemberSession(dialog, '');
 				setMemberLockNotice(dialog, payload.message || 'This member is read-only.');
 			}
 		} catch (error) {
-			dialog.dataset.memberLocked = 'true';
+			setMemberEditState(dialog, 'unavailable');
 			setMemberSession(dialog, '');
 			setMemberLockNotice(dialog, '');
 			setMemberError(dialog, error instanceof Error ? error.message : 'Member edit availability could not be checked.');
@@ -1495,6 +1535,7 @@ const invitationOperationKey = crypto.randomUUID();
 		if (!options.force && memberDialogDirty(dialog)) {
 			const discard = window.confirm('Discard the unsaved role change?');
 			if (!discard) return;
+			resetMemberRoleSelection(dialog);
 		}
 		releaseMemberSession(dialog);
 		dialog.close();
@@ -1551,10 +1592,15 @@ const invitationOperationKey = crypto.randomUUID();
 		});
 		const select = dialog.querySelector('[data-member-role-select]');
 		if (select instanceof HTMLSelectElement) {
-			select.addEventListener('change', () => {
+			const onRoleChange = () => {
 				setMemberError(dialog, '');
 				updateMemberSaveState(dialog);
-			});
+			};
+			select.addEventListener('input', onRoleChange);
+			select.addEventListener('change', onRoleChange);
+			select.disabled = true;
+		} else {
+			setMemberEditState(dialog, 'readonly');
 		}
 		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
 		if (form instanceof HTMLFormElement) {
@@ -2861,6 +2907,10 @@ const invitationOperationKey = crypto.randomUUID();
 		min-width: 0;
 	}
 
+	.workspace-team-member-modal__role-row {
+		grid-column: 1 / -1;
+	}
+
 	.workspace-team-member-modal__details dt {
 		color: var(--muted);
 		font-size: 0.78rem;
@@ -2874,14 +2924,7 @@ const invitationOperationKey = crypto.randomUUID();
 		font-weight: 800;
 	}
 
-	.workspace-team-member-modal__role {
-		display: grid;
-		gap: 0.3rem;
-		color: var(--muted-strong);
-		font-weight: 850;
-	}
-
-	.workspace-team-member-modal__role select {
+	.workspace-team-member-modal__details select {
 		width: min(100%, 18rem);
 		border: 1px solid rgba(110, 181, 224, 0.3);
 		border-radius: 0.5rem;
@@ -2889,6 +2932,17 @@ const invitationOperationKey = crypto.randomUUID();
 		background: rgba(3, 12, 24, 0.7);
 		color: var(--text);
 		font: inherit;
+	}
+
+	.workspace-team-member-modal__details select:disabled {
+		cursor: not-allowed;
+		opacity: 0.72;
+	}
+
+	.workspace-team-member-modal__details select:focus-visible {
+		border-color: rgba(0, 160, 255, 0.68);
+		outline: 3px solid rgba(0, 160, 255, 0.2);
+		outline-offset: 2px;
 	}
 
 	.workspace-team-member-modal__readonly {
