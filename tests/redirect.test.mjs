@@ -54,10 +54,12 @@ test('/app shell is hidden until the client confirms a real Supabase session', a
 	const layout = await readFile(new URL('../src/layouts/AuthenticatedLayout.astro', import.meta.url), 'utf8');
 	const authStatus = await readFile(new URL('../src/components/auth/AuthStatus.astro', import.meta.url), 'utf8');
 
-	assert.match(layout, /data-authenticated-shell hidden/);
-	assert.match(layout, /<section class="app-shell" data-authenticated-shell hidden>/);
+	assert.match(layout, /data-authenticated-shell/);
+	assert.match(layout, /data-server-authenticated=\{serverSessionConfirmed \? 'true' : undefined\}/);
+	assert.match(layout, /<section class="app-shell" data-authenticated-shell/);
 	assert.doesNotMatch(layout, /app-shell__bar|Workspace navigation|<SignOutButton/);
 	assert.match(authStatus, /supabase\.auth\.getSession\(\)/);
+	assert.match(authStatus, /serverAuthenticated/);
 	assert.match(authStatus, /dashboardRefreshTarget/);
 	assert.match(authStatus, /data-dashboard-refresh-on-session="true"/);
 	assert.match(authStatus, /document\.cookie = `wt-access-token=\$\{session\.access_token\}/);
@@ -90,11 +92,13 @@ test('shared header swaps Login for the existing sign-out action when authentica
 	assert.match(header, /<a class="login-slot" href="\/login" data-header-login hidden=\{hasAuthCookie \|\| undefined\}>Login<\/a>/);
 	assert.match(header, /data-header-sign-out hidden=\{!hasAuthCookie \|\| undefined\}/);
 	assert.match(header, /<SignOutButton className="login-slot login-slot--button" label="Sign out" \/>/);
+	assert.match(header, /serverAuthenticated/);
 	assert.match(header, /supabase\.auth\.getSession\(\)/);
-	assert.match(header, /loginLink\?\.toggleAttribute\('hidden', Boolean\(session\)\)/);
-	assert.match(header, /signOutAction\?\.toggleAttribute\('hidden', !session\)/);
-	assert.match(header, /publicNav\?\.toggleAttribute\('hidden', Boolean\(session\)\)/);
-	assert.match(header, /appNav\?\.toggleAttribute\('hidden', !session\)/);
+	assert.match(header, /const isAuthenticated = Boolean\(session\) \|\| serverAuthenticated/);
+	assert.match(header, /loginLink\?\.toggleAttribute\('hidden', isAuthenticated\)/);
+	assert.match(header, /signOutAction\?\.toggleAttribute\('hidden', !isAuthenticated\)/);
+	assert.match(header, /publicNav\?\.toggleAttribute\('hidden', isAuthenticated\)/);
+	assert.match(header, /appNav\?\.toggleAttribute\('hidden', !isAuthenticated\)/);
 	assert.match(header, /supabase\.auth\.onAuthStateChange/);
 	assert.match(signOutButton, /data-sign-out/);
 	assert.match(signOutButton, /recordAuthAuditEvent\('user\.logged_out'\)/);

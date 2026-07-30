@@ -79,12 +79,14 @@ const isActivePath = (href: string, exact = false) => {
 	const signOutAction = document.querySelector('[data-header-sign-out]');
 	const publicNav = document.querySelector('[data-public-nav]');
 	const appNav = document.querySelector('[data-app-nav]');
+	const serverAuthenticated = Boolean(document.querySelector('[data-server-authenticated="true"]'));
 
 	function setHeaderAuthState(session) {
-		loginLink?.toggleAttribute('hidden', Boolean(session));
-		signOutAction?.toggleAttribute('hidden', !session);
-		publicNav?.toggleAttribute('hidden', Boolean(session));
-		appNav?.toggleAttribute('hidden', !session);
+		const isAuthenticated = Boolean(session) || serverAuthenticated;
+		loginLink?.toggleAttribute('hidden', isAuthenticated);
+		signOutAction?.toggleAttribute('hidden', !isAuthenticated);
+		publicNav?.toggleAttribute('hidden', isAuthenticated);
+		appNav?.toggleAttribute('hidden', !isAuthenticated);
 	}
 
 	const { data } = await supabase.auth.getSession();

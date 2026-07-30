@@ -1,34 +1,18 @@
-<form class="auth-card" data-login-form>
+---
+type Props = {
+	message?: string;
+	redirectTo?: string;
+};
+
+const { message = '', redirectTo = '/app' } = Astro.props;
+---
+<form class="auth-card" data-login-form method="post" action="/login" novalidate>
 	<p class="eyebrow">Sign in</p>
 	<h1>Log in to WatchTower</h1>
-	<label>Email<input name="email" type="email" autocomplete="email" required /></label>
+	<input name="redirectTo" type="hidden" value={redirectTo} />
+	<label>Login name<input name="loginName" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required /></label>
 	<label>Password<input name="password" type="password" autocomplete="current-password" required minlength="15" maxlength="128" /></label>
 	<button class="button button--primary" type="submit">Log in</button>
-	<p class="form-message" data-message></p>
+	<p class="form-message" data-message>{message}</p>
 	<p><a href="/forgot-password">Forgot your password?</a> · <a href="/register">Create an account</a></p>
 </form>
-<script>
-	import { recordAuthAuditEvent } from '../../lib/authClient';
-	import { getSafeRedirectPath } from '../../lib/redirect';
-	import { supabase } from '../../lib/supabaseClient';
-	const form = document.querySelector('[data-login-form]');
-	const message = form?.querySelector('[data-message]');
-	form?.addEventListener('submit', async (event) => {
-		event.preventDefault();
-		const data = new FormData(form);
-		const email = String(data.get('email') ?? '');
-		const password = String(data.get('password') ?? '');
-		if (message) message.textContent = 'Signing in…';
-		const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password });
-		if (error || !authData.session) {
-			if (message) message.textContent = 'Unable to sign in. Check your email, password, and email verification status.';
-			return;
-		}
-		const cookieOptions = `path=/; SameSite=Lax; max-age=${authData.session.expires_in}`;
-		document.cookie = `wt-access-token=${authData.session.access_token}; ${cookieOptions}`;
-		document.cookie = `wt-refresh-token=${authData.session.refresh_token}; ${cookieOptions}`;
-		await recordAuthAuditEvent('user.logged_in');
-		const redirectTo = getSafeRedirectPath(new URLSearchParams(window.location.search).get('redirectTo'));
-		window.location.assign(redirectTo);
-	});
-</script>

@@ -1,7 +1,114 @@
 ---
+import { env } from 'cloudflare:workers';
 import LoginForm from '../components/auth/LoginForm.astro';
 import AuthLayout from '../layouts/AuthLayout.astro';
+import {
+	LOGIN_NAME_AUTH_ERROR_MESSAGE,
+	resolveLoginNameAuthIdentity,
+	safeLoginDiagnostic,
+	type LoginNameResolutionResult,
+} from '../lib/loginNameAuth';
+import { getSafeRedirectPath } from '../lib/redirect';
+import { createSupabaseAdminClient, createSupabaseServerClient } from '../lib/supabaseServer';
+
+type RuntimeEnv = Record<string, unknown>;
+type AuthSession = {
+	access_token: string;
+	refresh_token: string;
+	expires_in?: number;
+};
+
+const noStoreHeaders = {
+	'cache-control': 'private, no-store, no-cache, must-revalidate',
+	pragma: 'no-cache',
+	expires: '0',
+};
+
+function safeLogMessage(error: unknown) {
+	const message = error instanceof Error ? error.message : String(error ?? 'Login failed');
+	return message
+		.replace(/https?:\/\/\S+/gi, '[redacted-link]')
+		.replace(/[^\s@]+@[^\s@]+/g, '[redacted-email]')
+		.replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[redacted-token]')
+		.replace(/\b(?:token|password|authorization|secret|key)\b/gi, '[redacted]')
+		.slice(0, 240);
+}
+
+function sessionCookie(name: string, value: string, maxAge: number) {
+	return `${name}=${encodeURIComponent(value)}; Path=/; SameSite=Lax; Max-Age=${maxAge}`;
+}
+
+function redirectWithSession(location: string, session: AuthSession) {
+	const headers = new Headers({
+		location,
+		...noStoreHeaders,
+	});
+	const maxAge = Number.isFinite(session.expires_in) ? Number(session.expires_in) : 3600;
+	headers.append('Set-Cookie', sessionCookie('wt-access-token', session.access_token, maxAge));
+	headers.append('Set-Cookie', sessionCookie('wt-refresh-token', session.refresh_token, maxAge));
+	return new Response(null, { status: 303, headers });
+}
+
+function logLoginFailure(stage: string, result: LoginNameResolutionResult | { status: string }) {
+	console.warn('login_name_authentication_failed', {
+		routeName: 'login',
+		stage,
+		...safeLoginDiagnostic(result),
+	});
+}
+
+async function recordLoginAudit(session: AuthSession) {
+	const auditClient = createSupabaseServerClient(session.access_token);
+	const { error } = await auditClient.rpc('record_auth_audit_event', {
+		action_name: 'user.logged_in',
+		event_metadata: {},
+	});
+	if (error) {
+		console.warn('login_name_auth_audit_failed', {
+			routeName: 'login',
+			safeErrorCode: error.code ?? null,
+		});
+	}
+}
+
+const redirectTo = getSafeRedirectPath(Astro.url.searchParams.get('redirectTo'));
+let message = '';
+
+if (Astro.request.method === 'POST') {
+	const formData = await Astro.request.formData();
+	const requestedRedirectTo = getSafeRedirectPath(String(formData.get('redirectTo') ?? redirectTo));
+	const loginName = String(formData.get('loginName') ?? '');
+	const password = String(formData.get('password') ?? '');
+
+	try {
+		const adminSupabase = createSupabaseAdminClient(env as RuntimeEnv);
+		const resolution = await resolveLoginNameAuthIdentity(adminSupabase, loginName);
+		if (resolution.status !== 'resolved') {
+			logLoginFailure('identity_resolution', resolution);
+			message = LOGIN_NAME_AUTH_ERROR_MESSAGE;
+		} else {
+			const authSupabase = createSupabaseServerClient();
+			const { data: authData, error } = await authSupabase.auth.signInWithPassword({
+				email: resolution.authEmail,
+				password,
+			});
+			if (error || !authData.session) {
+				logLoginFailure('password_authentication', { status: 'password_authentication_failed' });
+				message = LOGIN_NAME_AUTH_ERROR_MESSAGE;
+			} else {
+				await recordLoginAudit(authData.session);
+				return redirectWithSession(requestedRedirectTo, authData.session);
+			}
+		}
+	} catch (error) {
+		console.error('login_name_authentication_unexpected_error', {
+			routeName: 'login',
+			message: safeLogMessage(error),
+		});
+		message = LOGIN_NAME_AUTH_ERROR_MESSAGE;
+	}
+}
 ---
 <AuthLayout title="Login | WatchTower" description="Log in to WatchTower.">
-	<LoginForm />
+	<LoginForm message={message} redirectTo={redirectTo} />
 </AuthLayout>

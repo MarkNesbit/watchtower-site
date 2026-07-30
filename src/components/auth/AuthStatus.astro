@@ -9,6 +9,7 @@
 	const protectedPrefixes = ['/app'];
 	const path = window.location.pathname.replace(/\/$/, '') || '/';
 	const dashboardRefreshKey = `watchtower:dashboard-context-refresh:${window.location.pathname}${window.location.search}`;
+	const serverAuthenticated = Boolean(document.querySelector('[data-server-authenticated="true"]'));
 
 	function getDashboardRefreshAttempted() {
 		try {
@@ -39,7 +40,7 @@
 		const session = data.session;
 		const isProtected = protectedPrefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 
-		if (!session && isProtected) {
+		if (!session && isProtected && !serverAuthenticated) {
 			window.location.replace(`/login?redirectTo=${encodeURIComponent(window.location.pathname)}`);
 			return;
 		}
