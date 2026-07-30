@@ -6,11 +6,17 @@
 	</div>
 </section>
 <script>
+	import { authenticatedUserDisplayName } from '../../lib/authenticatedUserDisplay';
 	import { supabase } from '../../lib/supabaseClient';
+
 	const message = document.querySelector('[data-welcome-message]');
 	const { data } = await supabase.auth.getUser();
 	if (data.user && message) {
-		const { data: profile } = await supabase.from('profiles').select('display_name').eq('id', data.user.id).maybeSingle();
-		message.textContent = `Signed in as ${profile?.display_name ?? data.user.email}. Your workspace foundation is ready.`;
+		const { data: profile } = await supabase
+			.from('profiles')
+			.select('first_name, last_name, display_name, login_name')
+			.eq('auth_user_id', data.user.id)
+			.maybeSingle();
+		message.textContent = `Signed in as ${authenticatedUserDisplayName(profile)}. Your workspace foundation is ready.`;
 	}
 </script>
