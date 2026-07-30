@@ -21,8 +21,24 @@ function errorMessage(error: unknown) {
 	const message = typeof (error as { message?: unknown })?.message === 'string'
 		? (error as { message: string }).message
 		: '';
+	const details = typeof (error as { details?: unknown })?.details === 'string'
+		? (error as { details: string }).details
+		: '';
+	const hint = typeof (error as { hint?: unknown })?.hint === 'string'
+		? (error as { hint: string }).hint
+		: '';
+	const diagnostic = `${message} ${details} ${hint}`;
 	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) return 'Only active Workspace Owners and Admins can manage workspace roles.';
 	if (message.includes('WT_MEMBER_ROLE_ACTIVE_ONLY')) return 'Only active workspace members can be opened for role management.';
+	if (
+		diagnostic.includes('start_workspace_member_edit_session')
+		|| diagnostic.includes('workspace_member_edit_sessions')
+		|| diagnostic.includes('Could not find the function')
+		|| diagnostic.includes('schema cache')
+		|| diagnostic.includes('does not exist')
+	) {
+		return 'Workspace role editing is not ready yet. Apply the latest Workspace Team database migration, then reopen this member.';
+	}
 	return 'Member edit availability could not be checked.';
 }
 
