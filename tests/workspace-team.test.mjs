@@ -36,15 +36,20 @@ test('Workspace Team route is workspace-scoped and active-membership guarded', a
 	assert.match(projects, /export async function getWorkspaceBySlug/);
 	assert.match(projects, /\.eq\('status', 'active'\)/);
 	assert.match(route, /isWorkspaceRole\(workspace\.role\)/);
+	assert.match(route, /can\(workspace\.role, 'workspaceTeam\.view'\)/);
+	assert.match(route, /Only active Workspace Owners and Admins can access Workspace Team/);
 	assert.doesNotMatch(route, /auth\.users|service_role|from\('profiles'\)|from\("profiles"\)/);
 });
 
 test('Workspace Team route selects the correct membership directory by role', async () => {
 	const route = await routeSource();
 
-	assert.match(route, /const canUseAdminDirectory = workspaceRole === 'owner' \|\| workspaceRole === 'admin'/);
+	assert.match(route, /const canUseAdminDirectory = can\(workspaceRole, 'workspaceTeam\.view'\)/);
 	assert.match(route, /const directoryTable = canUseAdminDirectory \? 'workspace_member_admin_directory' : 'workspace_member_directory'/);
 	assert.match(route, /joined_at/);
+	assert.match(route, /contact_email/);
+	assert.match(route, /last_login_at/);
+	assert.match(route, /updated_at/);
 	assert.match(route, /\.from\(directoryTable\)/);
 	assert.match(route, /\.eq\('organisation_id', organisation\.id\)/);
 	assert.match(route, /organisation_membership_id/);
@@ -83,6 +88,11 @@ test('Workspace Team route renders roles states filters search and accessible re
 	assert.match(route, /type="search"/);
 	assert.match(route, /data-membership-id=\{member\.organisation_membership_id\}/);
 	assert.match(route, /data-profile-id=\{member\.profile_id\}/);
+	assert.match(route, /workspace-team-person-pill--active/);
+	assert.match(route, /data-workspace-team-member-open/);
+	assert.match(route, /active member\. Open member details/);
+	assert.match(route, /workspace-team-person-pill--invited/);
+	assert.match(route, /Member details are not available until the invitation is accepted/);
 	assert.match(route, /aria-label=\{\`\$\{member\.displayStatus\}\. \$\{member\.statusDescription\}\`\}/);
 	assert.match(route, /\{formatDate\(member\.lifecycleDateValue\)\}/);
 	assert.doesNotMatch(route, /formatDate\(member\.invitation_expires_at \?\? member\.lifecycleDateValue\)/);
@@ -256,6 +266,7 @@ test('Workspace navigation links to the workspace-level team route when a worksp
 	assert.match(projectRoutes, /export function buildWorkspaceTeamPath\(workspaceSlug: string\)/);
 	assert.match(projectRoutes, /export function buildWorkspaceTeamInvitationSendPath\(workspaceSlug: string\)/);
 	assert.match(header, /getCurrentWorkspace\(serverSupabase, accessToken\)/);
+	assert.match(header, /can\(workspace\?\.role, 'workspaceTeam\.view'\)/);
 	assert.match(header, /buildWorkspaceTeamPath\(organisation\.slug\)/);
 	assert.match(header, /workspaceTeamHref \? \{ href: workspaceTeamHref, label: 'Workspace' \} : \{ label: 'Workspace' \}/);
 });

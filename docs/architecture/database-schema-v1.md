@@ -330,9 +330,27 @@ Access is constrained by `is_active_organisation_member(organisation_id)`.
 
 # View: `workspace_member_admin_directory`
 
-Provides Owner/Admin-only membership administration display identity for future team administration. It includes the safe directory fields plus linked Auth UUID, `contact_email`, `auth_email`, `joined_at` and lifecycle timestamps. The Team page's Joined value reads `organisation_members.joined_at`, with invitation acceptance populating that field when it was previously null.
+Provides Owner/Admin-only membership administration display identity for future team administration. It includes the safe directory fields plus linked Auth UUID, `contact_email`, `auth_email`, `last_login_at`, `joined_at`, `updated_at` and lifecycle timestamps. The Team page's Joined value reads `organisation_members.joined_at`, with invitation acceptance populating that field when it was previously null.
 
 Access is constrained by `has_real_active_organisation_role(organisation_id, array['owner', 'admin'])`, which uses the real stored membership role rather than internal role simulation.
+
+---
+
+# Table: `workspace_member_edit_sessions`
+
+## Purpose
+
+Stores advisory, membership-scoped edit sessions for the individual active-member role modal.
+
+WT-WORKSPACE-TEAM-009A uses this table to let more than one Owner/Admin view the same active member while allowing only one active editor at a time. It is advisory and bounded by expiry; optimistic snapshot validation remains the protection against stale writes.
+
+## Key Fields
+
+`organisation_id`, `organisation_membership_id`, `editing_by`, `status`, `started_at`, `expires_at`, `released_at`, `released_by`, `release_source`, `created_at`, `updated_at`.
+
+`status` is constrained to `active`, `released` or `expired`. A partial unique index permits only one unreleased active session per workspace membership. `start_workspace_member_edit_session(organisation_id, membership_id)` expires stale sessions before checking for an active editor, returns the named current editor when another active session exists, and creates or refreshes the current actor's session when permitted. `release_workspace_member_edit_session(organisation_id, session_id, source)` releases only the current actor's active session.
+
+RLS allows real active Owners/Admins to read session records in their workspace. Direct authenticated insert, update and delete are revoked; session changes happen through the controlled functions.
 
 ---
 
@@ -348,7 +366,9 @@ Append-only audit foundation for workspace membership lifecycle and profile iden
 
 `target_user_id` and `actor_user_id` reference `auth.users.id`; profile UUIDs are recorded only in JSON payload fields when the audit event also needs to identify the Watchtower profile/person record. `organisation_membership_id` is the dedicated workspace membership reference.
 
-Supported event types include `membership_invited`, `invitation_expired`, `membership_activated`, `membership_suspended`, `membership_deactivated`, `membership_reactivated`, `profile_identity_corrected`, `membership_import_proposed`, `membership_import_uploaded`, `membership_import_validation_failed`, `membership_import_validated`, `membership_import_stale_detected`, `membership_import_superseded_rejected`, `membership_import_applied`, `membership_import_failed`, `membership_export_generated`, `membership_export_read_only_generated`, `membership_export_taken_over`, `membership_export_superseded`, `workspace_membership_csv_checkout_released`, `membership_change_approved`, `membership_change_excluded`, `membership_deactivation_kept_active`, `membership_change_decision_revised`, `membership_change_blocked`, `membership_change_no_longer_required`, `membership_change_set_confirmed`, `membership_change_set_reconfirmed`, `workspace_membership_change_selection_confirmed`, `membership_addition_applied`, `profile_identity_correction_applied`, `membership_deactivation_applied`, `membership_reactivation_applied`, `membership_change_application_failed`, `membership_change_set_applied` and `membership_change_set_drift_detected`.
+Supported event types include `membership_invited`, `invitation_expired`, `membership_activated`, `membership_suspended`, `membership_deactivated`, `membership_reactivated`, `profile_identity_corrected`, `membership_import_proposed`, `membership_import_uploaded`, `membership_import_validation_failed`, `membership_import_validated`, `membership_import_stale_detected`, `membership_import_superseded_rejected`, `membership_import_applied`, `membership_import_failed`, `membership_export_generated`, `membership_export_read_only_generated`, `membership_export_taken_over`, `membership_export_superseded`, `workspace_membership_csv_checkout_released`, `membership_change_approved`, `membership_change_excluded`, `membership_deactivation_kept_active`, `membership_change_decision_revised`, `membership_change_blocked`, `membership_change_no_longer_required`, `membership_change_set_confirmed`, `membership_change_set_reconfirmed`, `workspace_membership_change_selection_confirmed`, `membership_addition_applied`, `profile_identity_correction_applied`, `membership_deactivation_applied`, `membership_reactivation_applied`, `membership_change_application_failed`, `membership_change_set_applied`, `membership_change_set_drift_detected` and `workspace_membership_role_changed`.
+
+WT-WORKSPACE-TEAM-009A role-change events use `workspace_membership_role_changed`, source `workspace_member_modal_role_management`, the affected membership id, the target Auth UUID where available, the actor Auth UUID, previous/new role values and a changed-at timestamp. They do not modify profile identity fields.
 
 Owner/Admin users can read audit events for their workspace. Normal authenticated users cannot update or delete audit events.
 

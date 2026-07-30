@@ -191,6 +191,20 @@ The public `/invitations/accept` page validates the opaque token hash before sho
 
 WT-008 audit events include `workspace_invitation_prepared`, `workspace_invitation_delivery_attempted`, `workspace_invitation_delivered`, `workspace_invitation_delivery_failed`, `workspace_invitation_opened`, `workspace_invitation_expired`, `workspace_invitation_cancelled`, `workspace_invitation_superseded`, `workspace_invitation_accepted`, `workspace_membership_activated` and `workspace_invitation_replay_rejected`. Audit metadata records workspace, invitation, membership, profile, actor, status movement, delivery strategy, recipient domain, attempt/version, sanitized provider name/message id and failure code without storing raw tokens, passwords, provider secrets, raw provider responses or full email bodies.
 
+## Workspace Team individual member role management
+
+WT-WORKSPACE-TEAM-009A restricts the Workspace Team page to active Workspace Owners and Admins. Members and Viewers do not receive the navigation link and direct route access returns a guarded unavailable state. Database functions continue to use real active membership, not profile flags or internal role simulation, for membership administration authority.
+
+Active memberships render as green interactive person pills that open a member details modal. Invited memberships render as amber non-interactive pills and do not open the modal. The modal displays full name, login name, contact email, workspace role, membership status, invitation status, joined/invited/accepted dates and last login when available. Profile UUIDs, membership UUIDs and authentication email are not displayed in the standard interface, and first name, last name, login name and contact email remain read-only.
+
+Role changes are handled by the controlled `change_workspace_member_role(organisation_id, membership_id, target_role, expected_snapshot_version, edit_session_id)` function. Owners may assign Viewer, Member, Admin or Owner to another active member. Owners cannot change their own role. Admins may change Viewers and Members only between Viewer and Member; they cannot assign Admin or Owner, cannot alter Admins or Owners and cannot change their own role. The browser only shows permitted options, but the RPC independently validates every transition and rejects cross-workspace, inactive, invited, self-change and unauthorised direct requests.
+
+The modal uses `workspace_member_edit_sessions` for an advisory membership-scoped edit session. A second Owner/Admin can still view current member information, but role controls become read-only while another active session exists and the modal names the current editor. Sessions release on modal close, cancel or successful save and expire automatically so abandoned browser sessions cannot permanently block a member.
+
+Role saves include the current workspace membership snapshot version. If membership data changed after the modal opened, the RPC rejects the save rather than overwriting newer data. Successful saves update `organisation_members.role`, set `updated_by`, refresh `updated_at` through the existing trigger and record a `workspace_membership_role_changed` audit event with previous role, new role, actor and timestamp. Failed and cancelled modal changes do not create completed role-change audit events.
+
+WT-WORKSPACE-TEAM-009A does not edit profile identity, send/resend/cancel invitations, deactivate/reactivate/suspend memberships, add responsibility-impact summaries, add audit-history UI, create project-specific roles, add an ownership-transfer wizard or change the CSV workflow.
+
 ## Future concepts not implemented in MVP
 
 The following concepts are recognised as possible future needs but are explicitly not implemented by WT-US-0105:

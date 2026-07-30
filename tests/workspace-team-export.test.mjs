@@ -590,7 +590,7 @@ test('Workspace Team page displays checkout warning and confirmation dialog flow
 	assert.match(page, /data-workspace-team-dialog-cancel/);
 	assert.match(page, /applyWorkspaceTeamActiveEditableCheckoutFilters/);
 	assert.match(page, /isWorkspaceTeamActiveEditableCheckout\(checkoutData, organisation\.id\) \? checkoutData : null/);
-	assert.doesNotMatch(page, /contact_email|auth_email|service_role|auth\.users/);
+	assert.doesNotMatch(page, /auth_email|service_role|auth\.users/);
 });
 
 test('Workspace Team page shows holder-only Undo checkout confirmation', async () => {
