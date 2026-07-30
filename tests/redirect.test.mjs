@@ -58,6 +58,11 @@ test('/app shell is hidden until the client confirms a real Supabase session', a
 	assert.match(layout, /<section class="app-shell" data-authenticated-shell hidden>/);
 	assert.doesNotMatch(layout, /app-shell__bar|Workspace navigation|<SignOutButton/);
 	assert.match(authStatus, /supabase\.auth\.getSession\(\)/);
+	assert.match(authStatus, /dashboardRefreshTarget/);
+	assert.match(authStatus, /data-dashboard-refresh-on-session="true"/);
+	assert.match(authStatus, /document\.cookie = `wt-access-token=\$\{session\.access_token\}/);
+	assert.match(authStatus, /window\.location\.reload\(\)/);
+	assert.match(authStatus, /sessionStorage\.setItem\(dashboardRefreshKey, '1'\)/);
 	assert.match(authStatus, /removeAttribute\('hidden'\)/);
 });
 
