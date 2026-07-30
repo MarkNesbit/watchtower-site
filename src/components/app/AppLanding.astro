@@ -1,22 +1,23 @@
+---
+import { loadAuthenticatedDashboardContext } from '../../lib/authenticatedDashboard';
+import { createSupabaseServerClient, getServerAccessToken } from '../../lib/supabaseServer';
+
+const accessToken = getServerAccessToken(Astro.cookies);
+let dashboardContext = {
+	personName: 'Signed-in user',
+	workspaceName: 'Workspace unavailable',
+};
+
+if (accessToken) {
+	const serverSupabase = createSupabaseServerClient(accessToken);
+	dashboardContext = await loadAuthenticatedDashboardContext(serverSupabase, accessToken);
+}
+---
 <section class="section light-section" data-app-landing>
 	<div class="content-card">
 		<p class="eyebrow">Authenticated area</p>
 		<h1>Welcome to WatchTower</h1>
-		<p data-welcome-message>Your personal workspace is being prepared.</p>
+		<p data-signed-in-person>Signed in as {dashboardContext.personName}</p>
+		<p data-current-workspace>Workspace: {dashboardContext.workspaceName}</p>
 	</div>
 </section>
-<script>
-	import { authenticatedUserDisplayName } from '../../lib/authenticatedUserDisplay';
-	import { supabase } from '../../lib/supabaseClient';
-
-	const message = document.querySelector('[data-welcome-message]');
-	const { data } = await supabase.auth.getUser();
-	if (data.user && message) {
-		const { data: profile } = await supabase
-			.from('profiles')
-			.select('first_name, last_name, display_name, login_name')
-			.eq('auth_user_id', data.user.id)
-			.maybeSingle();
-		message.textContent = `Signed in as ${authenticatedUserDisplayName(profile)}. Your workspace foundation is ready.`;
-	}
-</script>
