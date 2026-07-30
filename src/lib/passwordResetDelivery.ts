@@ -6,6 +6,8 @@ export const PASSWORD_RESET_PUBLIC_CONFIRMATION = 'If an eligible account matche
 
 export type PasswordResetDeliveryEnv = {
 	PUBLIC_SUPABASE_URL?: string;
+	SUPABASE_AUTH_ACTION_ORIGIN?: string;
+	SUPABASE_AUTH_ACTION_ORIGINS?: string;
 	WATCHTOWER_PASSWORD_RESET_DELIVERY_MODE?: string;
 	WATCHTOWER_EMAIL_PROVIDER?: string;
 	WATCHTOWER_RESEND_API_KEY?: string;
@@ -26,8 +28,19 @@ export type SupabaseRecoveryActionLinkValidationCode =
 	| 'redirect_invalid';
 
 export type SupabaseRecoveryActionLinkValidationResult =
-	| { status: 'valid'; actionLink: string }
-	| { status: 'invalid'; failureCode: SupabaseRecoveryActionLinkValidationCode };
+	| { status: 'valid'; actionLink: string; diagnostics: SupabaseRecoveryActionLinkDiagnostics }
+	| { status: 'invalid'; failureCode: SupabaseRecoveryActionLinkValidationCode; diagnostics: SupabaseRecoveryActionLinkDiagnostics };
+
+export type SupabaseRecoveryActionLinkDiagnostics = {
+	expectedProviderOrigin: string | null;
+	observedProviderOrigin: string | null;
+	expectedProviderHostname: string | null;
+	observedProviderHostname: string | null;
+	observedProtocol: string | null;
+	observedPathname: string | null;
+	originsMatch: boolean;
+	hostnamesMatch: boolean;
+};
 
 export type PasswordResetDeliveryResult = {
 	status: 'delivered' | 'delivery_failed';
@@ -81,6 +94,8 @@ export function passwordResetDeliveryMode(env: PasswordResetDeliveryEnv = import
 
 export function passwordResetEmailConfigDiagnostics(env: PasswordResetDeliveryEnv = import.meta.env ?? {}) {
 	return {
+		publicSupabaseUrlBindingPresent: hasBinding(env.PUBLIC_SUPABASE_URL),
+		authActionOriginBindingPresent: hasBinding(env.SUPABASE_AUTH_ACTION_ORIGIN) || hasBinding(env.SUPABASE_AUTH_ACTION_ORIGINS),
 		providerBindingPresent: hasBinding(env.WATCHTOWER_EMAIL_PROVIDER),
 		apiKeyBindingPresent: hasBinding(env.WATCHTOWER_RESEND_API_KEY),
 		senderBindingPresent: hasBinding(env.WATCHTOWER_EMAIL_FROM_ADDRESS ?? env.WATCHTOWER_INVITATION_FROM_EMAIL),
@@ -134,49 +149,52 @@ export function validateSupabaseRecoveryActionLink(
 	properties: Record<string, unknown> | null | undefined,
 	env: PasswordResetDeliveryEnv = import.meta.env ?? {},
 ): SupabaseRecoveryActionLinkValidationResult {
+	const trustedOrigins = resolveTrustedSupabaseActionOrigins(env);
 	const rawActionLink = properties?.action_link;
+	const emptyDiagnostics = recoveryActionLinkDiagnostics(null, trustedOrigins);
 	if (typeof rawActionLink !== 'string' || rawActionLink.trim().length < 1) {
-		return invalidRecoveryLink('provider_link_missing');
+		return invalidRecoveryLink('provider_link_missing', emptyDiagnostics);
 	}
 
-	const supabaseOrigin = resolveTrustedSupabaseOrigin(env);
-	if (!supabaseOrigin) return invalidRecoveryLink('provider_host_invalid');
+	if (trustedOrigins.length < 1) return invalidRecoveryLink('provider_host_invalid', emptyDiagnostics);
 
 	let actionUrl: URL;
 	try {
 		actionUrl = new URL(rawActionLink);
 	} catch {
-		return invalidRecoveryLink('provider_response_invalid');
+		return invalidRecoveryLink('provider_response_invalid', emptyDiagnostics);
 	}
+	const diagnostics = recoveryActionLinkDiagnostics(actionUrl, trustedOrigins);
+	const originTrusted = trustedOrigins.includes(actionUrl.origin);
 
 	if (
 		actionUrl.protocol !== 'https:'
-		|| actionUrl.origin !== supabaseOrigin
+		|| !originTrusted
 		|| actionUrl.username
 		|| actionUrl.password
 	) {
-		return invalidRecoveryLink('provider_host_invalid');
+		return invalidRecoveryLink('provider_host_invalid', diagnostics);
 	}
 
 	if (normalisePathname(actionUrl.pathname) !== '/auth/v1/verify') {
-		return invalidRecoveryLink('provider_path_invalid');
+		return invalidRecoveryLink('provider_path_invalid', diagnostics);
 	}
 
 	const verificationType = actionUrl.searchParams.get('type') ?? stringProperty(properties, 'verification_type');
-	if (verificationType !== 'recovery') return invalidRecoveryLink('provider_response_invalid');
+	if (verificationType !== 'recovery') return invalidRecoveryLink('provider_response_invalid', diagnostics);
 
 	const tokenHash = actionUrl.searchParams.get('token_hash');
-	if (!tokenHash || !tokenHash.trim()) return invalidRecoveryLink('provider_response_invalid');
+	if (!tokenHash || !tokenHash.trim()) return invalidRecoveryLink('provider_response_invalid', diagnostics);
 
 	const responseTokenHash = stringProperty(properties, 'hashed_token');
-	if (responseTokenHash !== null && !responseTokenHash.trim()) return invalidRecoveryLink('provider_response_invalid');
+	if (responseTokenHash !== null && !responseTokenHash.trim()) return invalidRecoveryLink('provider_response_invalid', diagnostics);
 
 	const redirectTo = actionUrl.searchParams.get('redirect_to');
 	if (!redirectTo || !isApprovedPasswordResetRedirect(redirectTo, env)) {
-		return invalidRecoveryLink('redirect_invalid');
+		return invalidRecoveryLink('redirect_invalid', diagnostics);
 	}
 
-	return { status: 'valid', actionLink: actionUrl.toString() };
+	return { status: 'valid', actionLink: actionUrl.toString(), diagnostics };
 }
 
 export function renderPasswordResetEmail(actionLink: string) {
@@ -299,12 +317,29 @@ function safeProviderFailureMessage(status: number): string {
 	return 'Password reset email provider did not accept the message.';
 }
 
-function invalidRecoveryLink(failureCode: SupabaseRecoveryActionLinkValidationCode): SupabaseRecoveryActionLinkValidationResult {
-	return { status: 'invalid', failureCode };
+function invalidRecoveryLink(
+	failureCode: SupabaseRecoveryActionLinkValidationCode,
+	diagnostics: SupabaseRecoveryActionLinkDiagnostics,
+): SupabaseRecoveryActionLinkValidationResult {
+	return { status: 'invalid', failureCode, diagnostics };
 }
 
-function resolveTrustedSupabaseOrigin(env: PasswordResetDeliveryEnv): string | null {
-	const configured = String(env.PUBLIC_SUPABASE_URL ?? '').trim();
+export function resolveTrustedSupabaseActionOrigins(env: PasswordResetDeliveryEnv = import.meta.env ?? {}): string[] {
+	const configuredOrigins = [
+		env.SUPABASE_AUTH_ACTION_ORIGIN,
+		...String(env.SUPABASE_AUTH_ACTION_ORIGINS ?? '').split(','),
+		env.PUBLIC_SUPABASE_URL,
+	];
+	const origins: string[] = [];
+	for (const configuredOrigin of configuredOrigins) {
+		const origin = normaliseTrustedHttpsOrigin(configuredOrigin);
+		if (origin && !origins.includes(origin)) origins.push(origin);
+	}
+	return origins;
+}
+
+function normaliseTrustedHttpsOrigin(value: unknown): string | null {
+	const configured = String(value ?? '').trim();
 	if (!configured) return null;
 	try {
 		const url = new URL(configured);
@@ -313,6 +348,23 @@ function resolveTrustedSupabaseOrigin(env: PasswordResetDeliveryEnv): string | n
 	} catch {
 		return null;
 	}
+}
+
+function recoveryActionLinkDiagnostics(actionUrl: URL | null, trustedOrigins: string[]): SupabaseRecoveryActionLinkDiagnostics {
+	const expectedProviderOrigin = trustedOrigins[0] ?? null;
+	const observedProviderOrigin = actionUrl?.origin ?? null;
+	const expectedProviderHostname = expectedProviderOrigin ? new URL(expectedProviderOrigin).hostname : null;
+	const observedProviderHostname = actionUrl?.hostname ?? null;
+	return {
+		expectedProviderOrigin,
+		observedProviderOrigin,
+		expectedProviderHostname,
+		observedProviderHostname,
+		observedProtocol: actionUrl?.protocol ?? null,
+		observedPathname: actionUrl ? normalisePathname(actionUrl.pathname) : null,
+		originsMatch: observedProviderOrigin !== null && trustedOrigins.includes(observedProviderOrigin),
+		hostnamesMatch: observedProviderHostname !== null && trustedOrigins.some((origin) => new URL(origin).hostname === observedProviderHostname),
+	};
 }
 
 function isApprovedPasswordResetRedirect(rawRedirectTo: string, env: PasswordResetDeliveryEnv): boolean {
