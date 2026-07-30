@@ -46,6 +46,7 @@ const acceptanceJoinedAtMigrationUrl = new URL('../supabase/migrations/202607230
 const workspaceResolutionMigrationUrl = new URL('../supabase/migrations/20260723002300_workspace_invitation_workspace_resolution.sql', import.meta.url);
 const authRemapGuardMigrationUrl = new URL('../supabase/migrations/20260723002400_workspace_invitation_auth_remap_guard.sql', import.meta.url);
 const deliveryAuditIdentityMigrationUrl = new URL('../supabase/migrations/20260723002500_workspace_invitation_delivery_audit_identity.sql', import.meta.url);
+const lookupAuditIdentityMigrationUrl = new URL('../supabase/migrations/20260723002600_workspace_invitation_lookup_audit_identity.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const setupRouteUrl = new URL('../src/pages/invitations/setup.ts', import.meta.url);
@@ -250,6 +251,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	const workspaceResolutionIndex = files.indexOf('20260723002300_workspace_invitation_workspace_resolution.sql');
 	const authRemapGuardIndex = files.indexOf('20260723002400_workspace_invitation_auth_remap_guard.sql');
 	const deliveryAuditIdentityIndex = files.indexOf('20260723002500_workspace_invitation_delivery_audit_identity.sql');
+	const lookupAuditIdentityIndex = files.indexOf('20260723002600_workspace_invitation_lookup_audit_identity.sql');
 	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
 	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
 
@@ -268,6 +270,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.equal(workspaceResolutionIndex, acceptanceJoinedAtIndex + 1, 'workspace resolution migration should follow acceptance joined-at migration');
 	assert.equal(authRemapGuardIndex, workspaceResolutionIndex + 1, 'Auth remap guard migration should follow workspace-resolution migration');
 	assert.equal(deliveryAuditIdentityIndex, authRemapGuardIndex + 1, 'delivery audit identity migration should follow Auth remap guard migration');
+	assert.equal(lookupAuditIdentityIndex, deliveryAuditIdentityIndex + 1, 'lookup audit identity migration should follow delivery audit identity migration');
 	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
 	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
@@ -365,6 +368,56 @@ test('Workspace invitation delivery audit records Auth identity rather than prof
 	}
 	assert.doesNotMatch(sql, /alter table public\.workspace_membership_audit_events[\s\S]*target_user_id[\s\S]*references public\.profiles|drop constraint .*target_user_id_fkey/i);
 	assert.match(sql, /grant execute on function public\.begin_workspace_membership_invitation_delivery_attempt\(uuid, uuid\) to authenticated, service_role/);
+});
+
+test('Workspace invitation lookup audit records Auth identity rather than profile identity', async () => {
+	const sql = await readFile(lookupAuditIdentityMigrationUrl, 'utf8');
+	const auditSchemaSql = await readFile(new URL('../supabase/migrations/20260722000100_workspace_membership_lifecycle_audit_schema.sql', import.meta.url), 'utf8');
+	const lookupSql = sqlFunctionDefinition(sql, 'get_workspace_membership_invitation_by_token');
+	const expiredAudit = lookupSql.match(/record_workspace_membership_audit_event\([\s\S]*?'workspace_invitation_expired'[\s\S]*?\);/)?.[0] ?? '';
+	const replayAudit = lookupSql.match(/record_workspace_membership_audit_event\([\s\S]*?'workspace_invitation_replay_rejected'[\s\S]*?\);/)?.[0] ?? '';
+	const openedAudit = lookupSql.match(/record_workspace_membership_audit_event\([\s\S]*?'workspace_invitation_opened'[\s\S]*?\);/)?.[0] ?? '';
+	const expiredInvitationUpdate = lookupSql.match(/update public\.workspace_membership_invitations[\s\S]*?where id = v_invitation\.id;/)?.[0] ?? '';
+	const expiredMembershipUpdate = lookupSql.match(/update public\.organisation_members as om[\s\S]*?and om\.status = 'invited';/)?.[0] ?? '';
+	const openedUpdate = lookupSql.match(/if v_invitation\.status = 'delivered' then[\s\S]*?where id = v_invitation\.id;/)?.[0] ?? '';
+	const openedUpdateIndex = lookupSql.indexOf("set status = 'opened'");
+	const openedAuditIndex = lookupSql.indexOf("'workspace_invitation_opened'");
+
+	assert.match(auditSchemaSql, /target_user_id uuid references auth\.users\(id\)/);
+	assert.match(auditSchemaSql, /actor_user_id uuid references auth\.users\(id\)/);
+	assert.doesNotMatch(auditSchemaSql, /target_profile_id|invitation_id uuid/);
+	assert.match(lookupSql, /v_actor_auth_user_id uuid := auth\.uid\(\)/);
+	assert.match(lookupSql, /where invitation\.token_hash = p_token_hash[\s\S]*and invitation\.is_current[\s\S]*for update/);
+	assert.match(lookupSql, /from public\.organisation_members as membership[\s\S]*membership\.id = v_invitation\.membership_id[\s\S]*membership\.organisation_id = v_invitation\.organisation_id[\s\S]*for update/);
+	assert.match(lookupSql, /v_membership\.user_id is distinct from v_invitation\.profile_id/);
+	assert.match(lookupSql, /v_membership\.auth_user_id is null/);
+	assert.match(lookupSql, /v_membership\.auth_user_id is distinct from v_invitation\.auth_user_id/);
+	assert.match(lookupSql, /v_membership\.role is distinct from v_invitation\.intended_role/);
+	assert.match(lookupSql, /WT_INVITATION_LOOKUP_IDENTITY_MISMATCH/);
+
+	assert.match(expiredAudit, /v_invitation\.organisation_id,\s+v_invitation\.membership_id,\s+v_membership\.auth_user_id,\s+v_actor_auth_user_id,\s+'workspace_invitation_expired'/);
+	assert.match(replayAudit, /v_invitation\.organisation_id,\s+v_invitation\.membership_id,\s+v_membership\.auth_user_id,\s+v_actor_auth_user_id,\s+'workspace_invitation_replay_rejected'/);
+	assert.match(openedAudit, /v_invitation\.organisation_id,\s+v_invitation\.membership_id,\s+v_membership\.auth_user_id,\s+v_actor_auth_user_id,\s+'workspace_invitation_opened'/);
+	for (const auditBlock of [expiredAudit, replayAudit, openedAudit]) {
+		assert.match(auditBlock, /'invitation_id', v_invitation\.id/);
+		assert.match(auditBlock, /'membership_id', v_invitation\.membership_id/);
+		assert.match(auditBlock, /'profile_id', v_invitation\.profile_id/);
+		assert.match(auditBlock, /'target_auth_user_id', v_membership\.auth_user_id/);
+		assert.doesNotMatch(auditBlock, /v_invitation\.profile_id,\s+(?:v_actor_auth_user_id|null),/);
+	}
+
+	assert.match(lookupSql, /if v_invitation\.status not in \('delivered', 'opened'\) then/);
+	assert.match(openedUpdate, /set status = 'opened'/);
+	assert.match(openedUpdate, /opened_at = coalesce\(opened_at, now\(\)\)/);
+	assert.match(lookupSql, /case when invitation\.status = 'delivered' then 'opened' else invitation\.status end/);
+	assert.match(lookupSql, /perform set_config\('watchtower\.membership_lifecycle_rpc', 'true', true\)/);
+	assert.match(expiredMembershipUpdate, /set status = 'invite_expired'/);
+	assert.ok(lookupSql.indexOf(expiredInvitationUpdate) >= 0 && lookupSql.indexOf(expiredAudit) > lookupSql.indexOf(expiredInvitationUpdate), 'expired invitation update is audited in the same transaction');
+	assert.ok(openedUpdateIndex > 0 && openedAuditIndex > openedUpdateIndex, 'delivered-to-opened update is audited in the same transaction');
+	assert.doesNotMatch(lookupSql, /record_workspace_membership_audit_event\(\s*v_invitation\.organisation_id,\s*v_invitation\.membership_id,\s*v_invitation\.profile_id,/);
+	assert.doesNotMatch(lookupSql, /status = 'active'|role\s*=|auth_user_id\s*=|user_id\s*=|accept_workspace_membership_invitation|record_workspace_invitation_auth_identity_repair/);
+	assert.doesNotMatch(sql, /alter table public\.workspace_membership_audit_events[\s\S]*target_user_id[\s\S]*references public\.profiles|drop constraint .*target_user_id_fkey/i);
+	assert.match(sql, /grant execute on function public\.get_workspace_membership_invitation_by_token\(text\) to anon, authenticated, service_role/);
 });
 
 test('Workspace invitation delivery provider configuration is server-side and production-origin bounded', () => {
