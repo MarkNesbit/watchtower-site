@@ -1,6 +1,7 @@
 ---
 import AuthLayout from '../../layouts/AuthLayout.astro';
 import { createSupabaseServerClient, getServerAccessToken } from '../../lib/supabaseServer.ts';
+import { buildWorkspaceInvitationAcceptanceLookupFailureLog } from '../../lib/workspaceInvitationAcceptanceDiagnostics.ts';
 import {
 	buildWorkspaceInvitationAcceptRelativePath,
 	buildWorkspaceInvitationLoginPath,
@@ -139,6 +140,17 @@ async function currentAuthUserId() {
 }
 
 if (!isWorkspaceInvitationToken(token)) {
+	console.error('workspace_invitation_acceptance_lookup_failed', buildWorkspaceInvitationAcceptanceLookupFailureLog({
+		routeName,
+		currentInvitation: null,
+		currentAuthUserId: null,
+		lookupOperationName: 'validate_workspace_invitation_token',
+		error: {
+			code: 'WT_INVITATION_TOKEN_INVALID',
+			message: 'Invitation token failed local format validation.',
+		},
+		classifiedOutcome: 'invalid',
+	}));
 	loadError = 'This invitation link is invalid or incomplete.';
 } else if (Astro.request.method === 'POST') {
 	const accessToken = getServerAccessToken(Astro.cookies);
@@ -179,29 +191,41 @@ if (!isWorkspaceInvitationToken(token)) {
 	});
 	return Astro.redirect(slug ? `/app/workspaces/${encodeURIComponent(slug)}/team?invitation_acceptance=success` : '/app?invitation_acceptance=success', 303);
 } else {
+	let signedInAuthUserId: string | null = null;
+	let lookupFailureLogged = false;
+	const logLookupFailure = (error: unknown) => {
+		lookupFailureLogged = true;
+		console.error('workspace_invitation_acceptance_lookup_failed', buildWorkspaceInvitationAcceptanceLookupFailureLog({
+			routeName,
+			currentInvitation: invitation,
+			currentAuthUserId: signedInAuthUserId,
+			lookupOperationName: 'get_workspace_membership_invitation_by_token',
+			error,
+		}));
+	};
 	try {
 		const serverSupabase = createSupabaseServerClient();
+		signedInAuthUserId = await currentAuthUserId();
 		const tokenHash = await hashInvitationToken(token);
 		const { data, error } = await serverSupabase.rpc('get_workspace_membership_invitation_by_token', {
 			p_token_hash: tokenHash,
 		});
-		if (error) throw error;
+		if (error) {
+			logLookupFailure(error);
+			throw error;
+		}
 		invitation = Array.isArray(data) ? data[0] as InvitationInfo | null : null;
 		if (!invitation) loadError = 'This invitation link is invalid, expired, cancelled or has already been used.';
 		if (success && invitation?.workspace_slug) acceptedWorkspacePath = `/app/workspaces/${encodeURIComponent(invitation.workspace_slug)}/team`;
 		if (invitation) {
-			const authUserId = await currentAuthUserId();
-			accountState = !authUserId
+			accountState = !signedInAuthUserId
 				? 'signed_out'
-				: authUserId === invitation.auth_user_id
+				: signedInAuthUserId === invitation.auth_user_id
 					? 'matching'
 					: 'wrong_account';
 		}
 	} catch (error) {
-		console.error('workspace_invitation_acceptance_lookup_failed', {
-			routeName,
-			message: safeLogText(error instanceof Error ? error.message : 'Invitation lookup failed'),
-		});
+		if (!lookupFailureLogged) logLookupFailure(error);
 		loadError = 'This invitation could not be validated. Try the link again, or ask the workspace Owner to resend it.';
 	}
 }

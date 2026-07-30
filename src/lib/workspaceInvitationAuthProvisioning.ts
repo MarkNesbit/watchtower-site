@@ -144,11 +144,11 @@ function safeOptionalFailureMessage(value: unknown) {
 	return safeFailureMessage(value, 'Invitation Auth repair detail redacted.');
 }
 
-function safeSupabaseErrorDiagnostics(error: unknown) {
+export function safeSupabaseErrorDiagnostics(error: unknown, fallback = 'Invitation Auth identity could not be provisioned.') {
 	const supabaseError = extractStructuredSupabaseError(error);
 	return {
 		supabaseErrorCode: safeOptionalFailureMessage(supabaseError.code),
-		safeErrorMessage: safeFailureMessage(error, 'Invitation Auth identity could not be provisioned.'),
+		safeErrorMessage: safeFailureMessage(error, fallback),
 		safeDetails: safeOptionalFailureMessage(supabaseError.details),
 		safeHint: safeOptionalFailureMessage(supabaseError.hint),
 	};
