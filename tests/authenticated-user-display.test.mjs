@@ -334,6 +334,8 @@ test('Authenticated dashboard source resolves through auth_user_id and member di
 	assert.match(source, /loadAuthenticatedDashboardContext\(serverSupabase, accessToken\)/);
 	assert.match(source, /data-signed-in-person/);
 	assert.match(source, /data-current-workspace/);
+	assert.match(source, /needsDashboardSessionRefresh/);
+	assert.match(source, /data-dashboard-refresh-on-session=\{needsDashboardSessionRefresh \? 'true' : undefined\}/);
 	assert.doesNotMatch(source, /supabaseClient|from\('profiles'\)|data\.user\.email|user_metadata|app_metadata/);
 });
 

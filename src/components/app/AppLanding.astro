@@ -6,14 +6,21 @@ const accessToken = getServerAccessToken(Astro.cookies);
 let dashboardContext = {
 	personName: 'Signed-in user',
 	workspaceName: 'Workspace unavailable',
+	personFallbackUsed: true,
+	workspaceFallbackUsed: true,
 };
 
 if (accessToken) {
 	const serverSupabase = createSupabaseServerClient(accessToken);
 	dashboardContext = await loadAuthenticatedDashboardContext(serverSupabase, accessToken);
 }
+const needsDashboardSessionRefresh = !accessToken || (dashboardContext.personFallbackUsed && dashboardContext.workspaceFallbackUsed);
 ---
-<section class="section light-section" data-app-landing>
+<section
+	class="section light-section"
+	data-app-landing
+	data-dashboard-refresh-on-session={needsDashboardSessionRefresh ? 'true' : undefined}
+>
 	<div class="content-card">
 		<p class="eyebrow">Authenticated area</p>
 		<h1>Welcome to WatchTower</h1>

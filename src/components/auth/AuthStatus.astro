@@ -4,9 +4,35 @@
 
 	const status = document.querySelector('[data-auth-status]');
 	const protectedShells = document.querySelectorAll('[data-authenticated-shell]');
+	const dashboardRefreshTarget = document.querySelector('[data-dashboard-refresh-on-session="true"]');
 	const publicAuthPaths = ['/login', '/register'];
 	const protectedPrefixes = ['/app'];
 	const path = window.location.pathname.replace(/\/$/, '') || '/';
+	const dashboardRefreshKey = `watchtower:dashboard-context-refresh:${window.location.pathname}${window.location.search}`;
+
+	function getDashboardRefreshAttempted() {
+		try {
+			return window.sessionStorage.getItem(dashboardRefreshKey) === '1';
+		} catch {
+			return false;
+		}
+	}
+
+	function setDashboardRefreshAttempted() {
+		try {
+			window.sessionStorage.setItem(dashboardRefreshKey, '1');
+		} catch {
+			// Ignore storage failures; the reload still lets the server use the recovered cookie.
+		}
+	}
+
+	function clearDashboardRefreshAttempted() {
+		try {
+			window.sessionStorage.removeItem(dashboardRefreshKey);
+		} catch {
+			// Ignore storage failures.
+		}
+	}
 
 	async function syncAuthState() {
 		const { data } = await supabase.auth.getSession();
@@ -27,6 +53,16 @@
 		if (session && publicAuthPaths.includes(path)) {
 			window.location.replace('/app');
 			return;
+		}
+
+		if (session && isProtected && dashboardRefreshTarget) {
+			if (!getDashboardRefreshAttempted()) {
+				setDashboardRefreshAttempted();
+				window.location.reload();
+				return;
+			}
+		} else {
+			clearDashboardRefreshAttempted();
 		}
 
 		if (isProtected) {
