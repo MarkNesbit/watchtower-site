@@ -25,6 +25,10 @@ import {
 	WORKSPACE_INVITATION_AUTH_IDENTITY_FAILURE_CODE,
 	provisionWorkspaceInvitationAuthIdentities,
 } from '../src/lib/workspaceInvitationAuthProvisioning.ts';
+import {
+	buildWorkspaceInvitationAcceptanceLookupFailureLog,
+	classifyWorkspaceInvitationAcceptanceLookupOutcome,
+} from '../src/lib/workspaceInvitationAcceptanceDiagnostics.ts';
 import { buildWorkspaceTeamInvitationSendPath } from '../src/lib/projectRoutes.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260723001100_workspace_membership_invitation_delivery_activation.sql', import.meta.url);
@@ -2535,6 +2539,104 @@ test('Workspace invitation acceptance page logs safe acceptance outcomes', async
 	assert.match(page, /logAcceptanceCompleted\(\{[\s\S]*currentInvitation,[\s\S]*signedInAuthUserId,[\s\S]*resultingWorkspaceSlug: slug \?\? null/);
 	assert.doesNotMatch(failureLog, /tokenHash|p_token_hash|token|Astro\.url|email|password|accessToken|refreshToken|url\.href/i);
 	assert.doesNotMatch(successLog, /tokenHash|p_token_hash|token|Astro\.url|email|password|accessToken|refreshToken|url\.href/i);
+});
+
+test('Workspace invitation acceptance lookup diagnostics expose safe structured database errors', () => {
+	const baseInvitation = {
+		invitation_id: '11111111-1111-4111-8111-111111111111',
+		membership_id: '22222222-2222-4222-8222-222222222222',
+		profile_id: '33333333-3333-4333-8333-333333333333',
+		status: 'delivered',
+	};
+	const directLog = buildWorkspaceInvitationAcceptanceLookupFailureLog({
+		routeName: 'workspace_invitation_acceptance',
+		currentInvitation: baseInvitation,
+		currentAuthUserId: '44444444-4444-4444-8444-444444444444',
+		lookupOperationName: 'get_workspace_membership_invitation_by_token',
+		error: {
+			code: '23503',
+			message: 'insert failed for james@example.test using https://watch-tower.co.uk/invitations/accept?token=secret',
+			details: 'token_hash=abcdef0123456789abcdef0123456789abcdef0123456789 and alias mark.nesbit.professional+wt.james@gmail.com',
+			hint: 'retry without access_token=abc123 or service_role key re_secret',
+		},
+	});
+	const nestedLog = buildWorkspaceInvitationAcceptanceLookupFailureLog({
+		routeName: 'workspace_invitation_acceptance',
+		currentInvitation: null,
+		currentAuthUserId: null,
+		lookupOperationName: 'get_workspace_membership_invitation_by_token',
+		error: {
+			error: {
+				code: 'PGRST204',
+				message: 'nested PostgREST error for secret@example.test',
+				details: 'password=topsecret refresh_token=abc123',
+				hint: 'JWT eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature',
+			},
+		},
+	});
+
+	assert.equal(directLog.routeName, 'workspace_invitation_acceptance');
+	assert.equal(directLog.invitationId, baseInvitation.invitation_id);
+	assert.equal(directLog.membershipId, baseInvitation.membership_id);
+	assert.equal(directLog.profileId, baseInvitation.profile_id);
+	assert.equal(directLog.currentAuthUserId, '44444444-4444-4444-8444-444444444444');
+	assert.equal(directLog.lookupOperationName, 'get_workspace_membership_invitation_by_token');
+	assert.equal(directLog.supabaseErrorCode, '23503');
+	assert.equal(directLog.safeErrorMessage, 'insert failed for [redacted-email] using [redacted-link]');
+	assert.equal(directLog.safeDetails, '[redacted-token-hash] and alias [redacted-email]');
+	assert.equal(directLog.safeHint, 'retry without [redacted]=[redacted] or [redacted-secret] [redacted-secret]');
+	assert.equal(directLog.classifiedOutcome, 'failed');
+	assert.equal(nestedLog.supabaseErrorCode, 'PGRST204');
+	assert.equal(nestedLog.safeErrorMessage, 'nested PostgREST error for [redacted-email]');
+	assert.equal(nestedLog.safeDetails, '[redacted]=[redacted] [redacted]=[redacted]');
+	assert.equal(nestedLog.safeHint, 'JWT [redacted-jwt]');
+	assert.doesNotMatch(JSON.stringify([directLog, nestedLog]), /james@example|secret@example|mark\.nesbit\.professional|watch-tower\.co\.uk|token=secret|abcdef0123456789|topsecret|abc123|re_secret|eyJ/i);
+});
+
+test('Workspace invitation acceptance lookup diagnostics classify invitation outcomes safely', () => {
+	assert.equal(classifyWorkspaceInvitationAcceptanceLookupOutcome({ message: 'WT_INVITATION_TOKEN_INVALID' }), 'invalid');
+	assert.equal(classifyWorkspaceInvitationAcceptanceLookupOutcome({ message: 'WT_INVITATION_EXPIRED before acceptance' }), 'expired');
+	assert.equal(classifyWorkspaceInvitationAcceptanceLookupOutcome({ message: 'invitation was cancelled' }), 'cancelled');
+	assert.equal(classifyWorkspaceInvitationAcceptanceLookupOutcome({ message: 'invitation superseded by retry' }), 'superseded');
+	assert.equal(classifyWorkspaceInvitationAcceptanceLookupOutcome({ message: 'invitation already accepted' }), 'accepted');
+	assert.equal(classifyWorkspaceInvitationAcceptanceLookupOutcome({ message: 'database unavailable' }), 'failed');
+	assert.equal(classifyWorkspaceInvitationAcceptanceLookupOutcome(new Error('network failed'), { status: 'expired' }), 'expired');
+	assert.equal(classifyWorkspaceInvitationAcceptanceLookupOutcome(new Error('network failed'), { status: 'superseded' }), 'superseded');
+});
+
+test('Workspace invitation acceptance lookup logs RPC failures without changing lookup behaviour', async () => {
+	const page = await readFile(acceptPageUrl, 'utf8');
+	const sql = await readFile(migrationUrl, 'utf8');
+	const lookupSql = sqlFunctionDefinition(sql, 'get_workspace_membership_invitation_by_token');
+	const lookupFailureLogs = [...page.matchAll(/console\.error\('workspace_invitation_acceptance_lookup_failed'[\s\S]*?buildWorkspaceInvitationAcceptanceLookupFailureLog\(\{[\s\S]*?\}\)\);/g)].map((match) => match[0]);
+	const rpcLookupFailureLog = lookupFailureLogs.find((log) => log.includes("lookupOperationName: 'get_workspace_membership_invitation_by_token'")) ?? '';
+	const deliveredOpenBlock = lookupSql.match(/if v_invitation\.status = 'delivered' then[\s\S]*?end if;/)?.[0] ?? '';
+	const replayBlock = lookupSql.match(/if v_invitation\.status not in \('delivered', 'opened'\) then[\s\S]*?return;\n  end if;/)?.[0] ?? '';
+
+	assert.match(page, /import \{ buildWorkspaceInvitationAcceptanceLookupFailureLog \}/);
+	assert.match(page, /const \{ data, error \} = await serverSupabase\.rpc\('get_workspace_membership_invitation_by_token'/);
+	assert.match(page, /lookupOperationName: 'get_workspace_membership_invitation_by_token'/);
+	assert.match(page, /lookupOperationName: 'validate_workspace_invitation_token'/);
+	assert.match(page, /currentAuthUserId: signedInAuthUserId/);
+	assert.match(page, /if \(error\) \{[\s\S]*logLookupFailure\(error\);[\s\S]*throw error/);
+	assert.match(page, /if \(!lookupFailureLogged\) logLookupFailure\(error\)/);
+	assert.ok(lookupFailureLogs.some((log) => log.includes("lookupOperationName: 'validate_workspace_invitation_token'")));
+	assert.match(rpcLookupFailureLog, /routeName/);
+	assert.match(rpcLookupFailureLog, /currentInvitation: invitation/);
+	assert.match(rpcLookupFailureLog, /currentAuthUserId: signedInAuthUserId/);
+	assert.match(rpcLookupFailureLog, /lookupOperationName/);
+	assert.doesNotMatch(rpcLookupFailureLog, /tokenHash|p_token_hash|token:|Astro\.url|email|password|accessToken|refreshToken|url\.href/i);
+	assert.match(lookupSql, /where invitation\.token_hash = p_token_hash[\s\S]*and invitation\.is_current[\s\S]*for update/);
+	assert.match(lookupSql, /if not found then[\s\S]*return/);
+	assert.match(lookupSql, /expires_at <= now\(\)[\s\S]*set status = 'expired'/);
+	assert.match(lookupSql, /workspace_invitation_expired/);
+	assert.match(replayBlock, /workspace_invitation_replay_rejected/);
+	assert.match(replayBlock, /requested_action', 'open'/);
+	assert.match(deliveredOpenBlock, /set status = 'opened'/);
+	assert.match(deliveredOpenBlock, /opened_at = coalesce\(opened_at, now\(\)\)/);
+	assert.match(deliveredOpenBlock, /workspace_invitation_opened/);
+	assert.match(lookupSql, /case when invitation\.status = 'delivered' then 'opened' else invitation\.status end/);
+	assert.doesNotMatch(lookupSql, /accept_workspace_membership_invitation|status = 'active'|auth\.uid\(\)/);
 });
 
 test('Workspace invitation acceptance page meets static accessibility guardrails', async () => {
