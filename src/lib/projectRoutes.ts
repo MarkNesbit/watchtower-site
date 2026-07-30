@@ -38,6 +38,14 @@ export function buildWorkspaceTeamInvitationSendPath(workspaceSlug: string): str
 	return `${buildWorkspaceTeamPath(workspaceSlug)}/invitations/send`;
 }
 
+export function buildWorkspaceTeamMemberSessionPath(workspaceSlug: string): string {
+	return `${buildWorkspaceTeamPath(workspaceSlug)}/members/session`;
+}
+
+export function buildWorkspaceTeamMemberRolePath(workspaceSlug: string): string {
+	return `${buildWorkspaceTeamPath(workspaceSlug)}/members/role`;
+}
+
 export function buildProjectEditPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/edit`;
 }

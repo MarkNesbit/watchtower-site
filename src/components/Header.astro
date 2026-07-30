@@ -1,6 +1,7 @@
 ---
 import SignOutButton from './auth/SignOutButton.astro';
 import { buildWorkspaceTeamPath, getCurrentWorkspace } from '../lib/projects';
+import { can } from '../lib/permissions';
 import { createSupabaseServerClient, getServerAccessToken } from '../lib/supabaseServer';
 
 const publicNavItems = [
@@ -17,7 +18,7 @@ if (accessToken) {
 		const serverSupabase = createSupabaseServerClient(accessToken);
 		const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
 		const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
-		workspaceTeamHref = organisation?.slug ? buildWorkspaceTeamPath(organisation.slug) : '';
+		workspaceTeamHref = organisation?.slug && can(workspace?.role, 'workspaceTeam.view') ? buildWorkspaceTeamPath(organisation.slug) : '';
 	} catch {
 		workspaceTeamHref = '';
 	}

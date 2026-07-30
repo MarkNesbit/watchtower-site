@@ -33,6 +33,7 @@ import { buildWorkspaceTeamInvitationSendPath } from '../src/lib/projectRoutes.t
 
 const migrationUrl = new URL('../supabase/migrations/20260723001100_workspace_membership_invitation_delivery_activation.sql', import.meta.url);
 const internalPolicyMigrationUrl = new URL('../supabase/migrations/20260723001200_workspace_invitation_internal_delivery_policy.sql', import.meta.url);
+const latestMembershipAuditMigrationUrl = new URL('../supabase/migrations/20260730000100_workspace_member_modal_role_management.sql', import.meta.url);
 const retryPolicyMigrationUrl = new URL('../supabase/migrations/20260723001300_workspace_invitation_retry_policy_resolution.sql', import.meta.url);
 const controlledIdentityMigrationUrl = new URL('../supabase/migrations/20260723001400_workspace_invitation_controlled_identity_preparation.sql', import.meta.url);
 const outboundEmailMigrationUrl = new URL('../supabase/migrations/20260723001500_workspace_invitation_outbound_email_delivery.sql', import.meta.url);
@@ -183,7 +184,7 @@ test('Workspace invitation migration exposes admin directory invitation columns'
 
 test('Internal delivery policy migration keeps audit event catalogue as a complete historical superset', async () => {
 	const files = (await readdir(migrationsDir)).filter((file) => file.endsWith('.sql')).sort();
-	const finalSql = await readFile(internalPolicyMigrationUrl, 'utf8');
+	const finalSql = await readFile(latestMembershipAuditMigrationUrl, 'utf8');
 	const finalEventTypes = sqlConstraintValues(finalSql, 'workspace_membership_audit_events_event_type_check');
 	const historicalEventTypes = new Set();
 

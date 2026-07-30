@@ -27,11 +27,13 @@ export const ACTION_PERMISSIONS = [
 	'action.takeover',
 ] as const;
 export type ActionPermission = (typeof ACTION_PERMISSIONS)[number];
-export type Permission = ProjectPermission | RiskPermission | NarrativePermission | ActionPermission;
+export const WORKSPACE_TEAM_PERMISSIONS = ['workspaceTeam.view', 'workspaceTeam.manageRoles'] as const;
+export type WorkspaceTeamPermission = (typeof WORKSPACE_TEAM_PERMISSIONS)[number];
+export type Permission = ProjectPermission | RiskPermission | NarrativePermission | ActionPermission | WorkspaceTeamPermission;
 
 const ROLE_PERMISSIONS: Record<WorkspaceRole, ReadonlySet<Permission>> = {
-	owner: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS, ...ACTION_PERMISSIONS]),
-	admin: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS, ...ACTION_PERMISSIONS]),
+	owner: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS, ...ACTION_PERMISSIONS, ...WORKSPACE_TEAM_PERMISSIONS]),
+	admin: new Set([...PROJECT_PERMISSIONS, ...RISK_PERMISSIONS, ...NARRATIVE_PERMISSIONS, ...ACTION_PERMISSIONS, ...WORKSPACE_TEAM_PERMISSIONS]),
 	member: new Set([
 		...PROJECT_PERMISSIONS,
 		...RISK_PERMISSIONS,

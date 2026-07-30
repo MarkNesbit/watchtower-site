@@ -12,9 +12,11 @@ import {
 	buildWorkspaceTeamImportReviewConfirmPath,
 	buildWorkspaceTeamImportReviewPath,
 	buildWorkspaceTeamInvitationSendPath,
+	buildWorkspaceTeamMemberRolePath,
+	buildWorkspaceTeamMemberSessionPath,
 	getWorkspaceBySlug,
 } from '../../../../lib/projects';
-import { isWorkspaceRole } from '../../../../lib/permissions';
+import { can, isWorkspaceRole } from '../../../../lib/permissions';
 import { createSupabaseServerClient, getServerAccessToken } from '../../../../lib/supabaseServer';
 import { WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES } from '../../../../lib/workspaceTeamCsvImport';
 import { normaliseWorkspaceTeamSnapshotVersion } from '../../../../lib/workspaceTeamCsv';
@@ -23,6 +25,8 @@ import {
 	buildWorkspaceTeamDisplayMembers,
 	isWorkspaceTeamActiveEditableCheckout,
 	membershipStateCounts,
+	workspaceTeamRoleAuthority,
+	workspaceRoleLabel,
 	workspaceTeamPersonName,
 	type TeamFilter,
 	type WorkspaceTeamActiveEditableCheckout,
@@ -127,6 +131,7 @@ let checkoutLoadError = '';
 let importLoadError = '';
 let reviewLoadError = '';
 let applicationLoadError = '';
+let membershipSnapshotVersion: string | null = null;
 
 const asRecord = (value: unknown): JsonRecord => value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : {};
 const asArray = <T,>(value: unknown): T[] => Array.isArray(value) ? value as T[] : [];
@@ -186,13 +191,16 @@ try {
 	} else if (!isWorkspaceRole(workspace.role)) {
 		loadMessage = 'Your workspace access could not be confirmed.';
 		Astro.response.status = 403;
+	} else if (!can(workspace.role, 'workspaceTeam.view')) {
+		loadMessage = 'Only active Workspace Owners and Admins can access Workspace Team.';
+		Astro.response.status = 403;
 	} else {
 		workspaceName = organisation.name;
 		workspaceRole = workspace.role;
-		const canUseAdminDirectory = workspaceRole === 'owner' || workspaceRole === 'admin';
+		const canUseAdminDirectory = can(workspaceRole, 'workspaceTeam.view');
 		const directoryTable = canUseAdminDirectory ? 'workspace_member_admin_directory' : 'workspace_member_directory';
 		const selectColumns = canUseAdminDirectory
-			? 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, invited_at, invitation_expires_at, joined_at, accepted_at, deactivated_at, reactivated_at, invitation_id, invitation_status, invitation_delivered_at, invitation_opened_at, invitation_accepted_at, invitation_cancelled_at, invitation_superseded_at, invitation_delivery_attempt_count, invitation_last_delivery_attempt_at, invitation_failure_code, invitation_failure_message, invitation_delivery_strategy, auth_user_id'
+			? 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, contact_email, role, membership_status, invited_at, invitation_expires_at, joined_at, accepted_at, deactivated_at, reactivated_at, invitation_id, invitation_status, invitation_delivered_at, invitation_opened_at, invitation_accepted_at, invitation_cancelled_at, invitation_superseded_at, invitation_delivery_attempt_count, invitation_last_delivery_attempt_at, invitation_failure_code, invitation_failure_message, invitation_delivery_strategy, auth_user_id, last_login_at, updated_at'
 			: 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, is_deactivated, joined_at, deactivated_at, reactivated_at, auth_user_id';
 		const { data, error } = await serverSupabase
 			.from(directoryTable)
@@ -202,6 +210,17 @@ try {
 		members = data ?? [];
 
 		if (canUseAdminDirectory) {
+			try {
+				const { data: snapshotTextData, error: snapshotTextError } = await serverSupabase.rpc('current_workspace_membership_snapshot_version_text', {
+					target_organisation_id: organisation.id,
+				});
+				if (snapshotTextError) throw snapshotTextError;
+				membershipSnapshotVersion = normaliseWorkspaceTeamSnapshotVersion(snapshotTextData);
+			} catch (error) {
+				logWorkspaceTeamLoadFailure('current_workspace_membership_snapshot_version_text_member_modal', error, { workspaceId: organisation.id });
+				membershipSnapshotVersion = null;
+			}
+
 			try {
 				const { data: checkoutData, error: checkoutError } = await applyWorkspaceTeamActiveEditableCheckoutFilters(
 					serverSupabase.from('workspace_membership_export_runs'),
@@ -322,7 +341,7 @@ const filterHref = (filter: TeamFilter) => {
 	return query ? `${Astro.url.pathname}?${query}` : Astro.url.pathname;
 };
 const searchAction = Astro.url.pathname;
-const canAdministerLater = workspaceRole === 'owner' || workspaceRole === 'admin';
+const canAdministerLater = can(workspaceRole, 'workspaceTeam.manageRoles');
 const exportAction = workspaceSlug ? buildWorkspaceTeamExportPath(workspaceSlug) : '';
 const checkoutReleaseAction = workspaceSlug ? buildWorkspaceTeamCheckoutReleasePath(workspaceSlug) : '';
 const importAction = workspaceSlug ? buildWorkspaceTeamImportPath(workspaceSlug) : '';
@@ -331,6 +350,8 @@ const importReviewConfirmPath = workspaceSlug && importRun ? buildWorkspaceTeamI
 const importReviewDraftPath = workspaceSlug && importRun ? buildWorkspaceTeamImportReviewDraftPath(workspaceSlug, importRun.id) : '';
 const importApplyPath = workspaceSlug && importRun ? buildWorkspaceTeamImportApplyPath(workspaceSlug, importRun.id) : '';
 const invitationSendAction = workspaceSlug ? buildWorkspaceTeamInvitationSendPath(workspaceSlug) : '';
+const memberSessionAction = workspaceSlug ? buildWorkspaceTeamMemberSessionPath(workspaceSlug) : '';
+const memberRoleAction = workspaceSlug ? buildWorkspaceTeamMemberRolePath(workspaceSlug) : '';
 const importMaxSizeLabel = `${Math.round(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES / 1024 / 1024)} MB`;
 const checkoutEditorMember = activeCheckout?.requested_by
 	? members.find((member) => member.profile_id === activeCheckout?.requested_by)
@@ -443,6 +464,25 @@ const invitationDeliveryMessage = invitationDeliveryState === 'success'
 const invitationAcceptanceMessage = String(Astro.url.searchParams.get('invitation_acceptance') ?? '') === 'success'
 	? 'Invitation accepted. Membership is active with the approved role.'
 	: '';
+const memberRoleState = String(Astro.url.searchParams.get('member_role') ?? '');
+const memberRoleError = String(Astro.url.searchParams.get('member_role_error') ?? '');
+const memberRoleMessage = memberRoleState === 'success'
+	? 'Workspace role updated.'
+	: memberRoleState === 'error'
+		? ({
+			signin: 'Sign in before changing workspace roles.',
+			workspace: 'Workspace access could not be confirmed for role management.',
+			permission: 'Only active Workspace Owners and Admins can change workspace roles.',
+			stale: 'This membership changed while the modal was open. Refresh the Team page and try again.',
+			locked: 'This member is currently being viewed by another Workspace administrator. Refresh when their edit session has ended.',
+			session: 'Your member edit session expired or could not be confirmed. Close and reopen the member modal.',
+			self: 'Users cannot change their own workspace role through this modal.',
+			invalid: 'Choose a permitted workspace role.',
+			active_only: 'Only active workspace members can be changed through this modal.',
+			method: 'Workspace role changes require the member modal form.',
+			failed: 'The role change could not be saved. No membership changes were applied.',
+		} as Record<string, string>)[memberRoleError] ?? 'The role change could not be saved. No membership changes were applied.'
+		: '';
 const importSummary = importRun?.validation_summary ?? {};
 const applicationSummary = importRun?.approved_change_set_summary ?? latestApplicationRun?.expected_counts ?? {};
 const approvedApplicationCount = Number(applicationSummary.approved_additions ?? 0)
@@ -691,6 +731,11 @@ const invitationOperationKey = crypto.randomUUID();
 					{invitationAcceptanceMessage && (
 						<p class="workspace-team-release-message" role="status" data-workspace-team-invitation-acceptance-message>
 							{invitationAcceptanceMessage}
+						</p>
+					)}
+					{memberRoleMessage && (
+						<p class={memberRoleState === 'success' ? 'workspace-team-release-message' : 'workspace-team-release-message workspace-team-release-message--error'} role="status" data-workspace-team-member-role-message>
+							{memberRoleMessage}
 						</p>
 					)}
 
@@ -1115,9 +1160,27 @@ const invitationOperationKey = crypto.randomUUID();
 									{displayedMembers.map((member) => (
 										<tr data-membership-id={member.organisation_membership_id} data-profile-id={member.profile_id} data-membership-status={member.membership_status}>
 											<td data-label="Person">
-												<strong class={member.membership_status === 'deactivated' ? 'workspace-team-person workspace-team-person--deactivated' : 'workspace-team-person'}>
-													{member.personName}
-												</strong>
+												{member.membership_status === 'active' && canAdministerLater ? (
+													<button
+														class="workspace-team-person-pill workspace-team-person-pill--active"
+														type="button"
+														aria-haspopup="dialog"
+														aria-label={`${member.personName}, active member. Open member details.`}
+														data-workspace-team-member-open={`workspace-team-member-dialog-${member.organisation_membership_id}`}
+													>
+														<span>{member.personName}</span>
+														<small>Active · Details</small>
+													</button>
+												) : member.membership_status === 'invited' || member.membership_status === 'invite_expired' ? (
+													<span class="workspace-team-person-pill workspace-team-person-pill--invited" aria-label={`${member.personName}, ${member.displayStatus.toLowerCase()} member. Member details are not available until the invitation is accepted.`}>
+														<span>{member.personName}</span>
+														<small>{member.displayStatus}</small>
+													</span>
+												) : (
+													<strong class={member.membership_status === 'deactivated' ? 'workspace-team-person workspace-team-person--deactivated' : 'workspace-team-person'}>
+														{member.personName}
+													</strong>
+												)}
 												{member.isCurrentUser && <span class="workspace-team-you" aria-label="This is your membership">You</span>}
 											</td>
 											<td data-label="Login">{member.loginLabel}</td>
@@ -1169,6 +1232,92 @@ const invitationOperationKey = crypto.randomUUID();
 							</table>
 						</div>
 					)}
+					{canAdministerLater && memberRoleAction && memberSessionAction && displayedMembers.filter((member) => member.membership_status === 'active').map((member) => {
+						const roleAuthority = workspaceTeamRoleAuthority(workspaceRole, member.role, member.isCurrentUser);
+						const modalId = `workspace-team-member-dialog-${member.organisation_membership_id}`;
+						const memberTitleId = `${modalId}-title`;
+						const memberDescriptionId = `${modalId}-description`;
+						const roleSelectId = `${modalId}-role`;
+						const errorId = `${modalId}-error`;
+						return (
+							<dialog
+								class="workspace-team-member-modal"
+								id={modalId}
+								aria-labelledby={memberTitleId}
+								aria-describedby={memberDescriptionId}
+								data-workspace-team-member-dialog
+								data-member-session-action={memberSessionAction}
+								data-member-role-action={memberRoleAction}
+								data-member-id={member.organisation_membership_id}
+								data-member-can-edit={roleAuthority.canEdit ? 'true' : 'false'}
+							>
+								<form method="post" action={memberRoleAction} data-workspace-team-member-role-form data-member-initial-role={member.role} data-member-session-id="">
+									<input type="hidden" name="membership_id" value={member.organisation_membership_id} />
+									<input type="hidden" name="expected_snapshot_version" value={membershipSnapshotVersion ?? ''} />
+									<input type="hidden" name="edit_session_id" value="" data-member-session-input />
+									<div class="workspace-team-member-modal__header">
+										<div>
+											<p class="eyebrow">Member details</p>
+											<h3 id={memberTitleId} tabindex="-1" data-workspace-team-dialog-focus>{member.personName}</h3>
+											<p id={memberDescriptionId}>Workspace: {workspaceName}. Identity fields are read-only in this view.</p>
+										</div>
+										<button class="workspace-team-member-modal__close" type="button" data-workspace-team-member-close aria-label={`Close ${member.personName} details`}>x</button>
+									</div>
+									<p class="workspace-team-member-modal__notice" role="status" data-member-lock-notice hidden></p>
+									<p class="workspace-team-member-modal__error" role="alert" id={errorId} data-member-error hidden></p>
+									<div class="workspace-team-member-modal__body">
+										<section class="workspace-team-member-modal__section" aria-labelledby={`${modalId}-identity-heading`}>
+											<h4 id={`${modalId}-identity-heading`}>Identity</h4>
+											<dl class="workspace-team-member-modal__details">
+												<div><dt>Full name</dt><dd>{member.personName}</dd></div>
+												<div><dt>Login name</dt><dd>{member.loginLabel}</dd></div>
+												<div><dt>Contact email</dt><dd>{member.contact_email ?? 'Not available'}</dd></div>
+											</dl>
+										</section>
+										<section class="workspace-team-member-modal__section" aria-labelledby={`${modalId}-membership-heading`}>
+											<h4 id={`${modalId}-membership-heading`}>Membership</h4>
+											<dl class="workspace-team-member-modal__details">
+												<div><dt>Workspace role</dt><dd data-member-current-role-label>{member.displayRole}</dd></div>
+												<div><dt>Membership status</dt><dd>{member.displayStatus}</dd></div>
+												<div><dt>Invitation status</dt><dd>{member.membership_status === 'active' ? 'Accepted' : workspaceInvitationStatusLabel(member.invitation_status)}</dd></div>
+												<div><dt>Joined date</dt><dd>{formatDate(member.joined_at ?? member.accepted_at ?? null)}</dd></div>
+												<div><dt>Invited date</dt><dd>{formatDate(member.invited_at ?? null)}</dd></div>
+												<div><dt>Accepted date</dt><dd>{formatDate(member.accepted_at ?? member.invitation_accepted_at ?? null)}</dd></div>
+												<div><dt>Last login</dt><dd>{formatDateTime(member.last_login_at ?? null)}</dd></div>
+											</dl>
+										</section>
+										<section class="workspace-team-member-modal__section" aria-labelledby={`${modalId}-role-heading`}>
+											<h4 id={`${modalId}-role-heading`}>Workspace role</h4>
+											{roleAuthority.canEdit ? (
+												<label class="workspace-team-member-modal__role">
+													<span>Role</span>
+													<select id={roleSelectId} name="target_role" aria-describedby={errorId} data-member-role-select>
+														{roleAuthority.options.map((role) => (
+															<option value={role} selected={member.role === role}>{workspaceRoleLabel(role)}</option>
+														))}
+													</select>
+												</label>
+											) : (
+												<div class="workspace-team-member-modal__readonly" data-member-readonly-reason>
+													<strong>Role is read-only</strong>
+													<p>{roleAuthority.reason}</p>
+												</div>
+											)}
+											<p class="workspace-team-member-modal__hint">{roleAuthority.reason}</p>
+										</section>
+									</div>
+									<div class="workspace-team-member-modal__actions">
+										<button class="button button--secondary" type="button" data-workspace-team-member-cancel>Cancel</button>
+										{roleAuthority.canEdit ? (
+											<button class="button button--primary" type="submit" disabled data-member-save>Save</button>
+										) : (
+											<button class="button button--primary" type="button" disabled data-member-save>Save</button>
+										)}
+									</div>
+								</form>
+							</dialog>
+						);
+					})}
 				</ProjectContentPanel>
 			</>
 		)}
@@ -1252,7 +1401,120 @@ const invitationOperationKey = crypto.randomUUID();
 		});
 	});
 
-	document.querySelectorAll('[data-workspace-team-export-dialog], [data-workspace-team-import-dialog], [data-workspace-team-checkout-release-dialog], [data-workspace-team-review-dialog], [data-workspace-team-application-dialog], [data-workspace-team-invitation-dialog]').forEach((dialog) => {
+	function memberDialogDirty(dialog) {
+		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
+		const select = dialog.querySelector('[data-member-role-select]');
+		return form instanceof HTMLFormElement
+			&& select instanceof HTMLSelectElement
+			&& select.value !== String(form.dataset.memberInitialRole || '');
+	}
+
+	function setMemberError(dialog, message) {
+		const target = dialog.querySelector('[data-member-error]');
+		if (!(target instanceof HTMLElement)) return;
+		target.textContent = message;
+		target.hidden = !message;
+	}
+
+	function setMemberLockNotice(dialog, message) {
+		const target = dialog.querySelector('[data-member-lock-notice]');
+		if (!(target instanceof HTMLElement)) return;
+		target.textContent = message;
+		target.hidden = !message;
+	}
+
+	function setMemberSession(dialog, sessionId) {
+		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
+		const input = dialog.querySelector('[data-member-session-input]');
+		if (form instanceof HTMLFormElement) form.dataset.memberSessionId = sessionId || '';
+		if (input instanceof HTMLInputElement) input.value = sessionId || '';
+	}
+
+	function updateMemberSaveState(dialog) {
+		const save = dialog.querySelector('[data-member-save]');
+		const select = dialog.querySelector('[data-member-role-select]');
+		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
+		if (!(save instanceof HTMLButtonElement) || !(form instanceof HTMLFormElement)) return;
+		const hasChanged = select instanceof HTMLSelectElement && select.value !== String(form.dataset.memberInitialRole || '');
+		const hasSession = Boolean(form.dataset.memberSessionId);
+		const canEdit = dialog instanceof HTMLElement && dialog.dataset.memberCanEdit === 'true' && !dialog.dataset.memberLocked;
+		save.disabled = !canEdit || !hasChanged || !hasSession;
+	}
+
+	async function releaseMemberSession(dialog) {
+		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
+		const sessionId = form instanceof HTMLFormElement ? form.dataset.memberSessionId || '' : '';
+		const sessionAction = dialog instanceof HTMLElement ? dialog.dataset.memberSessionAction || '' : '';
+		if (!sessionId || !sessionAction) return;
+		setMemberSession(dialog, '');
+		const body = new FormData();
+		body.set('session_id', sessionId);
+		body.set('session_action', 'release');
+		body.set('release_source', 'modal_closed');
+		try {
+			await fetch(sessionAction, { method: 'POST', body, credentials: 'same-origin', keepalive: true });
+		} catch {
+			// Advisory sessions expire server-side if release cannot be delivered.
+		}
+	}
+
+	async function acquireMemberSession(dialog) {
+		const sessionAction = dialog instanceof HTMLElement ? dialog.dataset.memberSessionAction || '' : '';
+		const membershipId = dialog instanceof HTMLElement ? dialog.dataset.memberId || '' : '';
+		if (!sessionAction || !membershipId) return;
+		setMemberError(dialog, '');
+		setMemberLockNotice(dialog, 'Checking edit availability...');
+		dialog.removeAttribute('data-member-locked');
+		const body = new FormData();
+		body.set('membership_id', membershipId);
+		body.set('session_action', 'start');
+		try {
+			const response = await fetch(sessionAction, { method: 'POST', body, credentials: 'same-origin' });
+			const payload = await response.json();
+			if (!response.ok) throw new Error(payload?.message || 'Member edit availability could not be checked.');
+			if (payload.session_id) setMemberSession(dialog, payload.session_id);
+			if (payload.can_edit) {
+				setMemberLockNotice(dialog, payload.message || 'You can edit this member role.');
+			} else {
+				dialog.dataset.memberLocked = 'true';
+				setMemberSession(dialog, '');
+				setMemberLockNotice(dialog, payload.message || 'This member is read-only.');
+			}
+		} catch (error) {
+			dialog.dataset.memberLocked = 'true';
+			setMemberSession(dialog, '');
+			setMemberLockNotice(dialog, '');
+			setMemberError(dialog, error instanceof Error ? error.message : 'Member edit availability could not be checked.');
+		} finally {
+			updateMemberSaveState(dialog);
+		}
+	}
+
+	function closeMemberDialog(dialog, options = {}) {
+		if (!(dialog instanceof HTMLDialogElement)) return;
+		if (!options.force && memberDialogDirty(dialog)) {
+			const discard = window.confirm('Discard the unsaved role change?');
+			if (!discard) return;
+		}
+		releaseMemberSession(dialog);
+		dialog.close();
+	}
+
+	document.querySelectorAll('[data-workspace-team-member-open]').forEach((trigger) => {
+		trigger.addEventListener('click', (event) => {
+			event.preventDefault();
+			const dialogId = trigger.getAttribute('data-workspace-team-member-open');
+			const dialog = dialogId ? document.getElementById(dialogId) : null;
+			if (!(dialog instanceof HTMLDialogElement)) return;
+			lastTriggerByDialog.set(dialog, trigger);
+			if (!dialog.open) dialog.showModal();
+			const focusTarget = dialog.querySelector('[data-workspace-team-dialog-focus], [data-member-role-select], button');
+			if (focusTarget instanceof HTMLElement) focusTarget.focus();
+			acquireMemberSession(dialog);
+		});
+	});
+
+	document.querySelectorAll('[data-workspace-team-export-dialog], [data-workspace-team-import-dialog], [data-workspace-team-checkout-release-dialog], [data-workspace-team-review-dialog], [data-workspace-team-application-dialog], [data-workspace-team-invitation-dialog], [data-workspace-team-member-dialog]').forEach((dialog) => {
 		if (!(dialog instanceof HTMLDialogElement)) return;
 		dialog.addEventListener('close', () => {
 			const trigger = lastTriggerByDialog.get(dialog);
@@ -1276,6 +1538,65 @@ const invitationOperationKey = crypto.randomUUID();
 		dialog.querySelectorAll('[data-workspace-team-dialog-cancel]').forEach((button) => {
 			button.addEventListener('click', () => dialog.close());
 		});
+	});
+
+	document.querySelectorAll('[data-workspace-team-member-dialog]').forEach((dialog) => {
+		if (!(dialog instanceof HTMLDialogElement)) return;
+		dialog.addEventListener('cancel', (event) => {
+			event.preventDefault();
+			closeMemberDialog(dialog);
+		});
+		dialog.querySelectorAll('[data-workspace-team-member-close], [data-workspace-team-member-cancel]').forEach((button) => {
+			button.addEventListener('click', () => closeMemberDialog(dialog));
+		});
+		const select = dialog.querySelector('[data-member-role-select]');
+		if (select instanceof HTMLSelectElement) {
+			select.addEventListener('change', () => {
+				setMemberError(dialog, '');
+				updateMemberSaveState(dialog);
+			});
+		}
+		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
+		if (form instanceof HTMLFormElement) {
+			form.addEventListener('submit', async (event) => {
+				event.preventDefault();
+				const submitButton = event.submitter instanceof HTMLButtonElement
+					? event.submitter
+					: form.querySelector('[data-member-save]');
+				if (submitButton?.disabled) return;
+				setMemberError(dialog, '');
+				if (submitButton instanceof HTMLButtonElement) {
+					submitButton.disabled = true;
+					submitButton.dataset.originalText = submitButton.textContent || '';
+					submitButton.textContent = 'Saving...';
+				}
+				try {
+					const response = await fetch(form.action, {
+						method: 'POST',
+						body: new FormData(form),
+						credentials: 'same-origin',
+						headers: { accept: 'application/json' },
+					});
+					const payload = await response.json();
+					if (!response.ok || !payload.success) {
+						throw new Error(payload.message || 'The role change could not be saved. No membership changes were applied.');
+					}
+					setMemberSession(dialog, '');
+					dialog.close('saved');
+					window.setTimeout(() => window.location.reload(), 250);
+				} catch (error) {
+					setMemberError(dialog, error instanceof Error ? error.message : 'The role change could not be saved. No membership changes were applied.');
+					updateMemberSaveState(dialog);
+				} finally {
+					if (submitButton instanceof HTMLButtonElement) {
+						submitButton.textContent = submitButton.dataset.originalText || 'Save';
+						delete submitButton.dataset.originalText;
+						updateMemberSaveState(dialog);
+					}
+				}
+			});
+		}
+		updateMemberSaveState(dialog);
 	});
 
 	function setupReviewModal(dialog) {
@@ -2282,6 +2603,57 @@ const invitationOperationKey = crypto.randomUUID();
 		color: var(--text);
 	}
 
+	.workspace-team-person-pill {
+		display: inline-grid;
+		grid-template-columns: 1fr;
+		gap: 0.05rem;
+		width: fit-content;
+		max-width: 100%;
+		border-radius: 999px;
+		padding: 0.28rem 0.58rem;
+		font: inherit;
+		font-weight: 850;
+		line-height: 1.1;
+		text-align: left;
+		letter-spacing: 0;
+	}
+
+	.workspace-team-person-pill span,
+	.workspace-team-person-pill small {
+		overflow-wrap: anywhere;
+	}
+
+	.workspace-team-person-pill small {
+		font-size: 0.7rem;
+		font-weight: 850;
+		letter-spacing: 0;
+		opacity: 0.9;
+	}
+
+	button.workspace-team-person-pill {
+		cursor: pointer;
+	}
+
+	.workspace-team-person-pill--active {
+		border: 1px solid rgba(64, 178, 121, 0.42);
+		background: rgba(64, 178, 121, 0.16);
+		color: #b8f3cd;
+	}
+
+	button.workspace-team-person-pill--active:hover,
+	button.workspace-team-person-pill--active:focus-visible {
+		border-color: rgba(110, 231, 168, 0.72);
+		background: rgba(64, 178, 121, 0.24);
+		outline: 3px solid rgba(110, 231, 168, 0.25);
+		outline-offset: 2px;
+	}
+
+	.workspace-team-person-pill--invited {
+		border: 1px solid rgba(245, 171, 53, 0.44);
+		background: rgba(245, 171, 53, 0.16);
+		color: #ffd28a;
+	}
+
 	.workspace-team-person--deactivated {
 		color: var(--muted-strong);
 		font-style: italic;
@@ -2360,6 +2732,188 @@ const invitationOperationKey = crypto.randomUUID();
 		justify-content: center;
 	}
 
+	.workspace-team-member-modal {
+		width: min(100% - 1.5rem, 54rem);
+		max-height: min(92vh, 48rem);
+		border: 1px solid rgba(110, 181, 224, 0.34);
+		border-radius: 0.75rem;
+		padding: 0;
+		background: #07111d;
+		color: var(--text);
+		box-shadow: 0 22px 70px rgba(0, 0, 0, 0.42);
+	}
+
+	.workspace-team-member-modal::backdrop {
+		background: rgba(2, 8, 23, 0.72);
+	}
+
+	.workspace-team-member-modal form {
+		display: grid;
+		grid-template-rows: auto auto auto 1fr auto;
+		max-height: min(92vh, 48rem);
+		margin: 0;
+	}
+
+	.workspace-team-member-modal__header,
+	.workspace-team-member-modal__actions {
+		position: sticky;
+		z-index: 1;
+		background: #07111d;
+	}
+
+	.workspace-team-member-modal__header {
+		top: 0;
+		display: flex;
+		align-items: start;
+		justify-content: space-between;
+		gap: 1rem;
+		border-bottom: 1px solid rgba(110, 181, 224, 0.2);
+		padding: 1rem;
+	}
+
+	.workspace-team-member-modal__header h3 {
+		margin: 0.1rem 0 0.35rem;
+		font-size: 1.35rem;
+		letter-spacing: 0;
+	}
+
+	.workspace-team-member-modal__header p,
+	.workspace-team-member-modal__section p,
+	.workspace-team-member-modal__hint {
+		margin: 0;
+		color: var(--muted-strong);
+	}
+
+	.workspace-team-member-modal__close {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		height: 2rem;
+		border: 1px solid rgba(215, 226, 234, 0.2);
+		border-radius: 999px;
+		background: rgba(18, 31, 42, 0.76);
+		color: var(--text);
+		font-size: 1.1rem;
+		font-weight: 900;
+		cursor: pointer;
+	}
+
+	.workspace-team-member-modal__close:hover,
+	.workspace-team-member-modal__close:focus-visible {
+		border-color: rgba(0, 160, 255, 0.56);
+		outline: 3px solid rgba(0, 160, 255, 0.18);
+		outline-offset: 2px;
+	}
+
+	.workspace-team-member-modal__notice,
+	.workspace-team-member-modal__error {
+		margin: 0.75rem 1rem 0;
+		border-radius: 0.5rem;
+		padding: 0.65rem 0.75rem;
+		font-weight: 750;
+	}
+
+	.workspace-team-member-modal__notice {
+		border: 1px solid rgba(245, 171, 53, 0.28);
+		background: rgba(245, 171, 53, 0.1);
+		color: #ffd28a;
+	}
+
+	.workspace-team-member-modal__error {
+		border: 1px solid rgba(239, 68, 68, 0.4);
+		background: rgba(239, 68, 68, 0.12);
+		color: #fecaca;
+	}
+
+	.workspace-team-member-modal__body {
+		display: grid;
+		gap: 0.75rem;
+		overflow: auto;
+		padding: 1rem;
+	}
+
+	.workspace-team-member-modal__section {
+		display: grid;
+		gap: 0.65rem;
+		border: 1px solid rgba(110, 181, 224, 0.16);
+		border-radius: 0.5rem;
+		padding: 0.8rem;
+		background: rgba(3, 12, 24, 0.46);
+	}
+
+	.workspace-team-member-modal__section h4 {
+		margin: 0;
+		font-size: 1rem;
+		letter-spacing: 0;
+	}
+
+	.workspace-team-member-modal__details {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 0.55rem 0.8rem;
+		margin: 0;
+	}
+
+	.workspace-team-member-modal__details div {
+		display: grid;
+		gap: 0.12rem;
+		min-width: 0;
+	}
+
+	.workspace-team-member-modal__details dt {
+		color: var(--muted);
+		font-size: 0.78rem;
+		font-weight: 850;
+	}
+
+	.workspace-team-member-modal__details dd {
+		margin: 0;
+		overflow-wrap: anywhere;
+		color: var(--text);
+		font-weight: 800;
+	}
+
+	.workspace-team-member-modal__role {
+		display: grid;
+		gap: 0.3rem;
+		color: var(--muted-strong);
+		font-weight: 850;
+	}
+
+	.workspace-team-member-modal__role select {
+		width: min(100%, 18rem);
+		border: 1px solid rgba(110, 181, 224, 0.3);
+		border-radius: 0.5rem;
+		padding: 0.58rem 0.7rem;
+		background: rgba(3, 12, 24, 0.7);
+		color: var(--text);
+		font: inherit;
+	}
+
+	.workspace-team-member-modal__readonly {
+		display: grid;
+		gap: 0.25rem;
+		border: 1px dashed rgba(215, 226, 234, 0.24);
+		border-radius: 0.5rem;
+		padding: 0.65rem 0.75rem;
+		background: rgba(18, 31, 42, 0.48);
+	}
+
+	.workspace-team-member-modal__actions {
+		bottom: 0;
+		display: flex;
+		justify-content: flex-end;
+		gap: 0.6rem;
+		border-top: 1px solid rgba(110, 181, 224, 0.2);
+		padding: 0.9rem 1rem 1rem;
+	}
+
+	.workspace-team-member-modal button:disabled {
+		opacity: 0.62;
+		cursor: not-allowed;
+	}
+
 	.workspace-team-invitation-failure {
 		display: block;
 		max-width: 18rem;
@@ -2418,9 +2972,15 @@ const invitationOperationKey = crypto.randomUUID();
 		}
 
 		.workspace-team-review-modal__tools,
-		.workspace-team-review-modal__footer {
+		.workspace-team-review-modal__footer,
+		.workspace-team-member-modal__header,
+		.workspace-team-member-modal__actions {
 			display: grid;
 			align-items: stretch;
+		}
+
+		.workspace-team-member-modal__details {
+			grid-template-columns: 1fr;
 		}
 
 		.workspace-team-export-dialog__actions {

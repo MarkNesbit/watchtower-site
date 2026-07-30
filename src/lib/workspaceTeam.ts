@@ -13,6 +13,8 @@ export type WorkspaceTeamMember = {
 	first_name?: string | null;
 	last_name?: string | null;
 	login_name?: string | null;
+	contact_email?: string | null;
+	last_login_at?: string | null;
 	role?: string | null;
 	membership_status?: string | null;
 	is_deactivated?: boolean | null;
@@ -34,6 +36,7 @@ export type WorkspaceTeamMember = {
 	invitation_failure_code?: string | null;
 	invitation_failure_message?: string | null;
 	invitation_delivery_strategy?: string | null;
+	updated_at?: string | null;
 };
 
 export type WorkspaceTeamActiveEditableCheckout = {
@@ -83,6 +86,16 @@ const ROLE_LABELS: Record<WorkspaceRole, string> = {
 	viewer: 'Viewer',
 };
 
+export const WORKSPACE_TEAM_MEMBER_SESSION_RPC = 'start_workspace_member_edit_session';
+export const WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC = 'release_workspace_member_edit_session';
+export const WORKSPACE_TEAM_MEMBER_ROLE_CHANGE_RPC = 'change_workspace_member_role';
+
+export type WorkspaceTeamRoleAuthority = {
+	canEdit: boolean;
+	options: WorkspaceRole[];
+	reason: string;
+};
+
 const STATUS_LABELS: Record<MembershipStatus, string> = {
 	active: 'Active',
 	invited: 'Invited',
@@ -109,6 +122,79 @@ export function membershipStatusDescription(status: unknown): string {
 
 export function workspaceRoleLabel(role: unknown): string {
 	return isWorkspaceRole(role) ? ROLE_LABELS[role] : 'Unavailable';
+}
+
+export function workspaceTeamRoleAuthority(actorRole: unknown, targetRole: unknown, isSelf = false): WorkspaceTeamRoleAuthority {
+	if (!isWorkspaceRole(actorRole)) {
+		return {
+			canEdit: false,
+			options: [],
+			reason: 'Only active Workspace Owners and Admins can change workspace roles.',
+		};
+	}
+	if (!isWorkspaceRole(targetRole)) {
+		return {
+			canEdit: false,
+			options: [],
+			reason: 'This member role could not be confirmed.',
+		};
+	}
+	if (actorRole !== 'owner' && actorRole !== 'admin') {
+		return {
+			canEdit: false,
+			options: [],
+			reason: 'Only active Workspace Owners and Admins can change workspace roles.',
+		};
+	}
+	if (isSelf) {
+		return {
+			canEdit: false,
+			options: [],
+			reason: 'Users cannot change their own workspace role through this modal.',
+		};
+	}
+	if (actorRole === 'owner') {
+		return {
+			canEdit: true,
+			options: ['viewer', 'member', 'admin', 'owner'],
+			reason: 'Owners can assign Viewer, Member, Admin or Owner to another active member.',
+		};
+	}
+	if (targetRole === 'admin') {
+		return {
+			canEdit: false,
+			options: [],
+			reason: 'Only a Workspace Owner may change an Admin role.',
+		};
+	}
+	if (targetRole === 'owner') {
+		return {
+			canEdit: false,
+			options: [],
+			reason: 'Admins cannot change an Owner role.',
+		};
+	}
+	return {
+		canEdit: true,
+		options: ['viewer', 'member'],
+		reason: 'Admins can move Viewers and Members between Viewer and Member.',
+	};
+}
+
+export function workspaceTeamRoleChangeErrorMessage(error: unknown): string {
+	const message = typeof (error as { message?: unknown })?.message === 'string'
+		? (error as { message: string }).message
+		: '';
+	if (message.includes('WT_MEMBER_ROLE_STALE')) return 'This membership changed while the modal was open. Refresh the Team page and try again.';
+	if (message.includes('WT_MEMBER_ROLE_LOCKED')) return 'This member is currently being viewed by another Workspace administrator. Refresh when their edit session has ended.';
+	if (message.includes('WT_MEMBER_ROLE_SESSION')) return 'Your member edit session expired or could not be confirmed. Close and reopen the member modal.';
+	if (message.includes('WT_MEMBER_ROLE_SELF_DENIED')) return 'Users cannot change their own workspace role through this modal.';
+	if (message.includes('WT_MEMBER_ROLE_ADMIN_TARGET_DENIED')) return 'Admins can change only Viewer and Member roles.';
+	if (message.includes('WT_MEMBER_ROLE_ADMIN_ASSIGN_DENIED')) return 'Admins cannot assign Admin or Owner roles.';
+	if (message.includes('WT_MEMBER_ROLE_INVALID_TARGET')) return 'Choose a permitted workspace role.';
+	if (message.includes('WT_MEMBER_ROLE_ACTIVE_ONLY')) return 'Only active workspace members can be changed through this modal.';
+	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) return 'Only active Workspace Owners and Admins can manage workspace roles.';
+	return 'The role change could not be saved. No membership changes were applied.';
 }
 
 export function isMembershipStatus(status: unknown): status is MembershipStatus {
