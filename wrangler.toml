@@ -3,6 +3,7 @@ main = "@astrojs/cloudflare/entrypoints/server"
 compatibility_date = "2026-06-17"
 
 [vars]
+PUBLIC_SUPABASE_URL = "https://wwxauzcgqtrqjyyskqzp.supabase.co"
 WATCHTOWER_EMAIL_PROVIDER = "resend"
 WATCHTOWER_EMAIL_FROM_ADDRESS = "invitations@watch-tower.co.uk"
 WATCHTOWER_EMAIL_FROM_NAME = "Watchtower"

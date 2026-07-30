@@ -6,6 +6,7 @@ import {
 	buildPasswordResetCompletionUrl,
 	renderPasswordResetEmail,
 	resolvePasswordResetProviderConfig,
+	resolveTrustedSupabaseActionOrigins,
 	sendPasswordResetEmail,
 	validateSupabaseRecoveryActionLink,
 } from '../src/lib/passwordResetDelivery.ts';
@@ -203,6 +204,9 @@ test('Supabase recovery action-link validation accepts the trusted provider URL 
 	assert.equal(result.status, 'valid');
 	assert.match(result.actionLink, /^https:\/\/project-ref\.supabase\.co\/auth\/v1\/verify\?/);
 	assert.doesNotMatch(result.actionLink, /^https:\/\/watch-tower\.co\.uk/);
+	assert.equal(result.diagnostics.expectedProviderOrigin, 'https://project-ref.supabase.co');
+	assert.equal(result.diagnostics.observedProviderOrigin, 'https://project-ref.supabase.co');
+	assert.equal(result.diagnostics.originsMatch, true);
 });
 
 test('Supabase recovery action-link validation rejects unsafe provider URLs', () => {
@@ -216,6 +220,70 @@ test('Supabase recovery action-link validation rejects unsafe provider URLs', ()
 	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ tokenHash: null }), trustedResetEnv).failureCode, 'provider_response_invalid');
 	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ type: 'signup' }), trustedResetEnv).failureCode, 'provider_response_invalid');
 	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ type: null, verificationType: 'signup' }), trustedResetEnv).failureCode, 'provider_response_invalid');
+});
+
+test('Supabase recovery action-link validation accepts only explicitly configured Auth action origins', () => {
+	const customOriginEnv = {
+		...trustedResetEnv,
+		SUPABASE_AUTH_ACTION_ORIGIN: ' https://auth.watch-tower.co.uk/reset ',
+	};
+	const result = validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://auth.watch-tower.co.uk' }), customOriginEnv);
+
+	assert.deepEqual(resolveTrustedSupabaseActionOrigins(customOriginEnv), [
+		'https://auth.watch-tower.co.uk',
+		'https://project-ref.supabase.co',
+	]);
+	assert.equal(result.status, 'valid');
+	assert.equal(result.diagnostics.expectedProviderOrigin, 'https://auth.watch-tower.co.uk');
+	assert.equal(result.diagnostics.observedProviderHostname, 'auth.watch-tower.co.uk');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://other-project.supabase.co' }), customOriginEnv).failureCode, 'provider_host_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://anything.supabase.co' }), {
+		...trustedResetEnv,
+		PUBLIC_SUPABASE_URL: 'https://stale-project.supabase.co',
+	}).failureCode, 'provider_host_invalid');
+});
+
+test('Supabase recovery action-link validation supports explicit exact allow-list origins', () => {
+	const allowListEnv = {
+		...trustedResetEnv,
+		SUPABASE_AUTH_ACTION_ORIGINS: 'https://auth-one.watch-tower.co.uk, https://auth-two.watch-tower.co.uk/path,not a url,http://auth-three.watch-tower.co.uk',
+	};
+
+	assert.deepEqual(resolveTrustedSupabaseActionOrigins(allowListEnv), [
+		'https://auth-one.watch-tower.co.uk',
+		'https://auth-two.watch-tower.co.uk',
+		'https://project-ref.supabase.co',
+	]);
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://auth-two.watch-tower.co.uk' }), allowListEnv).status, 'valid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://auth-two.watch-tower.co.uk.evil.example' }), allowListEnv).failureCode, 'provider_host_invalid');
+});
+
+test('Supabase recovery action-link diagnostics are safe and omit query token and redirect data', () => {
+	const result = validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://unexpected.supabase.co' }), trustedResetEnv);
+
+	assert.equal(result.status, 'invalid');
+	assert.equal(result.failureCode, 'provider_host_invalid');
+	assert.deepEqual(result.diagnostics, {
+		expectedProviderOrigin: 'https://project-ref.supabase.co',
+		observedProviderOrigin: 'https://unexpected.supabase.co',
+		expectedProviderHostname: 'project-ref.supabase.co',
+		observedProviderHostname: 'unexpected.supabase.co',
+		observedProtocol: 'https:',
+		observedPathname: '/auth/v1/verify',
+		originsMatch: false,
+		hostnamesMatch: false,
+	});
+	assert.doesNotMatch(JSON.stringify(result.diagnostics), /token_hash|provider-token-hash|redirect_to|watch-tower\.co\.uk\/reset-password|\?/i);
+});
+
+test('production Worker runtime declares the public Supabase URL used by recovery validation', async () => {
+	const wranglerConfig = await readFile(new URL('../wrangler.toml', import.meta.url), 'utf8');
+	const envExample = await readFile(new URL('../.env.example', import.meta.url), 'utf8');
+
+	assert.match(wranglerConfig, /PUBLIC_SUPABASE_URL = "https:\/\/wwxauzcgqtrqjyyskqzp\.supabase\.co"/);
+	assert.doesNotMatch(wranglerConfig, /PUBLIC_SUPABASE_ANON_KEY|SUPABASE_SERVICE_ROLE_KEY|WATCHTOWER_RESEND_API_KEY/);
+	assert.match(envExample, /SUPABASE_AUTH_ACTION_ORIGIN=/);
+	assert.match(envExample, /Auth action-link origin/);
 });
 
 test('Supabase recovery action-link validation rejects unsafe Watchtower redirects', () => {
@@ -271,13 +339,14 @@ test('password reset public confirmation and audit payload stay neutral and reda
 	assert.match(page, /type: 'recovery'/);
 	assert.match(page, /sendPasswordResetEmail\(\{/);
 	assert.match(page, /validateSupabaseRecoveryActionLink\(linkData\?\.properties/);
+	assert.match(page, /password_reset_provider_origin_mismatch/);
 	assert.match(page, /recipientEmail: resolution\.contactEmail/);
 	assert.match(page, /email: resolution\.authEmail/);
 	assert.match(page, /actionLink: actionLinkValidation\.actionLink/);
 	assert.match(page, /message = PASSWORD_RESET_PUBLIC_CONFIRMATION/);
 	assert.doesNotMatch(form, /mark\.nesbit\.professional\+wt|contact_email|auth_email|token_hash/);
 	assert.doesNotMatch(page, /import\.meta\.env/);
-	assert.doesNotMatch(page, /resetPasswordForEmail|recordAuthAuditEvent|formData\.get\('email'\)|console\.(?:log|warn|error)\([^)]*(?:loginName|authEmail|contactEmail|actionLink|token|password)|console\.info\([^)]*(?:actionLink|tokenHash|contactEmail|authEmail)/);
+	assert.doesNotMatch(page, /resetPasswordForEmail|recordAuthAuditEvent|formData\.get\('email'\)|console\.(?:log|warn|error)\([^)]*(?:loginName|authEmail|contactEmail|actionLink|token|password)|console\.info\([^)]*(?:actionLink|tokenHash|contactEmail|authEmail|redirectTo)/);
 	assert.match(loginPage, /resolveLoginNameAuthIdentity/);
 	assert.match(resetForm, /supabase\.auth\.updateUser\(\{ password \}\)/);
 	assert.match(setupRoute, /resolveLinkedAuthUserId\(adminSupabase, invitation, tokenHash\)/);
