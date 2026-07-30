@@ -1024,6 +1024,184 @@ test('Workspace invitation Auth provisioning rolls back replacement user when re
 	assert.doesNotMatch(JSON.stringify(entries), /secret@example\.test|example\.test\/action|re_secret|service[_ -]?role key|eyJ|abcdef0123456789|topsecret/i);
 });
 
+test('Workspace invitation Auth provisioning extracts structured remap RPC errors safely', async () => {
+	const replacementAuthUserId = '99999999-9999-4999-8999-999999999999';
+	const baseCandidate = {
+		invitation_id: '77777777-7777-4777-8777-777777777777',
+		organisation_id: '22222222-2222-4222-8222-222222222222',
+		membership_id: '33333333-3333-4333-8333-333333333333',
+		profile_id: '44444444-4444-4444-8444-444444444444',
+		current_auth_user_id: '55555555-5555-4555-8555-555555555555',
+		auth_email: 'secret@example.test',
+		membership_status: 'invited',
+		invitation_status: 'delivery_failed',
+		has_email_identity: false,
+		existing_valid_auth_user_id: null,
+	};
+	const customError = Object.assign(new Error('custom error for secret@example.test'), {
+		code: '23503',
+		details: 'custom details password=topsecret',
+		hint: 'custom hint token=abc123',
+	});
+	const circularError = {
+		status: 500,
+		headers: { authorization: 'Bearer secret' },
+	};
+	circularError.self = circularError;
+	const cases = [
+		{
+			name: 'direct PostgREST error object',
+			error: {
+				code: '23505',
+				message: 'duplicate key for secret@example.test',
+				details: 'Key already exists for mark.nesbit.professional+wt.james@gmail.com',
+				hint: 'retry without token_hash abcdef0123456789abcdef0123456789abcdef0123456789',
+			},
+			expected: {
+				supabaseErrorCode: '23505',
+				safeErrorMessage: 'duplicate key for [redacted-email]',
+				safeDetails: 'Key already exists for [redacted-email]',
+				safeHint: 'retry without token_hash [redacted-secret]',
+			},
+		},
+		{
+			name: 'nested error object',
+			error: {
+				error: {
+					code: '42501',
+					message: 'permission denied for secret@example.test',
+					details: 'Use service_role key re_secret',
+					hint: 'No invitation token may be logged',
+				},
+			},
+			expected: {
+				supabaseErrorCode: '42501',
+				safeErrorMessage: 'permission denied for [redacted-email]',
+				safeDetails: 'Use [redacted-secret] [redacted-secret]',
+				safeHint: 'No invitation [redacted] may be logged',
+			},
+		},
+		{
+			name: 'cause object',
+			error: {
+				cause: {
+					code: 'PGRST204',
+					message: 'PostgREST could not find column',
+					details: 'response body contains access_token=abc123',
+					hint: 'check schema cache',
+				},
+			},
+			expected: {
+				supabaseErrorCode: 'PGRST204',
+				safeErrorMessage: 'PostgREST could not find column',
+				safeDetails: 'response body contains [redacted]=[redacted]',
+				safeHint: 'check schema cache',
+			},
+		},
+		{
+			name: 'Error instance with custom fields',
+			error: customError,
+			expected: {
+				supabaseErrorCode: '23503',
+				safeErrorMessage: 'custom error for [redacted-email]',
+				safeDetails: 'custom details [redacted]=[redacted]',
+				safeHint: 'custom hint [redacted]=[redacted]',
+			},
+		},
+		{
+			name: 'string error',
+			error: 'plain string failure for secret@example.test with jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature',
+			expected: {
+				supabaseErrorCode: undefined,
+				safeErrorMessage: 'plain string failure for [redacted-email] with jwt [redacted-jwt]',
+				safeDetails: undefined,
+				safeHint: undefined,
+			},
+		},
+		{
+			name: 'unknown object shape',
+			error: {
+				data: { ignored: 'secret@example.test' },
+				status: 500,
+				headers: { authorization: 'Bearer secret' },
+			},
+			expected: {
+				supabaseErrorCode: undefined,
+				safeErrorMessage: 'Unrecognised structured error. Available fields: data, status',
+				safeDetails: undefined,
+				safeHint: undefined,
+			},
+		},
+		{
+			name: 'circular unknown object',
+			error: circularError,
+			expected: {
+				supabaseErrorCode: undefined,
+				safeErrorMessage: 'Unrecognised structured error. Available fields: status, self',
+				safeDetails: undefined,
+				safeHint: undefined,
+			},
+		},
+	];
+
+	for (const entry of cases) {
+		const calls = [];
+		const client = {
+			auth: {
+				admin: {
+					async updateUserById(...args) {
+						calls.push(['updateUserById', ...args]);
+						return { data: {}, error: null };
+					},
+					async createUser(input) {
+						calls.push(['createUser', input]);
+						return { data: { user: { id: replacementAuthUserId } }, error: null };
+					},
+					async deleteUser(...args) {
+						calls.push(['deleteUser', ...args]);
+						return { data: {}, error: null };
+					},
+					async getUserById() {
+						throw new Error('getUserById should not run after remap failure');
+					},
+				},
+			},
+			async rpc(name, args) {
+				calls.push(['rpc', name, args]);
+				if (name === 'record_workspace_invitation_auth_identity_repair' && args.p_outcome === 'remapped_created_user') {
+					return { data: null, error: entry.error };
+				}
+				return { data: 'repair-id', error: null };
+			},
+		};
+
+		const { entries, result } = await captureConsole(() => provisionWorkspaceInvitationAuthIdentities({
+			adminClient: client,
+			candidates: [baseCandidate],
+			correlationId: '88888888-8888-4888-8888-888888888888',
+		}));
+
+		assert.equal(result[0].status, 'failed', entry.name);
+		assert.deepEqual(calls.filter((call) => call[0] === 'deleteUser'), [['deleteUser', replacementAuthUserId, true]], entry.name);
+		assert.equal(calls.filter((call) => call[0] === 'updateUserById').length, 0, entry.name);
+		const failureLog = entries.at(-1)[2];
+		assert.equal(failureLog.stage, 'record_created_user_remap', entry.name);
+		assert.equal(failureLog.oldAuthUserId, baseCandidate.current_auth_user_id, entry.name);
+		assert.equal(failureLog.newAuthUserId, replacementAuthUserId, entry.name);
+		assert.equal(failureLog.remapOperationName, 'record_workspace_invitation_auth_identity_repair', entry.name);
+		assert.equal(failureLog.supabaseErrorCode, entry.expected.supabaseErrorCode, entry.name);
+		assert.equal(failureLog.safeErrorMessage, entry.expected.safeErrorMessage, entry.name);
+		assert.equal(failureLog.safeDetails, entry.expected.safeDetails, entry.name);
+		assert.equal(failureLog.safeHint, entry.expected.safeHint, entry.name);
+		assert.equal(failureLog.cleanupAttempted, true, entry.name);
+		assert.equal(failureLog.cleanupOutcome, 'deleted_new_auth_user', entry.name);
+		assert.equal(failureLog.newAuthUserRetained, false, entry.name);
+		assert.equal(failureLog.requiresManualRepair, false, entry.name);
+		assert.doesNotMatch(failureLog.safeErrorMessage, /\[object Object\]/, entry.name);
+		assert.doesNotMatch(JSON.stringify(entries), /secret@example\.test|mark\.nesbit\.professional|topsecret|re_secret|authorization|Bearer secret|eyJ|abcdef0123456789/i, entry.name);
+	}
+});
+
 test('Workspace invitation Auth provisioning logs cleanup outcome when remap rollback cannot delete replacement', async () => {
 	const calls = [];
 	const replacementAuthUserId = '99999999-9999-4999-8999-999999999999';

@@ -56,9 +56,77 @@ export const WORKSPACE_INVITATION_AUTH_IDENTITY_ALIAS_FAILURE_CODE = 'auth_ident
 
 type PlaceholderDeleteResult = 'deleted' | 'admin_missing';
 type SupabaseLikeError = Error & { code?: string; details?: string; hint?: string };
+type ExtractedStructuredError = {
+	code: string | null;
+	message: string | null;
+	details: string | null;
+	hint: string | null;
+};
+
+function isObjectLike(value: unknown): value is Record<string, unknown> {
+	return (typeof value === 'object' && value !== null) || typeof value === 'function';
+}
+
+function safeScalarText(value: unknown) {
+	if (typeof value === 'string') return value;
+	if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+	if (value instanceof Error) return value.message;
+	return null;
+}
+
+function safeStructuralFallback(value: unknown) {
+	if (!isObjectLike(value)) return null;
+	const safeKeys = Object.keys(value)
+		.filter((key) => !/headers?|cookies?|authorization|password|token|secret|payload|request|body/i.test(key))
+		.slice(0, 6);
+	return safeKeys.length > 0
+		? `Unrecognised structured error. Available fields: ${safeKeys.join(', ')}`
+		: 'Unrecognised structured error';
+}
+
+function extractStructuredSupabaseError(input: unknown): ExtractedStructuredError {
+	const extracted: ExtractedStructuredError = {
+		code: null,
+		message: null,
+		details: null,
+		hint: null,
+	};
+	const visited = new WeakSet<object>();
+	const queue: Array<{ value: unknown; depth: number }> = [{ value: input, depth: 0 }];
+	const nestedKeys = ['error', 'cause', 'data', 'response', 'body'];
+
+	while (queue.length > 0) {
+		const { value, depth } = queue.shift()!;
+		if (!extracted.message) extracted.message = safeScalarText(value);
+		if (!isObjectLike(value)) continue;
+
+		const objectValue = value as Record<string, unknown>;
+		if (visited.has(objectValue)) continue;
+		visited.add(objectValue);
+
+		extracted.code ??= safeScalarText(objectValue.code);
+		extracted.message ??= safeScalarText(objectValue.message);
+		extracted.details ??= safeScalarText(objectValue.details);
+		extracted.hint ??= safeScalarText(objectValue.hint);
+
+		if (depth >= 4) continue;
+		for (const key of nestedKeys) {
+			const nestedValue = objectValue[key];
+			if (key !== 'body' && !extracted.message) {
+				extracted.message = safeScalarText(nestedValue);
+			}
+			if (isObjectLike(nestedValue)) {
+				queue.push({ value: nestedValue, depth: depth + 1 });
+			}
+		}
+	}
+
+	extracted.message ??= safeStructuralFallback(input);
+	return extracted;
+}
 
 function safeFailureMessage(error: unknown, fallback: string) {
-	const message = error instanceof Error ? error.message : String(error ?? fallback);
+	const message = safeScalarText(error) ?? extractStructuredSupabaseError(error).message ?? fallback;
 	return message
 		.replace(/https?:\/\/\S+/gi, '[redacted-link]')
 		.replace(/[^\s@]+@[^\s@]+/g, '[redacted-email]')
@@ -77,12 +145,12 @@ function safeOptionalFailureMessage(value: unknown) {
 }
 
 function safeSupabaseErrorDiagnostics(error: unknown) {
-	const supabaseError = error instanceof Error ? error as SupabaseLikeError : null;
+	const supabaseError = extractStructuredSupabaseError(error);
 	return {
-		supabaseErrorCode: safeOptionalFailureMessage(supabaseError?.code),
+		supabaseErrorCode: safeOptionalFailureMessage(supabaseError.code),
 		safeErrorMessage: safeFailureMessage(error, 'Invitation Auth identity could not be provisioned.'),
-		safeDetails: safeOptionalFailureMessage(supabaseError?.details),
-		safeHint: safeOptionalFailureMessage(supabaseError?.hint),
+		safeDetails: safeOptionalFailureMessage(supabaseError.details),
+		safeHint: safeOptionalFailureMessage(supabaseError.hint),
 	};
 }
 
