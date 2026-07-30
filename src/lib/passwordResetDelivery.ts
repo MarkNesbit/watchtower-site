@@ -28,8 +28,18 @@ export type SupabaseRecoveryActionLinkValidationCode =
 	| 'redirect_invalid';
 
 export type SupabaseRecoveryActionLinkValidationResult =
-	| { status: 'valid'; actionLink: string; diagnostics: SupabaseRecoveryActionLinkDiagnostics }
-	| { status: 'invalid'; failureCode: SupabaseRecoveryActionLinkValidationCode; diagnostics: SupabaseRecoveryActionLinkDiagnostics };
+	| {
+		status: 'valid';
+		actionLink: string;
+		diagnostics: SupabaseRecoveryActionLinkDiagnostics;
+		responseDiagnostics: SupabaseRecoveryProviderResponseDiagnostics;
+	}
+	| {
+		status: 'invalid';
+		failureCode: SupabaseRecoveryActionLinkValidationCode;
+		diagnostics: SupabaseRecoveryActionLinkDiagnostics;
+		responseDiagnostics: SupabaseRecoveryProviderResponseDiagnostics;
+	};
 
 export type SupabaseRecoveryActionLinkDiagnostics = {
 	expectedProviderOrigin: string | null;
@@ -40,6 +50,19 @@ export type SupabaseRecoveryActionLinkDiagnostics = {
 	observedPathname: string | null;
 	originsMatch: boolean;
 	hostnamesMatch: boolean;
+};
+
+export type SupabaseRecoveryProviderResponseDiagnostics = {
+	topLevelKeys: string[];
+	propertyKeys: string[];
+	hasProperties: boolean;
+	hasActionLink: boolean;
+	actionLinkType: string;
+	hasVerificationType: boolean;
+	verificationTypeValue: string;
+	hasHashedToken: boolean;
+	hashedTokenType: string;
+	actionLinkQueryParameterNames: string[];
 };
 
 export type PasswordResetDeliveryResult = {
@@ -146,23 +169,24 @@ export function buildPasswordResetCompletionUrl(env: PasswordResetDeliveryEnv = 
 }
 
 export function validateSupabaseRecoveryActionLink(
-	properties: Record<string, unknown> | null | undefined,
+	response: Record<string, unknown> | null | undefined,
 	env: PasswordResetDeliveryEnv = import.meta.env ?? {},
 ): SupabaseRecoveryActionLinkValidationResult {
 	const trustedOrigins = resolveTrustedSupabaseActionOrigins(env);
-	const rawActionLink = properties?.action_link;
+	const extracted = extractGeneratedRecoveryAction(response);
 	const emptyDiagnostics = recoveryActionLinkDiagnostics(null, trustedOrigins);
-	if (typeof rawActionLink !== 'string' || rawActionLink.trim().length < 1) {
-		return invalidRecoveryLink('provider_link_missing', emptyDiagnostics);
+	if (extracted.status !== 'extracted') {
+		return invalidRecoveryLink(extracted.failureCode, emptyDiagnostics, extracted.responseDiagnostics);
 	}
+	const { actionLink: rawActionLink, properties, responseDiagnostics } = extracted;
 
-	if (trustedOrigins.length < 1) return invalidRecoveryLink('provider_host_invalid', emptyDiagnostics);
+	if (trustedOrigins.length < 1) return invalidRecoveryLink('provider_host_invalid', emptyDiagnostics, responseDiagnostics);
 
 	let actionUrl: URL;
 	try {
 		actionUrl = new URL(rawActionLink);
 	} catch {
-		return invalidRecoveryLink('provider_response_invalid', emptyDiagnostics);
+		return invalidRecoveryLink('provider_response_invalid', emptyDiagnostics, responseDiagnostics);
 	}
 	const diagnostics = recoveryActionLinkDiagnostics(actionUrl, trustedOrigins);
 	const originTrusted = trustedOrigins.includes(actionUrl.origin);
@@ -173,28 +197,32 @@ export function validateSupabaseRecoveryActionLink(
 		|| actionUrl.username
 		|| actionUrl.password
 	) {
-		return invalidRecoveryLink('provider_host_invalid', diagnostics);
+		return invalidRecoveryLink('provider_host_invalid', diagnostics, responseDiagnostics);
 	}
 
 	if (normalisePathname(actionUrl.pathname) !== '/auth/v1/verify') {
-		return invalidRecoveryLink('provider_path_invalid', diagnostics);
+		return invalidRecoveryLink('provider_path_invalid', diagnostics, responseDiagnostics);
 	}
 
-	const verificationType = actionUrl.searchParams.get('type') ?? stringProperty(properties, 'verification_type');
-	if (verificationType !== 'recovery') return invalidRecoveryLink('provider_response_invalid', diagnostics);
+	const responseVerificationType = stringProperty(properties, 'verification_type');
+	const linkVerificationType = actionUrl.searchParams.get('type');
+	const verificationType = responseVerificationType ?? linkVerificationType;
+	if (verificationType !== 'recovery' || (linkVerificationType !== null && linkVerificationType !== 'recovery')) {
+		return invalidRecoveryLink('provider_response_invalid', diagnostics, responseDiagnostics);
+	}
 
-	const tokenHash = actionUrl.searchParams.get('token_hash');
-	if (!tokenHash || !tokenHash.trim()) return invalidRecoveryLink('provider_response_invalid', diagnostics);
+	const providerToken = actionUrl.searchParams.get('token');
+	if (!providerToken || !providerToken.trim()) return invalidRecoveryLink('provider_response_invalid', diagnostics, responseDiagnostics);
 
 	const responseTokenHash = stringProperty(properties, 'hashed_token');
-	if (responseTokenHash !== null && !responseTokenHash.trim()) return invalidRecoveryLink('provider_response_invalid', diagnostics);
+	if (responseTokenHash !== null && !responseTokenHash.trim()) return invalidRecoveryLink('provider_response_invalid', diagnostics, responseDiagnostics);
 
-	const redirectTo = actionUrl.searchParams.get('redirect_to');
+	const redirectTo = actionUrl.searchParams.get('redirect_to') ?? stringProperty(properties, 'redirect_to');
 	if (!redirectTo || !isApprovedPasswordResetRedirect(redirectTo, env)) {
-		return invalidRecoveryLink('redirect_invalid', diagnostics);
+		return invalidRecoveryLink('redirect_invalid', diagnostics, responseDiagnostics);
 	}
 
-	return { status: 'valid', actionLink: actionUrl.toString(), diagnostics };
+	return { status: 'valid', actionLink: rawActionLink, diagnostics, responseDiagnostics };
 }
 
 export function renderPasswordResetEmail(actionLink: string) {
@@ -320,8 +348,33 @@ function safeProviderFailureMessage(status: number): string {
 function invalidRecoveryLink(
 	failureCode: SupabaseRecoveryActionLinkValidationCode,
 	diagnostics: SupabaseRecoveryActionLinkDiagnostics,
+	responseDiagnostics: SupabaseRecoveryProviderResponseDiagnostics,
 ): SupabaseRecoveryActionLinkValidationResult {
-	return { status: 'invalid', failureCode, diagnostics };
+	return { status: 'invalid', failureCode, diagnostics, responseDiagnostics };
+}
+
+export function extractGeneratedRecoveryAction(response: Record<string, unknown> | null | undefined):
+	| { status: 'extracted'; actionLink: string; properties: Record<string, unknown>; responseDiagnostics: SupabaseRecoveryProviderResponseDiagnostics }
+	| { status: 'invalid'; failureCode: SupabaseRecoveryActionLinkValidationCode; responseDiagnostics: SupabaseRecoveryProviderResponseDiagnostics } {
+	const responseDiagnostics = recoveryProviderResponseDiagnostics(response);
+	if (!isRecord(response) || !isRecord(response.properties)) {
+		return { status: 'invalid', failureCode: 'provider_response_invalid', responseDiagnostics };
+	}
+
+	const actionLink = response.properties.action_link;
+	if (actionLink === undefined || actionLink === null || actionLink === '') {
+		return { status: 'invalid', failureCode: 'provider_link_missing', responseDiagnostics };
+	}
+	if (typeof actionLink !== 'string' || actionLink.trim().length < 1 || actionLink !== actionLink.trim()) {
+		return { status: 'invalid', failureCode: 'provider_response_invalid', responseDiagnostics };
+	}
+
+	return {
+		status: 'extracted',
+		actionLink,
+		properties: response.properties,
+		responseDiagnostics,
+	};
 }
 
 export function resolveTrustedSupabaseActionOrigins(env: PasswordResetDeliveryEnv = import.meta.env ?? {}): string[] {
@@ -365,6 +418,56 @@ function recoveryActionLinkDiagnostics(actionUrl: URL | null, trustedOrigins: st
 		originsMatch: observedProviderOrigin !== null && trustedOrigins.includes(observedProviderOrigin),
 		hostnamesMatch: observedProviderHostname !== null && trustedOrigins.some((origin) => new URL(origin).hostname === observedProviderHostname),
 	};
+}
+
+function recoveryProviderResponseDiagnostics(response: Record<string, unknown> | null | undefined): SupabaseRecoveryProviderResponseDiagnostics {
+	const topLevelKeys = safeObjectKeys(response);
+	const properties = isRecord(response) && isRecord(response.properties) ? response.properties : null;
+	const propertyKeys = safeObjectKeys(properties);
+	const actionLink = properties?.action_link;
+	const verificationType = properties?.verification_type;
+	const hashedToken = properties?.hashed_token;
+	return {
+		topLevelKeys,
+		propertyKeys,
+		hasProperties: Boolean(properties),
+		hasActionLink: typeof actionLink === 'string' && actionLink.trim().length > 0,
+		actionLinkType: safeValueType(actionLink),
+		hasVerificationType: verificationType !== undefined && verificationType !== null,
+		verificationTypeValue: safeVerificationTypeValue(verificationType),
+		hasHashedToken: hashedToken !== undefined && hashedToken !== null,
+		hashedTokenType: safeValueType(hashedToken),
+		actionLinkQueryParameterNames: actionLinkQueryParameterNames(actionLink),
+	};
+}
+
+function actionLinkQueryParameterNames(actionLink: unknown): string[] {
+	if (typeof actionLink !== 'string') return [];
+	try {
+		return Array.from(new URL(actionLink).searchParams.keys());
+	} catch {
+		return [];
+	}
+}
+
+function safeObjectKeys(value: unknown): string[] {
+	return isRecord(value) ? Object.keys(value).sort() : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function safeValueType(value: unknown): string {
+	if (value === undefined) return 'undefined';
+	if (value === null) return 'null';
+	if (Array.isArray(value)) return 'array';
+	return typeof value;
+}
+
+function safeVerificationTypeValue(value: unknown): string {
+	if (value === 'recovery') return 'recovery';
+	return safeValueType(value);
 }
 
 function isApprovedPasswordResetRedirect(rawRedirectTo: string, env: PasswordResetDeliveryEnv): boolean {
