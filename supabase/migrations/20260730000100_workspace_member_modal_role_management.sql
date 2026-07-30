@@ -122,8 +122,7 @@ select
   om.joined_at,
   om.auth_user_id,
   p.last_login_at,
-  om.updated_at,
-  om.invitation_expires_at
+  om.updated_at
 from public.organisation_members om
 join public.profiles p on p.id = om.user_id
 left join public.workspace_membership_invitations invitation
