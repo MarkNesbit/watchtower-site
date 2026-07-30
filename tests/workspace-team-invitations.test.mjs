@@ -41,6 +41,7 @@ const acceptanceAuditIdentityMigrationUrl = new URL('../supabase/migrations/2026
 const acceptanceJoinedAtMigrationUrl = new URL('../supabase/migrations/20260723002200_workspace_invitation_acceptance_joined_at.sql', import.meta.url);
 const workspaceResolutionMigrationUrl = new URL('../supabase/migrations/20260723002300_workspace_invitation_workspace_resolution.sql', import.meta.url);
 const authRemapGuardMigrationUrl = new URL('../supabase/migrations/20260723002400_workspace_invitation_auth_remap_guard.sql', import.meta.url);
+const deliveryAuditIdentityMigrationUrl = new URL('../supabase/migrations/20260723002500_workspace_invitation_delivery_audit_identity.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const setupRouteUrl = new URL('../src/pages/invitations/setup.ts', import.meta.url);
@@ -244,6 +245,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	const acceptanceJoinedAtIndex = files.indexOf('20260723002200_workspace_invitation_acceptance_joined_at.sql');
 	const workspaceResolutionIndex = files.indexOf('20260723002300_workspace_invitation_workspace_resolution.sql');
 	const authRemapGuardIndex = files.indexOf('20260723002400_workspace_invitation_auth_remap_guard.sql');
+	const deliveryAuditIdentityIndex = files.indexOf('20260723002500_workspace_invitation_delivery_audit_identity.sql');
 	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
 	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
 
@@ -261,6 +263,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.equal(acceptanceJoinedAtIndex, acceptanceAuditIdentityIndex + 1, 'acceptance joined-at migration should follow acceptance audit identity migration');
 	assert.equal(workspaceResolutionIndex, acceptanceJoinedAtIndex + 1, 'workspace resolution migration should follow acceptance joined-at migration');
 	assert.equal(authRemapGuardIndex, workspaceResolutionIndex + 1, 'Auth remap guard migration should follow workspace-resolution migration');
+	assert.equal(deliveryAuditIdentityIndex, authRemapGuardIndex + 1, 'delivery audit identity migration should follow Auth remap guard migration');
 	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
 	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
@@ -299,6 +302,65 @@ test('Workspace invitation outbound email migration records provider evidence an
 	assert.doesNotMatch(recordSql, /organisation_members[\s\S]*status = 'active'/i);
 	assert.match(migrationSql, /grant execute on function public\.begin_workspace_membership_invitation_delivery_attempt\(uuid, uuid\) to authenticated, service_role/);
 	assert.match(migrationSql, /grant execute on function public\.record_workspace_membership_invitation_delivery_result\(uuid, text, text, text, text, text\) to authenticated, service_role/);
+});
+
+test('Workspace invitation delivery audit records Auth identity rather than profile identity', async () => {
+	const sql = await readFile(deliveryAuditIdentityMigrationUrl, 'utf8');
+	const auditSchemaSql = await readFile(new URL('../supabase/migrations/20260722000100_workspace_membership_lifecycle_audit_schema.sql', import.meta.url), 'utf8');
+	const prepareSql = sqlFunctionDefinition(sql, 'prepare_workspace_membership_invitations');
+	const beginSql = sqlFunctionDefinition(sql, 'begin_workspace_membership_invitation_delivery_attempt');
+	const recordSql = sqlFunctionDefinition(sql, 'record_workspace_membership_invitation_delivery_result');
+	const cancelSql = sqlFunctionDefinition(sql, 'cancel_workspace_membership_invitation');
+	const supersededAudit = prepareSql.match(/record_workspace_membership_audit_event\([\s\S]*?'workspace_invitation_superseded'[\s\S]*?\);/)?.[0] ?? '';
+	const preparedAudit = prepareSql.match(/record_workspace_membership_audit_event\([\s\S]*?'workspace_invitation_prepared'[\s\S]*?\);/)?.[0] ?? '';
+	const attemptedAudit = beginSql.match(/record_workspace_membership_audit_event\([\s\S]*?'workspace_invitation_delivery_attempted'[\s\S]*?\);/)?.[0] ?? '';
+	const resultAudit = recordSql.match(/record_workspace_membership_audit_event\([\s\S]*?workspace_invitation_delivered[\s\S]*?\);/)?.[0] ?? '';
+	const cancelReplayAudit = cancelSql.match(/record_workspace_membership_audit_event\([\s\S]*?'workspace_invitation_replay_rejected'[\s\S]*?\);/)?.[0] ?? '';
+	const cancelledAudit = cancelSql.match(/record_workspace_membership_audit_event\([\s\S]*?'workspace_invitation_cancelled'[\s\S]*?\);/)?.[0] ?? '';
+	const beginClaimUpdate = beginSql.match(/update public\.workspace_membership_invitations as invitation[\s\S]*?returning invitation\.\* into v_invitation;/)?.[0] ?? '';
+	const beginAuditIndex = beginSql.indexOf("'workspace_invitation_delivery_attempted'");
+
+	assert.match(auditSchemaSql, /target_user_id uuid references auth\.users\(id\)/);
+	assert.doesNotMatch(auditSchemaSql, /target_profile_id|invitation_id uuid/);
+	assert.match(prepareSql, /om\.auth_user_id/);
+	assert.match(prepareSql, /v_row\.auth_user_id is null[\s\S]*auth_identity_required/);
+	assert.match(prepareSql, /au\.id <> v_row\.auth_user_id/);
+	assert.match(prepareSql, /v_row\.membership_id,\s+v_row\.profile_id,\s+v_row\.auth_user_id,\s+v_handoff\.application_run_id/);
+	assert.match(prepareSql, /where au\.id = v_row\.auth_user_id/);
+	assert.match(supersededAudit, /p_organisation_id,\s+v_current\.membership_id,\s+v_current\.auth_user_id,\s+v_actor\.actor_user_id,\s+'workspace_invitation_superseded'/);
+	assert.match(preparedAudit, /p_organisation_id,\s+v_row\.membership_id,\s+v_row\.auth_user_id,\s+v_actor\.actor_user_id,\s+'workspace_invitation_prepared'/);
+	for (const auditBlock of [supersededAudit, preparedAudit]) {
+		assert.match(auditBlock, /'profile_id'/);
+		assert.match(auditBlock, /'target_auth_user_id'/);
+		assert.match(auditBlock, /'invitation_id'|'previous_invitation_id'/);
+		assert.match(auditBlock, /'membership_id'/);
+	}
+
+	assert.match(beginSql, /v_membership\.auth_user_id is distinct from v_invitation\.auth_user_id/);
+	assert.match(beginSql, /v_membership\.status not in \('invited', 'invite_expired'\)/);
+	assert.match(attemptedAudit, /v_invitation\.organisation_id,\s+v_invitation\.membership_id,\s+v_membership\.auth_user_id,\s+v_actor\.actor_user_id,\s+'workspace_invitation_delivery_attempted'/);
+	assert.match(attemptedAudit, /'profile_id', v_invitation\.profile_id/);
+	assert.match(attemptedAudit, /'target_auth_user_id', v_membership\.auth_user_id/);
+	assert.match(attemptedAudit, /'invitation_id', v_invitation\.id/);
+	assert.ok(beginSql.indexOf(beginClaimUpdate) >= 0 && beginAuditIndex > beginSql.indexOf(beginClaimUpdate), 'claim state is updated before audit in the same transaction');
+
+	assert.match(recordSql, /v_membership\.auth_user_id is distinct from v_invitation\.auth_user_id/);
+	assert.match(recordSql, /v_membership\.status not in \('invited', 'invite_expired'\)/);
+	assert.match(resultAudit, /v_invitation\.organisation_id,\s+v_invitation\.membership_id,\s+v_membership\.auth_user_id,\s+v_actor\.actor_user_id,\s+case when p_delivery_status = 'delivered'/);
+	assert.match(resultAudit, /'profile_id', v_invitation\.profile_id/);
+	assert.match(resultAudit, /'target_auth_user_id', v_membership\.auth_user_id/);
+	assert.match(resultAudit, /'invitation_id', v_invitation\.id/);
+
+	assert.match(cancelSql, /v_membership\.auth_user_id is distinct from v_invitation\.auth_user_id/);
+	assert.match(cancelReplayAudit, /p_organisation_id,\s+v_invitation\.membership_id,\s+v_membership\.auth_user_id,\s+v_actor\.actor_user_id,\s+'workspace_invitation_replay_rejected'/);
+	assert.match(cancelledAudit, /p_organisation_id,\s+v_invitation\.membership_id,\s+v_membership\.auth_user_id,\s+v_actor\.actor_user_id,\s+'workspace_invitation_cancelled'/);
+
+	for (const functionSql of [prepareSql, beginSql, recordSql, cancelSql]) {
+		assert.doesNotMatch(functionSql, /record_workspace_membership_audit_event\(\s*(?:p_organisation_id|v_invitation\.organisation_id),\s*(?:v_current\.membership_id|v_row\.membership_id|v_invitation\.membership_id),\s*(?:v_current\.profile_id|v_row\.profile_id|v_invitation\.profile_id),/);
+		assert.doesNotMatch(functionSql, /set\s+status = 'active'|update public\.organisation_members[\s\S]*\bauth_user_id\s*=|record_workspace_invitation_auth_identity_repair/);
+	}
+	assert.doesNotMatch(sql, /alter table public\.workspace_membership_audit_events[\s\S]*target_user_id[\s\S]*references public\.profiles|drop constraint .*target_user_id_fkey/i);
+	assert.match(sql, /grant execute on function public\.begin_workspace_membership_invitation_delivery_attempt\(uuid, uuid\) to authenticated, service_role/);
 });
 
 test('Workspace invitation delivery provider configuration is server-side and production-origin bounded', () => {
