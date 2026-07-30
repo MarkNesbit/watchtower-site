@@ -18,6 +18,7 @@ const pageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro'
 const roleRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/members/role.ts', import.meta.url);
 const sessionRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/members/session.ts', import.meta.url);
 const migrationUrl = new URL('../supabase/migrations/20260730000100_workspace_member_modal_role_management.sql', import.meta.url);
+const repairMigrationUrl = new URL('../supabase/migrations/20260730000200_workspace_member_modal_role_management_repair.sql', import.meta.url);
 
 async function pageSource() {
 	return readFile(pageUrl, 'utf8');
@@ -25,6 +26,10 @@ async function pageSource() {
 
 async function migrationSql() {
 	return readFile(migrationUrl, 'utf8');
+}
+
+async function repairMigrationSql() {
+	return readFile(repairMigrationUrl, 'utf8');
 }
 
 test('Workspace Team central permissions restrict page access to Owner and Admin', () => {
@@ -200,6 +205,21 @@ test('Workspace Team member role migration records audit evidence without changi
 	assert.doesNotMatch(adminView, /om\.auth_user_id,\s*p\.display_name/);
 	assert.equal(adminView.match(/\binvitation_expires_at\b/g)?.length, 1);
 	assert.doesNotMatch(sql, /update public\.profiles[\s\S]*first_name|update public\.profiles[\s\S]*last_name|update public\.profiles[\s\S]*contact_email|update public\.profiles[\s\S]*login_name/);
+});
+
+test('Workspace Team member role repair migration reapplies corrected session RPC under a new version', async () => {
+	const sql = await repairMigrationSql();
+
+	assert.match(sql, /20260730000100 migration may already be recorded as applied/);
+	assert.match(sql, /create or replace view public\.workspace_member_admin_directory/);
+	assert.match(sql, /p\.display_name[\s\S]*om\.joined_at,[\s\S]*om\.auth_user_id,[\s\S]*p\.last_login_at,[\s\S]*om\.updated_at/);
+	assert.equal(sql.match(/\binvitation_expires_at\b/g)?.length, 1);
+	assert.match(sql, /create or replace function public\.start_workspace_member_edit_session/);
+	assert.match(sql, /v_existing_id uuid/);
+	assert.match(sql, /v_existing_editing_by uuid/);
+	assert.match(sql, /returning workspace_member_edit_sessions\.id, workspace_member_edit_sessions\.expires_at/);
+	assert.match(sql, /grant execute on function public\.start_workspace_member_edit_session\(uuid, uuid\) to authenticated, service_role/);
+	assert.match(sql, /notify pgrst, 'reload schema'/);
 });
 
 test('Workspace Team role change errors are clear and non-leaky', () => {
