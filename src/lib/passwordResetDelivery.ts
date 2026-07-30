@@ -1,0 +1,257 @@
+const RESEND_EMAIL_ENDPOINT = 'https://api.resend.com/emails';
+const PRODUCTION_SITE_ORIGIN = 'https://watch-tower.co.uk';
+const PROVIDER_TIMEOUT_MS = 10_000;
+
+export const PASSWORD_RESET_PUBLIC_CONFIRMATION = 'If an eligible account matches that login name, password reset instructions have been sent.';
+
+export type PasswordResetDeliveryEnv = {
+	WATCHTOWER_PASSWORD_RESET_DELIVERY_MODE?: string;
+	WATCHTOWER_EMAIL_PROVIDER?: string;
+	WATCHTOWER_RESEND_API_KEY?: string;
+	WATCHTOWER_EMAIL_FROM_ADDRESS?: string;
+	WATCHTOWER_EMAIL_FROM_NAME?: string;
+	WATCHTOWER_PASSWORD_RESET_REPLY_TO?: string;
+	WATCHTOWER_INVITATION_REPLY_TO?: string;
+	WATCHTOWER_SITE_URL?: string;
+	WATCHTOWER_INVITATION_FROM_EMAIL?: string;
+	WATCHTOWER_INVITATION_FROM_NAME?: string;
+};
+
+export type PasswordResetDeliveryResult = {
+	status: 'delivered' | 'delivery_failed';
+	providerName?: string;
+	providerMessageId?: string;
+	failureCode?: string;
+	failureMessage?: string;
+};
+
+type ProviderConfig =
+	| { mode: 'test_record_only' }
+	| { mode: 'provider_required'; failureCode: string; failureMessage: string }
+	| {
+		mode: 'resend';
+		apiKey: string;
+		from: string;
+		replyTo?: string;
+		siteOrigin: string;
+	};
+
+export function normalisePasswordResetEmail(value: unknown): string | null {
+	const email = String(value ?? '').trim().toLowerCase();
+	if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+	return email;
+}
+
+function hasBinding(value: unknown): boolean {
+	return String(value ?? '').trim().length > 0;
+}
+
+function formatDisplayName(value: string): string {
+	return value.replace(/[<>"\r\n]/g, '').trim() || 'Watchtower';
+}
+
+export function resolvePasswordResetSiteOrigin(env: PasswordResetDeliveryEnv = import.meta.env ?? {}): string | null {
+	const configured = String(env.WATCHTOWER_SITE_URL ?? '').trim();
+	if (!configured) return null;
+	try {
+		const url = new URL(configured);
+		if (url.protocol !== 'https:' || url.origin !== PRODUCTION_SITE_ORIGIN) return null;
+		return url.origin;
+	} catch {
+		return null;
+	}
+}
+
+export function passwordResetDeliveryMode(env: PasswordResetDeliveryEnv = import.meta.env ?? {}): 'provider_required' | 'test_record_only' {
+	const mode = String(env.WATCHTOWER_PASSWORD_RESET_DELIVERY_MODE ?? '').trim();
+	return mode === 'test_record_only' ? 'test_record_only' : 'provider_required';
+}
+
+export function passwordResetEmailConfigDiagnostics(env: PasswordResetDeliveryEnv = import.meta.env ?? {}) {
+	return {
+		providerBindingPresent: hasBinding(env.WATCHTOWER_EMAIL_PROVIDER),
+		apiKeyBindingPresent: hasBinding(env.WATCHTOWER_RESEND_API_KEY),
+		senderBindingPresent: hasBinding(env.WATCHTOWER_EMAIL_FROM_ADDRESS ?? env.WATCHTOWER_INVITATION_FROM_EMAIL),
+		siteUrlBindingPresent: hasBinding(env.WATCHTOWER_SITE_URL),
+	};
+}
+
+export function resolvePasswordResetProviderConfig(env: PasswordResetDeliveryEnv = import.meta.env ?? {}): ProviderConfig {
+	if (passwordResetDeliveryMode(env) === 'test_record_only') {
+		return { mode: 'test_record_only' };
+	}
+
+	const provider = String(env.WATCHTOWER_EMAIL_PROVIDER ?? '').trim().toLowerCase();
+	if (!provider || provider !== 'resend') {
+		return {
+			mode: 'provider_required',
+			failureCode: 'provider_not_configured',
+			failureMessage: 'Password reset email provider is not configured.',
+		};
+	}
+
+	const apiKey = String(env.WATCHTOWER_RESEND_API_KEY ?? '').trim();
+	const fromEmail = normalisePasswordResetEmail(env.WATCHTOWER_EMAIL_FROM_ADDRESS ?? env.WATCHTOWER_INVITATION_FROM_EMAIL);
+	const fromName = String(env.WATCHTOWER_EMAIL_FROM_NAME ?? env.WATCHTOWER_INVITATION_FROM_NAME ?? 'Watchtower').trim() || 'Watchtower';
+	const siteOrigin = resolvePasswordResetSiteOrigin(env);
+	if (!apiKey || !fromEmail || !siteOrigin) {
+		return {
+			mode: 'provider_required',
+			failureCode: 'provider_not_configured',
+			failureMessage: 'Password reset email provider is missing required server-side configuration.',
+		};
+	}
+
+	const replyTo = normalisePasswordResetEmail(env.WATCHTOWER_PASSWORD_RESET_REPLY_TO ?? env.WATCHTOWER_INVITATION_REPLY_TO);
+	return {
+		mode: 'resend',
+		apiKey,
+		from: `${formatDisplayName(fromName)} <${fromEmail}>`,
+		replyTo: replyTo ?? undefined,
+		siteOrigin,
+	};
+}
+
+export function buildPasswordResetCompletionUrl(env: PasswordResetDeliveryEnv = import.meta.env ?? {}): string | null {
+	const siteOrigin = resolvePasswordResetSiteOrigin(env);
+	if (!siteOrigin) return null;
+	return new URL('/reset-password', siteOrigin).toString();
+}
+
+export function renderPasswordResetEmail(actionLink: string) {
+	const subject = 'Reset your Watchtower password';
+	const text = [
+		'Hello,',
+		'',
+		'A password reset was requested for your Watchtower account.',
+		'Use the secure link below to choose a new password.',
+		'',
+		`Reset password: ${actionLink}`,
+		'',
+		'If you did not request this, ignore this message.',
+	].join('\n');
+	const html = [
+		'<main>',
+		'<p>Hello,</p>',
+		'<p>A password reset was requested for your Watchtower account.</p>',
+		'<p>Use the secure link below to choose a new password.</p>',
+		`<p><a href="${escapeHtml(actionLink)}">Reset password</a></p>`,
+		'<p>If you did not request this, ignore this message.</p>',
+		'</main>',
+	].join('');
+	return { subject, text, html };
+}
+
+export async function sendPasswordResetEmail(request: {
+	recipientEmail?: string | null;
+	actionLink: string;
+	env?: PasswordResetDeliveryEnv;
+	fetchImpl?: typeof fetch;
+}): Promise<PasswordResetDeliveryResult> {
+	const recipientEmail = normalisePasswordResetEmail(request.recipientEmail);
+	if (!recipientEmail) {
+		return deliveryFailure('recipient_email_missing', 'Password reset recipient email could not be resolved.');
+	}
+
+	const config = resolvePasswordResetProviderConfig(request.env ?? import.meta.env ?? {});
+	if (config.mode === 'test_record_only') {
+		return {
+			status: 'delivered',
+			providerName: 'test_record_only',
+			providerMessageId: 'test_password_reset',
+		};
+	}
+	if (config.mode === 'provider_required') {
+		return deliveryFailure(config.failureCode, config.failureMessage);
+	}
+
+	const email = renderPasswordResetEmail(request.actionLink);
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+	try {
+		const response = await (request.fetchImpl ?? fetch)(RESEND_EMAIL_ENDPOINT, {
+			method: 'POST',
+			headers: {
+				authorization: `Bearer ${config.apiKey}`,
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				from: config.from,
+				to: [recipientEmail],
+				reply_to: config.replyTo,
+				subject: email.subject,
+				html: email.html,
+				text: email.text,
+				headers: {
+					'X-Watchtower-Email-Type': 'password-reset',
+				},
+			}),
+			signal: controller.signal,
+		});
+		clearTimeout(timeout);
+
+		if (!response.ok) {
+			return {
+				...deliveryFailure(failureCodeForProviderStatus(response.status), safeProviderFailureMessage(response.status)),
+				providerName: 'resend',
+			};
+		}
+
+		const body = await safeJson(response);
+		return {
+			status: 'delivered',
+			providerName: 'resend',
+			providerMessageId: typeof body?.id === 'string' ? body.id : undefined,
+		};
+	} catch (error) {
+		clearTimeout(timeout);
+		const aborted = error instanceof Error && error.name === 'AbortError';
+		return {
+			...deliveryFailure(
+				aborted ? 'provider_timeout' : 'provider_unavailable',
+				aborted ? 'Password reset email provider timed out.' : 'Password reset email provider could not be reached.',
+			),
+			providerName: 'resend',
+		};
+	}
+}
+
+function deliveryFailure(failureCode: string, failureMessage: string): PasswordResetDeliveryResult {
+	return {
+		status: 'delivery_failed',
+		failureCode,
+		failureMessage,
+	};
+}
+
+function failureCodeForProviderStatus(status: number): string {
+	if (status === 401 || status === 403) return 'provider_auth_failed';
+	if (status === 429) return 'provider_rate_limited';
+	if (status >= 400 && status < 500) return 'provider_rejected';
+	return 'provider_unavailable';
+}
+
+function safeProviderFailureMessage(status: number): string {
+	if (status === 401 || status === 403) return 'Password reset email provider rejected the configured credentials.';
+	if (status === 429) return 'Password reset email provider rate limit was reached.';
+	if (status >= 400 && status < 500) return 'Password reset email provider rejected the message.';
+	return 'Password reset email provider did not accept the message.';
+}
+
+async function safeJson(response: Response): Promise<Record<string, unknown> | null> {
+	try {
+		const parsed = await response.json();
+		return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+	} catch {
+		return null;
+	}
+}
+
+function escapeHtml(value: string) {
+	return value
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;')
+		.replaceAll("'", '&#39;');
+}
