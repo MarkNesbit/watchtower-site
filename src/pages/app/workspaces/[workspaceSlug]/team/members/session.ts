@@ -17,7 +17,7 @@ function json(data: Record<string, unknown>, status = 200) {
 	});
 }
 
-function errorMessage(error: unknown) {
+function errorDetails(error: unknown) {
 	const message = typeof (error as { message?: unknown })?.message === 'string'
 		? (error as { message: string }).message
 		: '';
@@ -28,8 +28,18 @@ function errorMessage(error: unknown) {
 		? (error as { hint: string }).hint
 		: '';
 	const diagnostic = `${message} ${details} ${hint}`;
-	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) return 'Only active Workspace Owners and Admins can manage workspace roles.';
-	if (message.includes('WT_MEMBER_ROLE_ACTIVE_ONLY')) return 'Only active workspace members can be opened for role management.';
+	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) {
+		return {
+			code: 'permission_denied',
+			message: 'Only active Workspace Owners and Admins can manage workspace roles.',
+		};
+	}
+	if (message.includes('WT_MEMBER_ROLE_ACTIVE_ONLY')) {
+		return {
+			code: 'active_member_required',
+			message: 'Only active workspace members can be opened for role management.',
+		};
+	}
 	if (
 		diagnostic.includes('start_workspace_member_edit_session')
 		|| diagnostic.includes('workspace_member_edit_sessions')
@@ -37,9 +47,18 @@ function errorMessage(error: unknown) {
 		|| diagnostic.includes('schema cache')
 		|| diagnostic.includes('does not exist')
 	) {
-		return 'Workspace role editing is not ready yet. Apply the latest Workspace Team database migration, then reopen this member.';
+		return {
+			code: 'schema_not_ready',
+			message: 'Workspace role editing is not ready yet. Apply the latest Workspace Team database migration, then reopen this member.',
+		};
 	}
-	return 'Member edit availability could not be checked.';
+	const code = typeof (error as { code?: unknown })?.code === 'string'
+		? (error as { code: string }).code
+		: 'unknown';
+	return {
+		code: `database_${code.replace(/[^A-Za-z0-9_]/g, '_')}`,
+		message: 'Member edit availability could not be checked.',
+	};
 }
 
 export const POST: APIRoute = async ({ cookies, params, request }) => {
@@ -79,7 +98,10 @@ export const POST: APIRoute = async ({ cookies, params, request }) => {
 		p_organisation_id: organisation.id,
 		p_membership_id: membershipId,
 	});
-	if (error) return json({ success: false, message: errorMessage(error) }, 400);
+	if (error) {
+		const detail = errorDetails(error);
+		return json({ success: false, message: detail.message, error_code: detail.code }, 400);
+	}
 
 	const result = Array.isArray(data) ? data[0] : data;
 	return json({

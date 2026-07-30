@@ -143,6 +143,9 @@ test('Workspace Team member session and role routes use workspace-scoped secure 
 	assert.match(sessionRoute, /WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC/);
 	assert.match(sessionRoute, /Workspace role editing is not ready yet/);
 	assert.match(sessionRoute, /Apply the latest Workspace Team database migration/);
+	assert.match(sessionRoute, /error_code: detail\.code/);
+	assert.match(sessionRoute, /schema_not_ready/);
+	assert.match(sessionRoute, /database_\$\{code\.replace/);
 	assert.match(sessionRoute, /start_workspace_member_edit_session/);
 	assert.match(sessionRoute, /workspace_member_edit_sessions/);
 	assert.match(roleRoute, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
