@@ -640,6 +640,7 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 		document.cookie = `wt-access-token=${session.access_token}; ${cookieOptions}`;
 		document.cookie = `wt-refresh-token=${session.refresh_token}; ${cookieOptions}`;
 	};
+	const hasServerAuthenticatedSession = () => Boolean(document.querySelector('[data-server-authenticated="true"]'));
 
 	const syncSessionBeforeSubmit = (form) => {
 		let sessionSynced = false;
@@ -648,6 +649,11 @@ const modalHasField = (blockId, fieldName) => modalConfig(blockId).fields.includ
 			event.preventDefault();
 			const { data } = await supabase.auth.getSession();
 			if (!data.session) {
+				if (hasServerAuthenticatedSession()) {
+					sessionSynced = true;
+					if (form instanceof HTMLFormElement) form.submit();
+					return;
+				}
 				window.location.assign(`/login?redirectTo=${encodeURIComponent(window.location.pathname)}`);
 				return;
 			}
