@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
 	PASSWORD_RESET_PUBLIC_CONFIRMATION,
 	buildPasswordResetCompletionUrl,
+	extractGeneratedRecoveryAction,
 	renderPasswordResetEmail,
 	resolvePasswordResetProviderConfig,
 	resolveTrustedSupabaseActionOrigins,
@@ -73,20 +74,36 @@ function recoveryProperties({
 	origin = 'https://project-ref.supabase.co',
 	path = '/auth/v1/verify',
 	type = 'recovery',
-	tokenHash = 'provider-token-hash',
+	token = 'provider-token',
 	redirectTo = 'https://watch-tower.co.uk/reset-password',
 	verificationType = 'recovery',
 	hashedToken = 'provider-token-hash',
+	emailOtp = '123456',
 } = {}) {
 	const url = new URL(path, origin);
-	if (tokenHash !== null) url.searchParams.set('token_hash', tokenHash);
+	if (token !== null) url.searchParams.set('token', token);
 	if (type !== null) url.searchParams.set('type', type);
 	if (redirectTo !== null) url.searchParams.set('redirect_to', redirectTo);
 	return {
 		action_link: url.toString(),
+		email_otp: emailOtp,
 		verification_type: verificationType,
 		hashed_token: hashedToken,
+		redirect_to: redirectTo,
 	};
+}
+
+function recoveryResponse(options = {}) {
+	return {
+		properties: recoveryProperties(options),
+		user: { id: 'fixture-user-id' },
+	};
+}
+
+function recoveryResponseWithoutProperty(propertyName, options = {}) {
+	const response = recoveryResponse(options);
+	delete response.properties[propertyName];
+	return response;
 }
 
 test('forgotten-password form accepts login names rather than email addresses', async () => {
@@ -159,7 +176,7 @@ test('password reset delivery sends generated recovery links to contact email th
 	let requestBody = {};
 	const result = await sendPasswordResetEmail({
 		recipientEmail: 'Ruby.Atkinson+Reset@Example.com',
-		actionLink: 'https://supabase.example/auth/v1/verify?token_hash=abc&type=recovery&redirect_to=https%3A%2F%2Fwatch-tower.co.uk%2Freset-password',
+		actionLink: 'https://supabase.example/auth/v1/verify?token=abc&type=recovery&redirect_to=https%3A%2F%2Fwatch-tower.co.uk%2Freset-password',
 		env: {
 			WATCHTOWER_EMAIL_PROVIDER: 'resend',
 			WATCHTOWER_RESEND_API_KEY: 're_test',
@@ -182,7 +199,7 @@ test('password reset delivery sends generated recovery links to contact email th
 	assert.equal(requestBody.from, 'Watchtower <invitations@watch-tower.co.uk>');
 	assert.equal(requestBody.reply_to, 'support@watch-tower.co.uk');
 	assert.match(requestBody.subject, /Reset your Watchtower password/);
-	assert.match(requestBody.text, /token_hash=abc/);
+	assert.match(requestBody.text, /token=abc/);
 	assert.doesNotMatch(JSON.stringify(requestBody), /mark\.nesbit\.professional\+wt/i);
 });
 
@@ -199,7 +216,7 @@ test('password reset provider configuration is production-origin bounded', () =>
 });
 
 test('Supabase recovery action-link validation accepts the trusted provider URL and Watchtower redirect', () => {
-	const result = validateSupabaseRecoveryActionLink(recoveryProperties(), trustedResetEnv);
+	const result = validateSupabaseRecoveryActionLink(recoveryResponse(), trustedResetEnv);
 
 	assert.equal(result.status, 'valid');
 	assert.match(result.actionLink, /^https:\/\/project-ref\.supabase\.co\/auth\/v1\/verify\?/);
@@ -209,17 +226,53 @@ test('Supabase recovery action-link validation accepts the trusted provider URL 
 	assert.equal(result.diagnostics.originsMatch, true);
 });
 
+test('Supabase recovery response extraction matches installed client response shape', () => {
+	const response = recoveryResponse();
+	const result = extractGeneratedRecoveryAction(response);
+
+	assert.equal(result.status, 'extracted');
+	assert.equal(result.actionLink, response.properties.action_link);
+	assert.deepEqual(result.responseDiagnostics, {
+		topLevelKeys: ['properties', 'user'],
+		propertyKeys: ['action_link', 'email_otp', 'hashed_token', 'redirect_to', 'verification_type'],
+		hasProperties: true,
+		hasActionLink: true,
+		actionLinkType: 'string',
+		hasVerificationType: true,
+		verificationTypeValue: 'recovery',
+		hasHashedToken: true,
+		hashedTokenType: 'string',
+		actionLinkQueryParameterNames: ['token', 'type', 'redirect_to'],
+	});
+	assert.doesNotMatch(JSON.stringify(result.responseDiagnostics), /provider-token|provider-token-hash|watch-tower\.co\.uk\/reset-password|\?/i);
+});
+
+test('Supabase recovery response extraction rejects malformed response shapes safely', () => {
+	assert.equal(extractGeneratedRecoveryAction({ properties: {}, user: { id: 'fixture-user-id' } }).failureCode, 'provider_link_missing');
+	assert.equal(extractGeneratedRecoveryAction({ properties: { action_link: 123 } }).failureCode, 'provider_response_invalid');
+	assert.equal(extractGeneratedRecoveryAction({ properties: { action_link: '' } }).failureCode, 'provider_link_missing');
+	assert.equal(extractGeneratedRecoveryAction({ properties: { action_link: '   ' } }).failureCode, 'provider_response_invalid');
+	assert.equal(extractGeneratedRecoveryAction({ action_link: recoveryProperties().action_link }).failureCode, 'provider_response_invalid');
+});
+
+test('Supabase recovery action-link validation accepts documented optional-field variants', () => {
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponseWithoutProperty('hashed_token'), trustedResetEnv).status, 'valid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponseWithoutProperty('verification_type'), trustedResetEnv).status, 'valid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ type: null, verificationType: 'recovery' }), trustedResetEnv).status, 'valid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ hashedToken: '' }), trustedResetEnv).failureCode, 'provider_response_invalid');
+});
+
 test('Supabase recovery action-link validation rejects unsafe provider URLs', () => {
-	assert.equal(validateSupabaseRecoveryActionLink(null, trustedResetEnv).failureCode, 'provider_link_missing');
-	assert.equal(validateSupabaseRecoveryActionLink({ action_link: 'not a url' }, trustedResetEnv).failureCode, 'provider_response_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://project-ref.supabase.co.evil.example' }), trustedResetEnv).failureCode, 'provider_host_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://evil-project-ref.supabase.co' }), trustedResetEnv).failureCode, 'provider_host_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'http://project-ref.supabase.co' }), trustedResetEnv).failureCode, 'provider_host_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://user:pass@project-ref.supabase.co' }), trustedResetEnv).failureCode, 'provider_host_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ path: '/auth/v1/callback' }), trustedResetEnv).failureCode, 'provider_path_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ tokenHash: null }), trustedResetEnv).failureCode, 'provider_response_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ type: 'signup' }), trustedResetEnv).failureCode, 'provider_response_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ type: null, verificationType: 'signup' }), trustedResetEnv).failureCode, 'provider_response_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(null, trustedResetEnv).failureCode, 'provider_response_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink({ properties: { action_link: 'not a url' } }, trustedResetEnv).failureCode, 'provider_response_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'https://project-ref.supabase.co.evil.example' }), trustedResetEnv).failureCode, 'provider_host_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'https://evil-project-ref.supabase.co' }), trustedResetEnv).failureCode, 'provider_host_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'http://project-ref.supabase.co' }), trustedResetEnv).failureCode, 'provider_host_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'https://user:pass@project-ref.supabase.co' }), trustedResetEnv).failureCode, 'provider_host_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ path: '/auth/v1/callback' }), trustedResetEnv).failureCode, 'provider_path_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ token: null }), trustedResetEnv).failureCode, 'provider_response_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ type: 'signup' }), trustedResetEnv).failureCode, 'provider_response_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ type: null, verificationType: 'signup' }), trustedResetEnv).failureCode, 'provider_response_invalid');
 });
 
 test('Supabase recovery action-link validation accepts only explicitly configured Auth action origins', () => {
@@ -227,7 +280,7 @@ test('Supabase recovery action-link validation accepts only explicitly configure
 		...trustedResetEnv,
 		SUPABASE_AUTH_ACTION_ORIGIN: ' https://auth.watch-tower.co.uk/reset ',
 	};
-	const result = validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://auth.watch-tower.co.uk' }), customOriginEnv);
+	const result = validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'https://auth.watch-tower.co.uk' }), customOriginEnv);
 
 	assert.deepEqual(resolveTrustedSupabaseActionOrigins(customOriginEnv), [
 		'https://auth.watch-tower.co.uk',
@@ -236,8 +289,8 @@ test('Supabase recovery action-link validation accepts only explicitly configure
 	assert.equal(result.status, 'valid');
 	assert.equal(result.diagnostics.expectedProviderOrigin, 'https://auth.watch-tower.co.uk');
 	assert.equal(result.diagnostics.observedProviderHostname, 'auth.watch-tower.co.uk');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://other-project.supabase.co' }), customOriginEnv).failureCode, 'provider_host_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://anything.supabase.co' }), {
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'https://other-project.supabase.co' }), customOriginEnv).failureCode, 'provider_host_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'https://anything.supabase.co' }), {
 		...trustedResetEnv,
 		PUBLIC_SUPABASE_URL: 'https://stale-project.supabase.co',
 	}).failureCode, 'provider_host_invalid');
@@ -254,12 +307,12 @@ test('Supabase recovery action-link validation supports explicit exact allow-lis
 		'https://auth-two.watch-tower.co.uk',
 		'https://project-ref.supabase.co',
 	]);
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://auth-two.watch-tower.co.uk' }), allowListEnv).status, 'valid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://auth-two.watch-tower.co.uk.evil.example' }), allowListEnv).failureCode, 'provider_host_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'https://auth-two.watch-tower.co.uk' }), allowListEnv).status, 'valid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'https://auth-two.watch-tower.co.uk.evil.example' }), allowListEnv).failureCode, 'provider_host_invalid');
 });
 
 test('Supabase recovery action-link diagnostics are safe and omit query token and redirect data', () => {
-	const result = validateSupabaseRecoveryActionLink(recoveryProperties({ origin: 'https://unexpected.supabase.co' }), trustedResetEnv);
+	const result = validateSupabaseRecoveryActionLink(recoveryResponse({ origin: 'https://unexpected.supabase.co' }), trustedResetEnv);
 
 	assert.equal(result.status, 'invalid');
 	assert.equal(result.failureCode, 'provider_host_invalid');
@@ -274,6 +327,8 @@ test('Supabase recovery action-link diagnostics are safe and omit query token an
 		hostnamesMatch: false,
 	});
 	assert.doesNotMatch(JSON.stringify(result.diagnostics), /token_hash|provider-token-hash|redirect_to|watch-tower\.co\.uk\/reset-password|\?/i);
+	assert.deepEqual(result.responseDiagnostics.actionLinkQueryParameterNames, ['token', 'type', 'redirect_to']);
+	assert.doesNotMatch(JSON.stringify(result.responseDiagnostics), /provider-token|provider-token-hash|watch-tower\.co\.uk\/reset-password|\?/i);
 });
 
 test('production Worker runtime declares the public Supabase URL used by recovery validation', async () => {
@@ -287,21 +342,23 @@ test('production Worker runtime declares the public Supabase URL used by recover
 });
 
 test('Supabase recovery action-link validation rejects unsafe Watchtower redirects', () => {
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: 'https://watch-tower.co.uk/reset-password' }), trustedResetEnv).status, 'valid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: 'https://evil.example/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: 'https://watch-tower.co.uk.evil.example/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: 'https://reset.watch-tower.co.uk/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: '//evil.example/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: 'javascript:alert(1)' }), trustedResetEnv).failureCode, 'redirect_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: 'data:text/html,reset' }), trustedResetEnv).failureCode, 'redirect_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: 'https://user:pass@watch-tower.co.uk/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: 'https://watch-tower.co.uk/login' }), trustedResetEnv).failureCode, 'redirect_invalid');
-	assert.equal(validateSupabaseRecoveryActionLink(recoveryProperties({ redirectTo: null }), trustedResetEnv).failureCode, 'redirect_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: 'https://watch-tower.co.uk/reset-password' }), trustedResetEnv).status, 'valid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: 'https://evil.example/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: 'https://watch-tower.co.uk.evil.example/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: 'https://reset.watch-tower.co.uk/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: '//evil.example/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: 'javascript:alert(1)' }), trustedResetEnv).failureCode, 'redirect_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: 'data:text/html,reset' }), trustedResetEnv).failureCode, 'redirect_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: 'https://user:pass@watch-tower.co.uk/reset-password' }), trustedResetEnv).failureCode, 'redirect_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: 'https://watch-tower.co.uk/login' }), trustedResetEnv).failureCode, 'redirect_invalid');
+	assert.equal(validateSupabaseRecoveryActionLink(recoveryResponse({ redirectTo: null }), trustedResetEnv).failureCode, 'redirect_invalid');
 });
 
 test('validated recovery action link is delivered through Resend without exposing contact email to the page', async () => {
-	const validation = validateSupabaseRecoveryActionLink(recoveryProperties(), trustedResetEnv);
+	const response = recoveryResponse();
+	const validation = validateSupabaseRecoveryActionLink(response, trustedResetEnv);
 	assert.equal(validation.status, 'valid');
+	assert.equal(validation.actionLink, response.properties.action_link);
 
 	let requestBody = {};
 	const result = await sendPasswordResetEmail({
@@ -338,8 +395,9 @@ test('password reset public confirmation and audit payload stay neutral and reda
 	assert.match(page, /auth\.admin\.generateLink\(\{/);
 	assert.match(page, /type: 'recovery'/);
 	assert.match(page, /sendPasswordResetEmail\(\{/);
-	assert.match(page, /validateSupabaseRecoveryActionLink\(linkData\?\.properties/);
+	assert.match(page, /validateSupabaseRecoveryActionLink\(linkData/);
 	assert.match(page, /password_reset_provider_origin_mismatch/);
+	assert.match(page, /password_reset_provider_response_mismatch/);
 	assert.match(page, /recipientEmail: resolution\.contactEmail/);
 	assert.match(page, /email: resolution\.authEmail/);
 	assert.match(page, /actionLink: actionLinkValidation\.actionLink/);
@@ -362,10 +420,10 @@ test('password reset public confirmation and audit payload stay neutral and reda
 });
 
 test('password reset helpers avoid logging reset links and generated email escapes HTML', () => {
-	const email = renderPasswordResetEmail('https://supabase.example/reset?token_hash=<secret>');
+	const email = renderPasswordResetEmail('https://supabase.example/reset?token=<secret>');
 
-	assert.match(email.text, /token_hash=<secret>/);
-	assert.match(email.html, /token_hash=&lt;secret&gt;/);
+	assert.match(email.text, /token=<secret>/);
+	assert.match(email.html, /token=&lt;secret&gt;/);
 });
 
 test('password reset rate limiting fails closed without exposing account state', () => {
