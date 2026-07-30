@@ -156,6 +156,9 @@ test('Workspace Team member role migration records audit evidence without changi
 	assert.match(sql, /create or replace view public\.workspace_member_admin_directory/);
 	assert.match(sql, /p\.last_login_at/);
 	assert.match(sql, /om\.updated_at/);
+	const adminView = sql.match(/create or replace view public\.workspace_member_admin_directory[\s\S]*?where public\.has_real_active_organisation_role/)?.[0] ?? '';
+	assert.match(adminView, /p\.display_name[\s\S]*om\.joined_at,[\s\S]*om\.auth_user_id,[\s\S]*p\.last_login_at,[\s\S]*om\.updated_at,[\s\S]*om\.invitation_expires_at/);
+	assert.doesNotMatch(adminView, /om\.auth_user_id,\s*p\.display_name/);
 	assert.doesNotMatch(sql, /update public\.profiles[\s\S]*first_name|update public\.profiles[\s\S]*last_name|update public\.profiles[\s\S]*contact_email|update public\.profiles[\s\S]*login_name/);
 });
 
