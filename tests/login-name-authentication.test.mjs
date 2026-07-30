@@ -6,6 +6,16 @@ import {
 	normaliseLoginNameInput,
 	resolveLoginNameAuthIdentity,
 } from '../src/lib/loginNameAuth.ts';
+import {
+	ACCESS_SESSION_COOKIE,
+	LOGIN_SWITCH_CSRF_COOKIE,
+	REFRESH_SESSION_COOKIE,
+	buildCleanLoginPath,
+	clearedAuthenticationCookieHeaders,
+	isSameOriginPost,
+	isValidLoginSwitchCsrf,
+	loginSwitchCsrfCookie,
+} from '../src/lib/sessionSwitch.ts';
 
 function queryResult(data, error = null) {
 	return {
@@ -121,4 +131,88 @@ test('login page authenticates through the server without exposing the internal 
 	for (const line of page.split('\n')) {
 		assert.doesNotMatch(line, /console\.(?:warn|error|info).*authEmail/);
 	}
+});
+
+test('authenticated login page presents explicit account switching instead of a second login form', async () => {
+	const page = await readFile(new URL('../src/pages/login.astro', import.meta.url), 'utf8');
+	const choice = await readFile(new URL('../src/components/auth/AuthenticatedLoginChoice.astro', import.meta.url), 'utf8');
+
+	assert.match(page, /getServerAccessToken\(Astro\.cookies\)/);
+	assert.match(page, /loadAuthenticatedDashboardContext\(sessionSupabase, accessToken\)/);
+	assert.match(page, /existingSessionContext \? \(/);
+	assert.match(page, /<AuthenticatedLoginChoice/);
+	assert.match(page, /<LoginForm message=\{message\} redirectTo=\{redirectTo\} \/>/);
+	assert.match(choice, /data-account-switch-prompt/);
+	assert.match(choice, /Signed in as/);
+	assert.match(choice, /Workspace/);
+	assert.match(choice, /Continue as \{personName\}/);
+	assert.match(choice, /Sign out and use another account/);
+	assert.match(choice, /name="action" type="hidden" value="switch-account"/);
+	assert.doesNotMatch(choice, /authEmail|contactEmail|login_name|auth_user_id|uuid|access_token|refresh_token|password/i);
+});
+
+test('direct login POST with an existing session is blocked until account switch is confirmed', async () => {
+	const page = await readFile(new URL('../src/pages/login.astro', import.meta.url), 'utf8');
+
+	assert.match(page, /if \(existingSessionContext\) \{/);
+	assert.match(page, /login_blocked_existing_session/);
+	assert.match(page, /You are already signed in\. Sign out before using another account\./);
+	assert.doesNotMatch(page, /existingSessionContext[\s\S]{0,240}signInWithPassword/);
+});
+
+test('account switch action clears server cookies and uses CSRF protected POST', async () => {
+	const page = await readFile(new URL('../src/pages/login.astro', import.meta.url), 'utf8');
+
+	assert.match(page, /action === 'switch-account'/);
+	assert.match(page, /isSameOriginPost\(Astro\.request, Astro\.url\)/);
+	assert.match(page, /isValidLoginSwitchCsrf\(formData\.get\('switchCsrfToken'\), Astro\.cookies\.get\(LOGIN_SWITCH_CSRF_COOKIE\)\?\.value\)/);
+	assert.match(page, /account_switch_completed/);
+	assert.match(page, /redirectClearingSession\(buildCleanLoginPath\(requestedRedirectTo, true\)\)/);
+
+	const clearCookies = clearedAuthenticationCookieHeaders();
+	assert.ok(clearCookies.some((cookie) => cookie.startsWith(`${ACCESS_SESSION_COOKIE}=; Path=/;`) && cookie.includes('Max-Age=0')));
+	assert.ok(clearCookies.some((cookie) => cookie.startsWith(`${REFRESH_SESSION_COOKIE}=; Path=/;`) && cookie.includes('Max-Age=0')));
+	assert.ok(clearCookies.some((cookie) => cookie.startsWith(`${LOGIN_SWITCH_CSRF_COOKIE}=; Path=/login;`) && cookie.includes('Max-Age=0')));
+	assert.match(loginSwitchCsrfCookie('x'.repeat(24)), /wt-login-switch-csrf=x{24}; Path=\/login; SameSite=Lax; Max-Age=300/);
+	assert.equal(isValidLoginSwitchCsrf('x'.repeat(24), 'x'.repeat(24)), true);
+	assert.equal(isValidLoginSwitchCsrf('x'.repeat(24), 'y'.repeat(24)), false);
+});
+
+test('account switch cleanup clears browser Supabase session state before clean login', async () => {
+	const authStatus = await readFile(new URL('../src/components/auth/AuthStatus.astro', import.meta.url), 'utf8');
+
+	assert.match(authStatus, /accountSwitchCompleted/);
+	assert.match(authStatus, /await supabase\.auth\.signOut\(\)/);
+	assert.match(authStatus, /wt-access-token=; path=\/; max-age=0/);
+	assert.match(authStatus, /wt-refresh-token=; path=\/; max-age=0/);
+	assert.match(authStatus, /wt-login-switch-csrf=; path=\/login; max-age=0/);
+	assert.match(authStatus, /watchtower:dashboard-context-refresh:/);
+	assert.match(authStatus, /window\.history\.replaceState/);
+	assert.match(authStatus, /session && publicAuthPaths\.includes\(path\) && !accountSwitchPrompt/);
+});
+
+test('account switch preserves safe redirects and blocks open redirects', () => {
+	assert.equal(buildCleanLoginPath('/app/workspaces/alpha/projects'), '/login?redirectTo=%2Fapp%2Fworkspaces%2Falpha%2Fprojects');
+	assert.equal(buildCleanLoginPath('/app?tab=home#top', true), '/login?redirectTo=%2Fapp%3Ftab%3Dhome%23top&accountSwitched=1');
+	assert.equal(buildCleanLoginPath('https://attacker.example/app', true), '/login?accountSwitched=1');
+	assert.equal(buildCleanLoginPath('//attacker.example/app', true), '/login?accountSwitched=1');
+});
+
+test('account switch same-origin check rejects cross-origin state changes', () => {
+	assert.equal(isSameOriginPost(new Request('https://watch-tower.co.uk/login', {
+		method: 'POST',
+		headers: { origin: 'https://watch-tower.co.uk' },
+	}), new URL('https://watch-tower.co.uk/login')), true);
+	assert.equal(isSameOriginPost(new Request('https://watch-tower.co.uk/login', {
+		method: 'POST',
+		headers: { origin: 'https://attacker.example' },
+	}), new URL('https://watch-tower.co.uk/login')), false);
+	assert.equal(isSameOriginPost(new Request('https://watch-tower.co.uk/login', {
+		method: 'POST',
+		headers: { referer: 'https://watch-tower.co.uk/app' },
+	}), new URL('https://watch-tower.co.uk/login')), true);
+	assert.equal(isSameOriginPost(new Request('https://watch-tower.co.uk/login', {
+		method: 'POST',
+		headers: { referer: 'https://attacker.example/app' },
+	}), new URL('https://watch-tower.co.uk/login')), false);
 });

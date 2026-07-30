@@ -1,0 +1,83 @@
+---
+type Props = {
+	personName: string;
+	workspaceName?: string;
+	redirectTo?: string;
+	switchCsrfToken: string;
+	message?: string;
+};
+
+const {
+	personName,
+	workspaceName = '',
+	redirectTo = '/app',
+	switchCsrfToken,
+	message = '',
+} = Astro.props;
+---
+<section class="auth-card" data-account-switch-prompt>
+	<p class="eyebrow">Current session</p>
+	<h1>You are already signed in</h1>
+	<dl class="auth-summary">
+		<div>
+			<dt>Signed in as</dt>
+			<dd>{personName}</dd>
+		</div>
+		{workspaceName && (
+			<div>
+				<dt>Workspace</dt>
+				<dd>{workspaceName}</dd>
+			</div>
+		)}
+	</dl>
+	<div class="auth-actions">
+		<a class="button button--primary" href={redirectTo}>Continue as {personName}</a>
+		<form method="post" action="/login" data-account-switch-form>
+			<input name="action" type="hidden" value="switch-account" />
+			<input name="redirectTo" type="hidden" value={redirectTo} />
+			<input name="switchCsrfToken" type="hidden" value={switchCsrfToken} />
+			<button class="button button--secondary" type="submit">Sign out and use another account</button>
+		</form>
+	</div>
+	<p class="form-message" data-message>{message}</p>
+</section>
+
+<style>
+	.auth-summary {
+		display: grid;
+		gap: 0.75rem;
+		margin: 0;
+	}
+
+	.auth-summary div {
+		display: grid;
+		gap: 0.2rem;
+	}
+
+	.auth-summary dt {
+		color: var(--color-text-muted);
+		font-size: 0.82rem;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.auth-summary dd {
+		margin: 0;
+		color: var(--color-text);
+		font-weight: 700;
+	}
+
+	.auth-actions {
+		display: grid;
+		gap: 0.75rem;
+	}
+
+	.auth-actions form {
+		margin: 0;
+	}
+
+	.auth-actions .button {
+		width: 100%;
+		justify-content: center;
+	}
+</style>

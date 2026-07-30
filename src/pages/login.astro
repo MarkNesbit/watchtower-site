@@ -1,7 +1,13 @@
 ---
 import { env } from 'cloudflare:workers';
+import AuthenticatedLoginChoice from '../components/auth/AuthenticatedLoginChoice.astro';
 import LoginForm from '../components/auth/LoginForm.astro';
 import AuthLayout from '../layouts/AuthLayout.astro';
+import {
+	AUTHENTICATED_DASHBOARD_WORKSPACE_FALLBACK,
+	loadAuthenticatedDashboardContext,
+	type AuthenticatedDashboardContext,
+} from '../lib/authenticatedDashboard';
 import {
 	LOGIN_NAME_AUTH_ERROR_MESSAGE,
 	resolveLoginNameAuthIdentity,
@@ -9,7 +15,20 @@ import {
 	type LoginNameResolutionResult,
 } from '../lib/loginNameAuth';
 import { getSafeRedirectPath } from '../lib/redirect';
-import { createSupabaseAdminClient, createSupabaseServerClient } from '../lib/supabaseServer';
+import {
+	ACCESS_SESSION_COOKIE,
+	LOGIN_SWITCH_CSRF_COOKIE,
+	REFRESH_SESSION_COOKIE,
+	buildCleanLoginPath,
+	clearedAuthenticationCookieHeaders,
+	clearedSessionCookie,
+	createLoginSwitchCsrfToken,
+	isSameOriginPost,
+	isValidLoginSwitchCsrf,
+	loginSwitchCsrfCookie,
+	sessionCookie,
+} from '../lib/sessionSwitch';
+import { createSupabaseAdminClient, createSupabaseServerClient, getServerAccessToken } from '../lib/supabaseServer';
 
 type RuntimeEnv = Record<string, unknown>;
 type AuthSession = {
@@ -34,18 +53,26 @@ function safeLogMessage(error: unknown) {
 		.slice(0, 240);
 }
 
-function sessionCookie(name: string, value: string, maxAge: number) {
-	return `${name}=${encodeURIComponent(value)}; Path=/; SameSite=Lax; Max-Age=${maxAge}`;
-}
-
 function redirectWithSession(location: string, session: AuthSession) {
 	const headers = new Headers({
 		location,
 		...noStoreHeaders,
 	});
 	const maxAge = Number.isFinite(session.expires_in) ? Number(session.expires_in) : 3600;
-	headers.append('Set-Cookie', sessionCookie('wt-access-token', session.access_token, maxAge));
-	headers.append('Set-Cookie', sessionCookie('wt-refresh-token', session.refresh_token, maxAge));
+	headers.append('Set-Cookie', sessionCookie(ACCESS_SESSION_COOKIE, session.access_token, maxAge));
+	headers.append('Set-Cookie', sessionCookie(REFRESH_SESSION_COOKIE, session.refresh_token, maxAge));
+	headers.append('Set-Cookie', clearedSessionCookie(LOGIN_SWITCH_CSRF_COOKIE, '/login'));
+	return new Response(null, { status: 303, headers });
+}
+
+function redirectClearingSession(location: string) {
+	const headers = new Headers({
+		location,
+		...noStoreHeaders,
+	});
+	for (const cookie of clearedAuthenticationCookieHeaders()) {
+		headers.append('Set-Cookie', cookie);
+	}
 	return new Response(null, { status: 303, headers });
 }
 
@@ -72,43 +99,120 @@ async function recordLoginAudit(session: AuthSession) {
 }
 
 const redirectTo = getSafeRedirectPath(Astro.url.searchParams.get('redirectTo'));
+for (const [header, value] of Object.entries(noStoreHeaders)) {
+	Astro.response.headers.set(header, value);
+}
+
+const accessToken = getServerAccessToken(Astro.cookies);
+let existingSessionContext: AuthenticatedDashboardContext | null = null;
 let message = '';
+let switchMessage = '';
+let switchCsrfToken = '';
+
+if (accessToken) {
+	const sessionSupabase = createSupabaseServerClient(accessToken);
+	const context = await loadAuthenticatedDashboardContext(sessionSupabase, accessToken);
+	if (context.signedInAuthUserId) {
+		existingSessionContext = context;
+	} else {
+		console.info('stale_session_prevented', {
+			routeName: 'login',
+			hadExistingSession: true,
+			switchFlow: false,
+			sessionClearStage: 'server_cookie',
+			redirectOutcome: 'render_login',
+		});
+		Astro.cookies.delete(ACCESS_SESSION_COOKIE, { path: '/' });
+		Astro.cookies.delete(REFRESH_SESSION_COOKIE, { path: '/' });
+	}
+}
 
 if (Astro.request.method === 'POST') {
 	const formData = await Astro.request.formData();
+	const action = String(formData.get('action') ?? 'login');
 	const requestedRedirectTo = getSafeRedirectPath(String(formData.get('redirectTo') ?? redirectTo));
-	const loginName = String(formData.get('loginName') ?? '');
-	const password = String(formData.get('password') ?? '');
-
-	try {
-		const adminSupabase = createSupabaseAdminClient(env as RuntimeEnv);
-		const resolution = await resolveLoginNameAuthIdentity(adminSupabase, loginName);
-		if (resolution.status !== 'resolved') {
-			logLoginFailure('identity_resolution', resolution);
-			message = LOGIN_NAME_AUTH_ERROR_MESSAGE;
-		} else {
-			const authSupabase = createSupabaseServerClient();
-			const { data: authData, error } = await authSupabase.auth.signInWithPassword({
-				email: resolution.authEmail,
-				password,
+	if (action === 'switch-account') {
+		const csrfValid = isSameOriginPost(Astro.request, Astro.url)
+			&& isValidLoginSwitchCsrf(formData.get('switchCsrfToken'), Astro.cookies.get(LOGIN_SWITCH_CSRF_COOKIE)?.value);
+		if (!csrfValid) {
+			console.warn('account_switch_failed', {
+				routeName: 'login',
+				hadExistingSession: Boolean(existingSessionContext),
+				switchFlow: true,
+				sessionClearStage: 'csrf',
+				redirectOutcome: 'blocked',
+				safeErrorCode: 'csrf_invalid',
 			});
-			if (error || !authData.session) {
-				logLoginFailure('password_authentication', { status: 'password_authentication_failed' });
+			return new Response(null, { status: 403, headers: noStoreHeaders });
+		}
+
+		console.info('account_switch_completed', {
+			routeName: 'login',
+			hadExistingSession: Boolean(existingSessionContext),
+			switchFlow: true,
+			sessionClearStage: 'server_cookie',
+			redirectOutcome: 'clean_login',
+		});
+		return redirectClearingSession(buildCleanLoginPath(requestedRedirectTo, true));
+	}
+
+	if (existingSessionContext) {
+		console.warn('login_blocked_existing_session', {
+			routeName: 'login',
+			hadExistingSession: true,
+			switchFlow: false,
+			redirectOutcome: 'account_switch_required',
+		});
+		switchMessage = 'You are already signed in. Sign out before using another account.';
+	} else {
+		const loginName = String(formData.get('loginName') ?? '');
+		const password = String(formData.get('password') ?? '');
+
+		try {
+			const adminSupabase = createSupabaseAdminClient(env as RuntimeEnv);
+			const resolution = await resolveLoginNameAuthIdentity(adminSupabase, loginName);
+			if (resolution.status !== 'resolved') {
+				logLoginFailure('identity_resolution', resolution);
 				message = LOGIN_NAME_AUTH_ERROR_MESSAGE;
 			} else {
-				await recordLoginAudit(authData.session);
-				return redirectWithSession(requestedRedirectTo, authData.session);
+				const authSupabase = createSupabaseServerClient();
+				const { data: authData, error } = await authSupabase.auth.signInWithPassword({
+					email: resolution.authEmail,
+					password,
+				});
+				if (error || !authData.session) {
+					logLoginFailure('password_authentication', { status: 'password_authentication_failed' });
+					message = LOGIN_NAME_AUTH_ERROR_MESSAGE;
+				} else {
+					await recordLoginAudit(authData.session);
+					return redirectWithSession(requestedRedirectTo, authData.session);
+				}
 			}
+		} catch (error) {
+			console.error('login_name_authentication_unexpected_error', {
+				routeName: 'login',
+				message: safeLogMessage(error),
+			});
+			message = LOGIN_NAME_AUTH_ERROR_MESSAGE;
 		}
-	} catch (error) {
-		console.error('login_name_authentication_unexpected_error', {
-			routeName: 'login',
-			message: safeLogMessage(error),
-		});
-		message = LOGIN_NAME_AUTH_ERROR_MESSAGE;
 	}
+}
+
+if (existingSessionContext) {
+	switchCsrfToken = createLoginSwitchCsrfToken();
+	Astro.response.headers.append('Set-Cookie', loginSwitchCsrfCookie(switchCsrfToken));
 }
 ---
 <AuthLayout title="Login | WatchTower" description="Log in to WatchTower.">
-	<LoginForm message={message} redirectTo={redirectTo} />
+	{existingSessionContext ? (
+		<AuthenticatedLoginChoice
+			personName={existingSessionContext.personName}
+			workspaceName={existingSessionContext.workspaceName === AUTHENTICATED_DASHBOARD_WORKSPACE_FALLBACK ? '' : existingSessionContext.workspaceName}
+			redirectTo={redirectTo}
+			switchCsrfToken={switchCsrfToken}
+			message={switchMessage}
+		/>
+	) : (
+		<LoginForm message={message} redirectTo={redirectTo} />
+	)}
 </AuthLayout>
