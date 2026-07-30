@@ -40,6 +40,7 @@ const acceptanceLifecycleGuardMigrationUrl = new URL('../supabase/migrations/202
 const acceptanceAuditIdentityMigrationUrl = new URL('../supabase/migrations/20260723002100_workspace_invitation_acceptance_audit_identity.sql', import.meta.url);
 const acceptanceJoinedAtMigrationUrl = new URL('../supabase/migrations/20260723002200_workspace_invitation_acceptance_joined_at.sql', import.meta.url);
 const workspaceResolutionMigrationUrl = new URL('../supabase/migrations/20260723002300_workspace_invitation_workspace_resolution.sql', import.meta.url);
+const authRemapGuardMigrationUrl = new URL('../supabase/migrations/20260723002400_workspace_invitation_auth_remap_guard.sql', import.meta.url);
 const sendRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/invitations/send.ts', import.meta.url);
 const acceptPageUrl = new URL('../src/pages/invitations/accept.astro', import.meta.url);
 const setupRouteUrl = new URL('../src/pages/invitations/setup.ts', import.meta.url);
@@ -242,6 +243,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	const acceptanceAuditIdentityIndex = files.indexOf('20260723002100_workspace_invitation_acceptance_audit_identity.sql');
 	const acceptanceJoinedAtIndex = files.indexOf('20260723002200_workspace_invitation_acceptance_joined_at.sql');
 	const workspaceResolutionIndex = files.indexOf('20260723002300_workspace_invitation_workspace_resolution.sql');
+	const authRemapGuardIndex = files.indexOf('20260723002400_workspace_invitation_auth_remap_guard.sql');
 	const policySql = await readFile(internalPolicyMigrationUrl, 'utf8');
 	const seedBlock = policySql.match(/do \$\$[\s\S]*?end;\n\$\$;/)?.[0] ?? '';
 
@@ -258,6 +260,7 @@ test('Internal delivery policy migration introduces the locked policy and upgrad
 	assert.equal(acceptanceAuditIdentityIndex, acceptanceLifecycleGuardIndex + 1, 'acceptance audit identity migration should follow acceptance lifecycle guard migration');
 	assert.equal(acceptanceJoinedAtIndex, acceptanceAuditIdentityIndex + 1, 'acceptance joined-at migration should follow acceptance audit identity migration');
 	assert.equal(workspaceResolutionIndex, acceptanceJoinedAtIndex + 1, 'workspace resolution migration should follow acceptance joined-at migration');
+	assert.equal(authRemapGuardIndex, workspaceResolutionIndex + 1, 'Auth remap guard migration should follow workspace-resolution migration');
 	assert.match(policySql, /create table if not exists public\.workspace_invitation_delivery_policies/);
 	assert.match(policySql, /workspace_membership_invitations_current_auth_email_unique/);
 	assert.match(policySql, /drop trigger if exists set_workspace_invitation_delivery_policies_updated_at/);
@@ -657,6 +660,56 @@ test('Workspace invitation API-invisible Auth placeholder release migration is e
 	assert.doesNotMatch(sql, /grant execute on function public\.release_workspace_invitation_auth_placeholder\(uuid, uuid, uuid, uuid\) to authenticated/);
 	assert.doesNotMatch(sql, /delete from auth\.identities|insert into auth\.identities|update auth\.identities/i);
 	assert.doesNotMatch(sql, /v_old_auth_user\.email[^;]*metadata|auth_email[^;]*metadata|token_hash|p_token/i);
+});
+
+test('Workspace invitation Auth remap guard migration authorises only the controlled invited placeholder remap', async () => {
+	const sql = await readFile(authRemapGuardMigrationUrl, 'utf8');
+	const guardSql = sqlFunctionDefinition(sql, 'prevent_unsafe_workspace_membership_update');
+	const recordSql = sqlFunctionDefinition(sql, 'record_workspace_invitation_auth_identity_repair');
+
+	assert.match(sql, /create or replace function public\.prevent_unsafe_workspace_membership_update\(\)/);
+	assert.match(sql, /create or replace function public\.record_workspace_invitation_auth_identity_repair\(/);
+	assert.match(guardSql, /invitation_auth_identity_repair boolean := lifecycle_operation = 'workspace_invitation_auth_identity_repair'/);
+	assert.match(guardSql, /old\.organisation_id is distinct from new\.organisation_id[\s\S]*old\.user_id is distinct from new\.user_id[\s\S]*old\.created_at is distinct from new\.created_at[\s\S]*Workspace membership identity fields cannot be changed/);
+	assert.match(guardSql, /old\.auth_user_id is distinct from new\.auth_user_id[\s\S]*if invitation_auth_identity_repair then[\s\S]*coalesce\(auth\.role\(\), ''\) <> 'service_role'/);
+	assert.match(guardSql, /marker_new_auth_user_id := nullif\(current_setting\('watchtower\.membership_lifecycle_new_auth_user_id', true\), ''\)/);
+	assert.match(guardSql, /old\.id is distinct from marker_membership_id::uuid[\s\S]*old\.user_id is distinct from marker_profile_id::uuid[\s\S]*old\.auth_user_id is distinct from marker_auth_user_id::uuid[\s\S]*new\.auth_user_id is distinct from marker_new_auth_user_id::uuid/);
+	assert.match(guardSql, /marker_auth_user_id::uuid = marker_new_auth_user_id::uuid/);
+	assert.match(guardSql, /old\.status not in \('invited', 'invite_expired'\)[\s\S]*new\.status is distinct from old\.status[\s\S]*new\.role is distinct from old\.role/);
+	assert.match(guardSql, /new\.invited_by is distinct from old\.invited_by[\s\S]*new\.invited_at is distinct from old\.invited_at[\s\S]*new\.invitation_expires_at is distinct from old\.invitation_expires_at/);
+	assert.match(guardSql, /new\.accepted_at is distinct from old\.accepted_at[\s\S]*new\.joined_at is distinct from old\.joined_at[\s\S]*new\.suspended_at is distinct from old\.suspended_at/);
+	assert.match(guardSql, /new\.deactivated_at is distinct from old\.deactivated_at[\s\S]*new\.reactivated_at is distinct from old\.reactivated_at[\s\S]*new\.updated_by is distinct from old\.updated_by/);
+	assert.match(guardSql, /WT_INVITATION_AUTH_IDENTITY_REPAIR_SCOPE: Auth identity repair may only replace the Auth UUID on the exact invited membership/);
+	assert.match(guardSql, /return new;[\s\S]*raise exception 'Workspace membership identity fields cannot be changed\.'/);
+	assert.match(guardSql, /invitation_acceptance boolean := lifecycle_operation = 'workspace_invitation_acceptance'/);
+	assert.match(guardSql, /Use controlled workspace membership lifecycle functions for membership lifecycle changes/);
+
+	assert.match(recordSql, /coalesce\(auth\.role\(\), ''\) <> 'service_role'/);
+	assert.match(recordSql, /p_old_auth_user_id = p_new_auth_user_id[\s\S]*WT_INVITATION_AUTH_IDENTITY_REPAIR_SAME_AUTH/);
+	assert.match(recordSql, /from public\.workspace_membership_invitations invitation[\s\S]*where invitation\.id = p_invitation_id[\s\S]*and invitation\.is_current[\s\S]*for update/);
+	assert.match(recordSql, /from public\.organisation_members om[\s\S]*where om\.id = v_invitation\.membership_id[\s\S]*for update/);
+	assert.match(recordSql, /from public\.profiles profile[\s\S]*where profile\.id = v_invitation\.profile_id[\s\S]*for update/);
+	assert.match(recordSql, /v_invitation\.membership_id is distinct from v_membership\.id[\s\S]*v_invitation\.profile_id is distinct from v_profile\.id[\s\S]*v_membership\.user_id is distinct from v_profile\.id/);
+	assert.match(recordSql, /v_invitation\.auth_user_id = p_new_auth_user_id[\s\S]*v_profile\.auth_user_id = p_new_auth_user_id[\s\S]*v_membership\.auth_user_id = p_new_auth_user_id[\s\S]*select repair\.id into v_repair_id/);
+	assert.match(recordSql, /v_invitation\.auth_user_id is distinct from p_old_auth_user_id[\s\S]*WT_INVITATION_AUTH_IDENTITY_REPAIR_STALE/);
+	assert.match(recordSql, /v_profile\.auth_user_id is distinct from p_old_auth_user_id[\s\S]*v_membership\.auth_user_id is distinct from p_old_auth_user_id[\s\S]*WT_INVITATION_AUTH_IDENTITY_REPAIR_STALE_LINKAGE/);
+	assert.match(recordSql, /from auth\.users au[\s\S]*where au\.id = p_new_auth_user_id[\s\S]*from auth\.identities identity[\s\S]*identity\.user_id = au\.id[\s\S]*identity\.provider = 'email'/);
+	assert.match(recordSql, /v_membership\.status not in \('invited', 'invite_expired'\)[\s\S]*v_invitation\.status not in \('pending_delivery', 'sending', 'delivered', 'delivery_failed', 'opened'\)[\s\S]*v_invitation\.intended_role is distinct from v_membership\.role/);
+	assert.match(recordSql, /other_membership\.auth_user_id = p_new_auth_user_id[\s\S]*other_membership\.id <> v_membership\.id/);
+	assert.match(recordSql, /other_profile\.auth_user_id = p_new_auth_user_id[\s\S]*other_profile\.id <> v_profile\.id/);
+	assert.match(recordSql, /update public\.profiles profile[\s\S]*set auth_user_id = p_new_auth_user_id[\s\S]*where profile\.id = v_profile\.id[\s\S]*profile\.auth_user_id = p_old_auth_user_id/);
+	assert.match(recordSql, /perform set_config\('watchtower\.membership_lifecycle_operation', 'workspace_invitation_auth_identity_repair', true\)/);
+	assert.match(recordSql, /perform set_config\('watchtower\.membership_lifecycle_auth_user_id', p_old_auth_user_id::text, true\)/);
+	assert.match(recordSql, /perform set_config\('watchtower\.membership_lifecycle_new_auth_user_id', p_new_auth_user_id::text, true\)/);
+	assert.match(recordSql, /update public\.organisation_members om[\s\S]*set auth_user_id = p_new_auth_user_id,[\s\S]*updated_at = now\(\)[\s\S]*where om\.id = v_membership\.id[\s\S]*om\.auth_user_id = p_old_auth_user_id[\s\S]*om\.status in \('invited', 'invite_expired'\)[\s\S]*om\.role = v_invitation\.intended_role/);
+	assert.match(recordSql, /perform set_config\('watchtower\.membership_lifecycle_new_auth_user_id', '', true\)/);
+	assert.match(recordSql, /update public\.workspace_membership_invitations invitation[\s\S]*set auth_user_id = p_new_auth_user_id[\s\S]*invitation\.auth_user_id = p_old_auth_user_id[\s\S]*invitation\.status in \('pending_delivery', 'sending', 'delivered', 'delivery_failed', 'opened'\)/);
+	assert.match(recordSql, /insert into public\.workspace_invitation_auth_identity_repairs[\s\S]*old_auth_user_id,[\s\S]*new_auth_user_id,[\s\S]*metadata/);
+	assert.match(recordSql, /'operation', 'record_workspace_invitation_auth_identity_repair'[\s\S]*'source', 'workspace_invitation_auth_identity_repair'[\s\S]*'membership_activated', false/);
+	assert.match(recordSql, /return v_repair_id/);
+	assert.match(sql, /revoke all on function public\.record_workspace_invitation_auth_identity_repair\(uuid, uuid, uuid, text, text, text, uuid\) from authenticated/);
+	assert.match(sql, /grant execute on function public\.record_workspace_invitation_auth_identity_repair\(uuid, uuid, uuid, text, text, text, uuid\) to service_role/);
+	assert.doesNotMatch(recordSql, /status = 'active'|set role|set status|insert into auth\.users|insert into auth\.identities|update auth\.identities|delete from auth\.identities/i);
 });
 
 test('Workspace invitation Auth provisioning source and remediation are documented', async () => {
