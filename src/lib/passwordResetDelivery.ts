@@ -5,6 +5,7 @@ const PROVIDER_TIMEOUT_MS = 10_000;
 export const PASSWORD_RESET_PUBLIC_CONFIRMATION = 'If an eligible account matches that login name, password reset instructions have been sent.';
 
 export type PasswordResetDeliveryEnv = {
+	PUBLIC_SUPABASE_URL?: string;
 	WATCHTOWER_PASSWORD_RESET_DELIVERY_MODE?: string;
 	WATCHTOWER_EMAIL_PROVIDER?: string;
 	WATCHTOWER_RESEND_API_KEY?: string;
@@ -16,6 +17,17 @@ export type PasswordResetDeliveryEnv = {
 	WATCHTOWER_INVITATION_FROM_EMAIL?: string;
 	WATCHTOWER_INVITATION_FROM_NAME?: string;
 };
+
+export type SupabaseRecoveryActionLinkValidationCode =
+	| 'provider_link_missing'
+	| 'provider_host_invalid'
+	| 'provider_path_invalid'
+	| 'provider_response_invalid'
+	| 'redirect_invalid';
+
+export type SupabaseRecoveryActionLinkValidationResult =
+	| { status: 'valid'; actionLink: string }
+	| { status: 'invalid'; failureCode: SupabaseRecoveryActionLinkValidationCode };
 
 export type PasswordResetDeliveryResult = {
 	status: 'delivered' | 'delivery_failed';
@@ -116,6 +128,55 @@ export function buildPasswordResetCompletionUrl(env: PasswordResetDeliveryEnv = 
 	const siteOrigin = resolvePasswordResetSiteOrigin(env);
 	if (!siteOrigin) return null;
 	return new URL('/reset-password', siteOrigin).toString();
+}
+
+export function validateSupabaseRecoveryActionLink(
+	properties: Record<string, unknown> | null | undefined,
+	env: PasswordResetDeliveryEnv = import.meta.env ?? {},
+): SupabaseRecoveryActionLinkValidationResult {
+	const rawActionLink = properties?.action_link;
+	if (typeof rawActionLink !== 'string' || rawActionLink.trim().length < 1) {
+		return invalidRecoveryLink('provider_link_missing');
+	}
+
+	const supabaseOrigin = resolveTrustedSupabaseOrigin(env);
+	if (!supabaseOrigin) return invalidRecoveryLink('provider_host_invalid');
+
+	let actionUrl: URL;
+	try {
+		actionUrl = new URL(rawActionLink);
+	} catch {
+		return invalidRecoveryLink('provider_response_invalid');
+	}
+
+	if (
+		actionUrl.protocol !== 'https:'
+		|| actionUrl.origin !== supabaseOrigin
+		|| actionUrl.username
+		|| actionUrl.password
+	) {
+		return invalidRecoveryLink('provider_host_invalid');
+	}
+
+	if (normalisePathname(actionUrl.pathname) !== '/auth/v1/verify') {
+		return invalidRecoveryLink('provider_path_invalid');
+	}
+
+	const verificationType = actionUrl.searchParams.get('type') ?? stringProperty(properties, 'verification_type');
+	if (verificationType !== 'recovery') return invalidRecoveryLink('provider_response_invalid');
+
+	const tokenHash = actionUrl.searchParams.get('token_hash');
+	if (!tokenHash || !tokenHash.trim()) return invalidRecoveryLink('provider_response_invalid');
+
+	const responseTokenHash = stringProperty(properties, 'hashed_token');
+	if (responseTokenHash !== null && !responseTokenHash.trim()) return invalidRecoveryLink('provider_response_invalid');
+
+	const redirectTo = actionUrl.searchParams.get('redirect_to');
+	if (!redirectTo || !isApprovedPasswordResetRedirect(redirectTo, env)) {
+		return invalidRecoveryLink('redirect_invalid');
+	}
+
+	return { status: 'valid', actionLink: actionUrl.toString() };
 }
 
 export function renderPasswordResetEmail(actionLink: string) {
@@ -236,6 +297,49 @@ function safeProviderFailureMessage(status: number): string {
 	if (status === 429) return 'Password reset email provider rate limit was reached.';
 	if (status >= 400 && status < 500) return 'Password reset email provider rejected the message.';
 	return 'Password reset email provider did not accept the message.';
+}
+
+function invalidRecoveryLink(failureCode: SupabaseRecoveryActionLinkValidationCode): SupabaseRecoveryActionLinkValidationResult {
+	return { status: 'invalid', failureCode };
+}
+
+function resolveTrustedSupabaseOrigin(env: PasswordResetDeliveryEnv): string | null {
+	const configured = String(env.PUBLIC_SUPABASE_URL ?? '').trim();
+	if (!configured) return null;
+	try {
+		const url = new URL(configured);
+		if (url.protocol !== 'https:' || url.username || url.password) return null;
+		return url.origin;
+	} catch {
+		return null;
+	}
+}
+
+function isApprovedPasswordResetRedirect(rawRedirectTo: string, env: PasswordResetDeliveryEnv): boolean {
+	const expected = buildPasswordResetCompletionUrl(env);
+	if (!expected) return false;
+	try {
+		const redirectUrl = new URL(rawRedirectTo);
+		const expectedUrl = new URL(expected);
+		return redirectUrl.protocol === 'https:'
+			&& redirectUrl.origin === expectedUrl.origin
+			&& normalisePathname(redirectUrl.pathname) === normalisePathname(expectedUrl.pathname)
+			&& !redirectUrl.username
+			&& !redirectUrl.password
+			&& redirectUrl.search === ''
+			&& redirectUrl.hash === '';
+	} catch {
+		return false;
+	}
+}
+
+function normalisePathname(pathname: string): string {
+	return pathname.length > 1 ? pathname.replace(/\/+$/g, '') : pathname;
+}
+
+function stringProperty(properties: Record<string, unknown> | null | undefined, name: string): string | null {
+	const value = properties?.[name];
+	return typeof value === 'string' ? value : null;
 }
 
 async function safeJson(response: Response): Promise<Record<string, unknown> | null> {
