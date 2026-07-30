@@ -8,8 +8,35 @@
 	const publicAuthPaths = ['/login', '/register'];
 	const protectedPrefixes = ['/app'];
 	const path = window.location.pathname.replace(/\/$/, '') || '/';
+	const accountSwitchCompleted = path === '/login' && new URLSearchParams(window.location.search).get('accountSwitched') === '1';
 	const dashboardRefreshKey = `watchtower:dashboard-context-refresh:${window.location.pathname}${window.location.search}`;
 	const serverAuthenticated = Boolean(document.querySelector('[data-server-authenticated="true"]'));
+	const accountSwitchPrompt = Boolean(document.querySelector('[data-account-switch-prompt]'));
+
+	function clearSessionCookies() {
+		document.cookie = 'wt-access-token=; path=/; max-age=0; SameSite=Lax';
+		document.cookie = 'wt-refresh-token=; path=/; max-age=0; SameSite=Lax';
+		document.cookie = 'wt-login-switch-csrf=; path=/login; max-age=0; SameSite=Lax';
+	}
+
+	function clearWatchtowerSessionState() {
+		try {
+			for (let index = window.sessionStorage.length - 1; index >= 0; index -= 1) {
+				const key = window.sessionStorage.key(index);
+				if (key?.startsWith('watchtower:dashboard-context-refresh:')) {
+					window.sessionStorage.removeItem(key);
+				}
+			}
+		} catch {
+			// Ignore storage failures; the server session cookies are the authority.
+		}
+	}
+
+	function removeAccountSwitchMarker() {
+		const url = new URL(window.location.href);
+		url.searchParams.delete('accountSwitched');
+		window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+	}
 
 	function getDashboardRefreshAttempted() {
 		try {
@@ -40,6 +67,16 @@
 		const session = data.session;
 		const isProtected = protectedPrefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
 
+		if (accountSwitchCompleted) {
+			if (session) {
+				await supabase.auth.signOut();
+			}
+			clearSessionCookies();
+			clearWatchtowerSessionState();
+			removeAccountSwitchMarker();
+			return;
+		}
+
 		if (!session && isProtected && !serverAuthenticated) {
 			window.location.replace(`/login?redirectTo=${encodeURIComponent(window.location.pathname)}`);
 			return;
@@ -51,7 +88,7 @@
 			document.cookie = `wt-refresh-token=${session.refresh_token}; ${cookieOptions}`;
 		}
 
-		if (session && publicAuthPaths.includes(path)) {
+		if (session && publicAuthPaths.includes(path) && !accountSwitchPrompt) {
 			window.location.replace('/app');
 			return;
 		}
