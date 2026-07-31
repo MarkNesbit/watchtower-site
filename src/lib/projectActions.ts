@@ -519,6 +519,30 @@ export function isActionerCurrentlyAssignable(action: Pick<ProjectAction, 'actio
 	return action.actioner?.isAssignable === true;
 }
 
+export type ActionerEditSelection = {
+	membershipId: string | null;
+	error: string | null;
+};
+
+// Action storage remains profile-keyed until 001D, while assignment controls
+// intentionally submit workspace membership IDs. Translate at this boundary;
+// never let a failed translation masquerade as an explicit unassignment.
+export function resolveActionerEditSelection(
+	action: Pick<ProjectAction, 'actioner_id' | 'actioner'>,
+	eligibleActioners: Pick<ActionProfile, 'membershipId' | 'profileId'>[],
+): ActionerEditSelection {
+	if (!action.actioner_id) return { membershipId: null, error: null };
+
+	const currentProfileId = action.actioner?.profileId ?? action.actioner_id;
+	const matches = eligibleActioners.filter((person) => person.profileId === currentProfileId && person.membershipId);
+	if (matches.length === 1) return { membershipId: matches[0].membershipId ?? null, error: null };
+
+	return {
+		membershipId: null,
+		error: 'The current Actioner cannot be resolved to one active workspace membership. Assignment changes are unavailable until this identity is resolved.',
+	};
+}
+
 function uniqueValues<T>(values: Array<T | null | undefined>): T[] {
 	return [...new Set(values.filter((value): value is T => value !== null && value !== undefined))];
 }
@@ -1012,6 +1036,8 @@ async function loadActionProfiles(organisationId: string, profileIds: string[], 
 			if (!person) continue;
 			profilesById.set(requestedId, {
 				id: person.profileId,
+				profileId: person.profileId,
+				membershipId: person.membershipId,
 				display_name: person.displayName,
 				role: person.workspaceRole,
 				membershipStatus: person.membershipStatus,

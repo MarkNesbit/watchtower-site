@@ -24,6 +24,7 @@ import {
 	listProjectActionHistory,
 	reissueProjectAction,
 	returnProjectActionToActioner,
+	resolveActionerEditSelection,
 	setProjectActionApprover,
 	sourceLabelForAction,
 	takeOverProjectActionAcceptance,
@@ -126,6 +127,12 @@ try {
 				message = 'Action not found or you do not have access.';
 				Astro.response.status = 404;
 			} else {
+				try {
+					eligibleActioners = await listEligibleActioners(organisation.id, workspace.role, serverSupabase);
+				} catch {
+					eligibleActioners = [];
+				}
+
 				if (Astro.request.method === 'POST') {
 					if (!accessToken) return Astro.redirect(sessionRedirectPath);
 					const formData = await Astro.request.formData();
@@ -140,12 +147,17 @@ try {
 							await changeProjectActionDueDate(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, dueDate: String(formData.get('due_date') ?? '') || null });
 						} else if (intent === 'assign-actioner') {
 							const nextActioner = String(formData.get('actioner_id') ?? '');
+							const currentActioner = resolveActionerEditSelection(action, eligibleActioners);
+							if (currentActioner.error) throw new Error(currentActioner.error);
+							if ((nextActioner || null) === currentActioner.membershipId) return Astro.redirect(`${detailPath}?updated=1`);
 							await assignProjectAction(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, actionerId: nextActioner || null });
 						} else if (intent === 'set-approver') {
 							const nextApprover = String(formData.get('approver_id') ?? '');
 							await setProjectActionApprover(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, approverId: nextApprover || null });
 						} else if (intent === 'reissue') {
 							const nextActioner = String(formData.get('actioner_id') ?? '');
+							const currentActioner = resolveActionerEditSelection(action, eligibleActioners);
+							if (currentActioner.error) throw new Error(currentActioner.error);
 							await reissueProjectAction(serverSupabase, {
 								actionId: action.id,
 								expectedStatus,
@@ -173,11 +185,6 @@ try {
 				}
 
 				if (Astro.url.searchParams.get('updated') === '1') successMessage = 'Action updated.';
-				try {
-					eligibleActioners = await listEligibleActioners(organisation.id, workspace.role, serverSupabase);
-				} catch {
-					eligibleActioners = [];
-				}
 				history = await listProjectActionHistory(organisation.id, data.id, action.id, workspace.role, serverSupabase);
 			}
 		}
@@ -197,6 +204,7 @@ const canReissue = canManage && ['returned_to_raiser', 'rejected_by_actioner'].i
 const canAssign = canManage && action?.status !== 'submitted';
 const canCancel = canManage;
 const actionerWorkflowDeferred = action?.actioner_id === actorId && ['open', 'returned_to_actioner'].includes(action.status);
+const actionerEditSelection = action ? resolveActionerEditSelection(action, eligibleActioners) : { membershipId: null, error: null };
 const actionsBackHref = project ? buildProjectActionsPath(workspaceSlug ?? '', project.slug) : workspaceSlug && projectSlug ? buildProjectActionsPath(workspaceSlug, projectSlug) : '/app/projects';
 const sourceUrl = action && project ? sourceHref(action, project) : '';
 ---
@@ -309,11 +317,15 @@ const sourceUrl = action && project ? sourceHref(action, project) : '';
 										<input type="hidden" name="intent" value="assign-actioner" />
 										<input type="hidden" name="expected_status" value={action.status} />
 										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
-										<label><span>Assign or reassign</span><select name="actioner_id">
-											<option value="" selected={!action.actioner_id}>Unassigned</option>
-											{eligibleActioners.map((person) => <option value={person.id} selected={action.actioner_id === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
-										</select></label>
-										<button class="button button--secondary" type="submit">{action.actioner_id ? 'Save assignment' : 'Assign'}</button>
+										{actionerEditSelection.error ? (
+											<p class="action-detail-muted" role="alert">{actionerEditSelection.error}</p>
+										) : (
+											<label><span>Assign or reassign</span><select name="actioner_id">
+												<option value="" selected={actionerEditSelection.membershipId === null}>Unassigned</option>
+												{eligibleActioners.map((person) => <option value={person.id} selected={actionerEditSelection.membershipId === person.membershipId}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
+											</select></label>
+										)}
+										<button class="button button--secondary" type="submit" disabled={Boolean(actionerEditSelection.error)}>{action.actioner_id ? 'Save assignment' : 'Assign'}</button>
 									</form>
 								)}
 								{canAssign && (
@@ -335,11 +347,15 @@ const sourceUrl = action && project ? sourceHref(action, project) : '';
 										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
 										<label><span>Reissue brief</span><textarea name="brief" rows="3">{action.brief}</textarea></label>
 										<label><span>Due date</span><input type="date" name="due_date" value={action.due_date ?? ''} /></label>
-										<label><span>Actioner</span><select name="actioner_id">
-											<option value="" selected={!action.actioner_id}>Unassigned</option>
-											{eligibleActioners.map((person) => <option value={person.id} selected={action.actioner_id === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
-										</select></label>
-										<button class="button button--secondary" type="submit">Reissue Action</button>
+										{actionerEditSelection.error ? (
+											<p class="action-detail-muted" role="alert">{actionerEditSelection.error}</p>
+										) : (
+											<label><span>Actioner</span><select name="actioner_id">
+												<option value="" selected={actionerEditSelection.membershipId === null}>Unassigned</option>
+												{eligibleActioners.map((person) => <option value={person.id} selected={actionerEditSelection.membershipId === person.membershipId}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
+											</select></label>
+										)}
+										<button class="button button--secondary" type="submit" disabled={Boolean(actionerEditSelection.error)}>Reissue Action</button>
 									</form>
 								)}
 								{canReturnToActioner && (

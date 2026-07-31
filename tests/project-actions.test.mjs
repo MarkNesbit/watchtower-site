@@ -45,6 +45,7 @@ import {
 	paginateProjectActions,
 	reissueProjectAction,
 	rejectProjectAction,
+	resolveActionerEditSelection,
 	returnProjectActionToActioner,
 	returnProjectActionToRaiser,
 	saveProjectActionProgress,
@@ -542,6 +543,27 @@ const actionFixture = (overrides = {}) => ({
 	acceptance_owner: { id: overrides.acceptance_owner_id ?? 'raiser-1', display_name: overrides.acceptanceOwnerName ?? 'Mark Nesbit' },
 });
 
+test('Actioner edit selection translates stored Profile identity to the workspace Membership option without defaulting to unassigned', () => {
+	const eligible = [
+		{ membershipId: 'membership-ella', profileId: 'profile-ella' },
+		{ membershipId: 'membership-mark', profileId: 'profile-mark' },
+	];
+
+	assert.deepEqual(
+		resolveActionerEditSelection(actionFixture({ actioner_id: 'profile-ella', actioner: { id: 'profile-ella', profileId: 'profile-ella', membershipId: 'membership-ella' } }), eligible),
+		{ membershipId: 'membership-ella', error: null },
+	);
+	assert.deepEqual(
+		resolveActionerEditSelection(actionFixture({ actioner_id: 'equal-id', actioner: { id: 'equal-id', profileId: 'equal-id', membershipId: 'equal-id' } }), [{ membershipId: 'equal-id', profileId: 'equal-id' }]),
+		{ membershipId: 'equal-id', error: null },
+	);
+	assert.deepEqual(resolveActionerEditSelection(actionFixture({ actioner_id: null }), eligible), { membershipId: null, error: null });
+
+	const unresolved = resolveActionerEditSelection(actionFixture({ actioner_id: 'profile-inactive' }), eligible);
+	assert.equal(unresolved.membershipId, null);
+	assert.match(unresolved.error ?? '', /cannot be resolved to one active workspace membership/);
+});
+
 test('Project Actions route builders use workspace-safe project paths', () => {
 	assert.equal(buildProjectActionsPath('mark-workspace', 'hhh-website-build'), '/app/workspaces/mark-workspace/projects/hhh-website-build/actions');
 	assert.equal(buildProjectActionPath('mark-workspace', 'hhh-website-build', 'action/1'), '/app/workspaces/mark-workspace/projects/hhh-website-build/actions/action%2F1');
@@ -824,6 +846,9 @@ test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register s
 	assert.match(detail, /changeProjectActionDueDate/);
 	assert.match(detail, /No due date/);
 	assert.match(detail, /assignProjectAction/);
+	assert.match(detail, /resolveActionerEditSelection/);
+	assert.match(detail, /selected=\{actionerEditSelection\.membershipId === person\.membershipId\}/);
+	assert.match(detail, /actionerEditSelection\.error/);
 	assert.match(detail, /reissueProjectAction/);
 	assert.match(detail, /completeProjectAction/);
 	assert.match(detail, /returnProjectActionToActioner/);
