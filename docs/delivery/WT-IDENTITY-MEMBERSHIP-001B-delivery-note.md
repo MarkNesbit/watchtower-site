@@ -16,4 +16,6 @@ Risks and Actions are now explicitly assignable to any eligible workspace member
 
 ## Deferred identity repair
 
-This slice intentionally does not change write identifiers, Action RPC actor comparisons or `project_people.user_id` foreign-key semantics. The known split-ID Action actor/responsibility defect and Project People persistence defect remain follow-on work. No registration, invitation or workspace-bootstrap behaviour changed.
+The follow-up migration repairs the confirmed Project People persistence defect: `project_people.user_id` now references the profile/person UUID and responsibility replacement occurs in one controlled database transaction. The client reads the returned active row before reporting success, so a failed replacement retains the previous assignment rather than leaving the tile empty.
+
+Action RPC actor comparisons remain deferred. No registration, invitation or workspace-bootstrap behaviour changed.
