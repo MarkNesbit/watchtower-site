@@ -298,34 +298,30 @@ export async function saveProjectPersonForRole(
 	const { organisation, project } = await resolveEditableProject(workspaceSlug, projectSlug, client, accessToken);
 	if (selection) await assertActiveProjectPersonSelection(organisation.id, selection, client);
 
-	const { error: removeExistingError } = await client
+	const { data, error } = await client.rpc('replace_project_person_assignment', {
+		p_organisation_id: organisation.id,
+		p_project_id: project.id,
+		p_project_role: input.projectRole,
+		p_user_profile_id: selection?.source === 'user' ? selection.id : null,
+		p_demo_person_id: selection?.source === 'demo' ? selection.id : null,
+		p_responsibility: cleanOptionalText(input.responsibility),
+	});
+	if (error) throw error;
+	if (!selection) return null;
+
+	const assignment = Array.isArray(data) ? data[0] : data;
+	if (!assignment?.id) throw new Error('The project responsibility could not be confirmed after saving.');
+
+	const { data: persisted, error: persistedError } = await client
 		.from('project_people')
-		.update({ status: 'removed' })
+		.select('id, organisation_id, project_id, user_id, demo_person_id, project_role, responsibility, is_primary, status, created_by, updated_by, created_at, updated_at')
+		.eq('id', assignment.id)
 		.eq('organisation_id', organisation.id)
 		.eq('project_id', project.id)
 		.eq('project_role', input.projectRole)
-		.eq('status', 'active');
-
-	if (removeExistingError) throw removeExistingError;
-	if (!selection) return null;
-
-	const payload = {
-		organisation_id: organisation.id,
-		project_id: project.id,
-		user_id: selection.source === 'user' ? selection.id : null,
-		demo_person_id: selection.source === 'demo' ? selection.id : null,
-		project_role: input.projectRole,
-		responsibility: cleanOptionalText(input.responsibility),
-		is_primary: true,
-		status: 'active',
-	};
-
-	const { data, error } = await client
-		.from('project_people')
-		.insert(payload)
-		.select('id, organisation_id, project_id, user_id, demo_person_id, project_role, responsibility, is_primary, status, created_by, updated_by, created_at, updated_at')
-		.single();
-
-	if (error) throw error;
-	return data as ProjectPersonAssignment;
+		.eq('status', 'active')
+		.maybeSingle();
+	if (persistedError) throw persistedError;
+	if (!persisted) throw new Error('The project responsibility could not be confirmed after saving.');
+	return persisted as ProjectPersonAssignment;
 }

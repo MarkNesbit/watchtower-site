@@ -23,6 +23,7 @@ import {
 } from '../src/lib/projectDates.ts';
 
 const migrationUrl = new URL('../supabase/migrations/20260630000200_project_people_assignments.sql', import.meta.url);
+const projectPeopleIdentityRepairMigrationUrl = new URL('../supabase/migrations/20260731000700_project_people_profile_identity_atomic_replace.sql', import.meta.url);
 const projectInfoMigrationUrl = new URL('../supabase/migrations/20260630000300_project_information_fields.sql', import.meta.url);
 const projectDatesMigrationUrl = new URL('../supabase/migrations/20260701000100_project_dates_timeline_readiness.sql', import.meta.url);
 const projectDatesWarningDaysMigrationUrl = new URL('../supabase/migrations/20260702000200_allow_start_date_zero_warning_days.sql', import.meta.url);
@@ -576,9 +577,23 @@ test('Project people helper enforces central RBAC and scopes assignment writes t
 	assert.match(source, /\.from\('workspace_demo_people'\)[\s\S]*\.eq\('status', 'active'\)[\s\S]*\.eq\('is_demo_person', true\)/);
 	assert.match(source, /parseProjectPersonSelection\(input\.personSelection\)/);
 	assert.match(source, /assertActiveProjectPersonSelection\(organisation\.id, selection, client\)/);
-	assert.match(source, /\.from\('project_people'\)[\s\S]*\.update\(\{ status: 'removed' \}\)/);
+	assert.match(source, /\.rpc\('replace_project_person_assignment'/);
+	assert.match(source, /\.eq\('id', assignment\.id\)[\s\S]*\.eq\('status', 'active'\)[\s\S]*\.maybeSingle\(\)/);
 	assert.doesNotMatch(source, /organisation_members'\)\s*\.update|profiles'\)\s*\.update/);
 	assert.doesNotMatch(source, /\.delete\(\)/);
+});
+
+test('Project people identity repair stores profile IDs and makes replacements atomic', async () => {
+	const sql = await readFile(projectPeopleIdentityRepairMigrationUrl, 'utf8');
+	assert.match(sql, /drop constraint if exists project_people_user_id_fkey/);
+	assert.match(sql, /foreign key \(user_id\) references public\.profiles\(id\) on delete cascade not valid/);
+	assert.match(sql, /create or replace function public\.replace_project_person_assignment/);
+	assert.match(sql, /security definer/);
+	assert.match(sql, /membership\.user_id = p_user_profile_id[\s\S]*membership\.status = 'active'/);
+	assert.match(sql, /update public\.project_people assignment[\s\S]*set status = 'removed'[\s\S]*insert into public\.project_people/);
+	assert.match(sql, /returning \* into v_assignment/);
+	assert.match(sql, /grant execute on function public\.replace_project_person_assignment/);
+	assert.doesNotMatch(sql, /references auth\.users\(id\)/);
 });
 
 test('Project information helper validates controlled values dates permissions and scoped updates', async () => {
