@@ -89,10 +89,18 @@ const ROLE_LABELS: Record<WorkspaceRole, string> = {
 export const WORKSPACE_TEAM_MEMBER_SESSION_RPC = 'start_workspace_member_edit_session_api';
 export const WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC = 'release_workspace_member_edit_session_api';
 export const WORKSPACE_TEAM_MEMBER_ROLE_CHANGE_RPC = 'change_workspace_member_role_api';
+export const WORKSPACE_TEAM_MEMBER_DEACTIVATION_IMPACT_RPC = 'workspace_member_deactivation_impact_summary_api';
+export const WORKSPACE_TEAM_MEMBER_DEACTIVATE_RPC = 'deactivate_workspace_member_from_modal_api';
+export const WORKSPACE_TEAM_MEMBER_DEACTIVATION_REASON_MAX_LENGTH = 500;
 
 export type WorkspaceTeamRoleAuthority = {
 	canEdit: boolean;
 	options: WorkspaceRole[];
+	reason: string;
+};
+
+export type WorkspaceTeamDeactivationAuthority = {
+	canDeactivate: boolean;
 	reason: string;
 };
 
@@ -181,6 +189,55 @@ export function workspaceTeamRoleAuthority(actorRole: unknown, targetRole: unkno
 	};
 }
 
+export function workspaceTeamDeactivationAuthority(actorRole: unknown, targetRole: unknown, isSelf = false): WorkspaceTeamDeactivationAuthority {
+	if (!isWorkspaceRole(actorRole)) {
+		return {
+			canDeactivate: false,
+			reason: 'Only active Workspace Owners and Admins can deactivate workspace members.',
+		};
+	}
+	if (!isWorkspaceRole(targetRole)) {
+		return {
+			canDeactivate: false,
+			reason: 'This member role could not be confirmed.',
+		};
+	}
+	if (actorRole !== 'owner' && actorRole !== 'admin') {
+		return {
+			canDeactivate: false,
+			reason: 'Only active Workspace Owners and Admins can deactivate workspace members.',
+		};
+	}
+	if (isSelf) {
+		return {
+			canDeactivate: false,
+			reason: 'Users cannot deactivate their own workspace membership through this modal.',
+		};
+	}
+	if (actorRole === 'owner') {
+		return {
+			canDeactivate: true,
+			reason: 'Owners can deactivate another active workspace member after reviewing current responsibilities.',
+		};
+	}
+	if (targetRole === 'viewer' || targetRole === 'member') {
+		return {
+			canDeactivate: true,
+			reason: 'Admins can deactivate Viewers and Members after reviewing current responsibilities.',
+		};
+	}
+	if (targetRole === 'admin') {
+		return {
+			canDeactivate: false,
+			reason: 'Only a Workspace Owner may deactivate an Admin.',
+		};
+	}
+	return {
+		canDeactivate: false,
+		reason: 'Admins cannot deactivate an Owner.',
+	};
+}
+
 export function workspaceTeamRoleChangeErrorMessage(error: unknown): string {
 	const message = typeof (error as { message?: unknown })?.message === 'string'
 		? (error as { message: string }).message
@@ -195,6 +252,23 @@ export function workspaceTeamRoleChangeErrorMessage(error: unknown): string {
 	if (message.includes('WT_MEMBER_ROLE_ACTIVE_ONLY')) return 'Only active workspace members can be changed through this modal.';
 	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) return 'Only active Workspace Owners and Admins can manage workspace roles.';
 	return 'The role change could not be saved. No membership changes were applied.';
+}
+
+export function workspaceTeamDeactivationErrorMessage(error: unknown): string {
+	const message = typeof (error as { message?: unknown })?.message === 'string'
+		? (error as { message: string }).message
+		: '';
+	if (message.includes('WT_MEMBER_DEACTIVATION_STALE')) return 'This membership changed while the modal was open. Refresh the Team page and try again.';
+	if (message.includes('WT_MEMBER_DEACTIVATION_LOCKED')) return 'This member is currently being viewed by another Workspace administrator. Refresh when their edit session has ended.';
+	if (message.includes('WT_MEMBER_DEACTIVATION_SESSION')) return 'Your member edit session expired or could not be confirmed. Close and reopen the member modal.';
+	if (message.includes('WT_MEMBER_DEACTIVATION_SELF_DENIED')) return 'Users cannot deactivate their own workspace membership through this modal.';
+	if (message.includes('WT_MEMBER_DEACTIVATION_ADMIN_TARGET_DENIED')) return 'Admins can deactivate only Viewer and Member memberships.';
+	if (message.includes('WT_MEMBER_DEACTIVATION_REASON_REQUIRED')) return 'Enter a deactivation reason for the audit record.';
+	if (message.includes('WT_MEMBER_DEACTIVATION_REASON_TOO_LONG')) return `Deactivation reason must be ${WORKSPACE_TEAM_MEMBER_DEACTIVATION_REASON_MAX_LENGTH} characters or fewer.`;
+	if (message.includes('WT_MEMBER_DEACTIVATION_ACTIVE_ONLY')) return 'Only active workspace members can be deactivated through this modal.';
+	if (message.includes('WT_MEMBERSHIP_FINAL_OWNER')) return 'The final active Workspace Owner cannot be deactivated.';
+	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) return 'Only active Workspace Owners and Admins can deactivate workspace members.';
+	return 'The member could not be deactivated. No membership changes were applied.';
 }
 
 export function isMembershipStatus(status: unknown): status is MembershipStatus {

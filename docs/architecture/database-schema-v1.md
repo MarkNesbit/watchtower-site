@@ -342,7 +342,7 @@ Access is constrained by `has_real_active_organisation_role(organisation_id, arr
 
 Stores advisory, membership-scoped edit sessions for the individual active-member role modal.
 
-WT-WORKSPACE-TEAM-009A uses this table to let more than one Owner/Admin view the same active member while allowing only one active editor at a time. It is advisory and bounded by expiry; optimistic snapshot validation remains the protection against stale writes.
+WT-WORKSPACE-TEAM-009A uses this table to let more than one Owner/Admin view the same active member while allowing only one active editor at a time. WT-WORKSPACE-TEAM-009B reuses the same membership-scoped session for individual deactivation. It is advisory and bounded by expiry; optimistic snapshot validation remains the protection against stale writes.
 
 ## Key Fields
 
@@ -369,6 +369,8 @@ Append-only audit foundation for workspace membership lifecycle and profile iden
 Supported event types include `membership_invited`, `invitation_expired`, `membership_activated`, `membership_suspended`, `membership_deactivated`, `membership_reactivated`, `profile_identity_corrected`, `membership_import_proposed`, `membership_import_uploaded`, `membership_import_validation_failed`, `membership_import_validated`, `membership_import_stale_detected`, `membership_import_superseded_rejected`, `membership_import_applied`, `membership_import_failed`, `membership_export_generated`, `membership_export_read_only_generated`, `membership_export_taken_over`, `membership_export_superseded`, `workspace_membership_csv_checkout_released`, `membership_change_approved`, `membership_change_excluded`, `membership_deactivation_kept_active`, `membership_change_decision_revised`, `membership_change_blocked`, `membership_change_no_longer_required`, `membership_change_set_confirmed`, `membership_change_set_reconfirmed`, `workspace_membership_change_selection_confirmed`, `membership_addition_applied`, `profile_identity_correction_applied`, `membership_deactivation_applied`, `membership_reactivation_applied`, `membership_change_application_failed`, `membership_change_set_applied`, `membership_change_set_drift_detected` and `workspace_membership_role_changed`.
 
 WT-WORKSPACE-TEAM-009A role-change events use `workspace_membership_role_changed`, source `workspace_member_modal_role_management`, the affected membership id, the target Auth UUID where available, the actor Auth UUID, previous/new role values and a changed-at timestamp. They do not modify profile identity fields.
+
+WT-WORKSPACE-TEAM-009B modal deactivation events use `membership_deactivated`, source `workspace_member_modal_deactivation`, the affected membership id, the target profile/person id in the audit payload, the actor Auth UUID, previous/new membership lifecycle values, the deactivation reason and the recalculated informational responsibility counts available at save time. Project-role counts are recorded as unavailable while `WT-PROJECT-TEAM-DEFECT-001` remains open. The deactivation transaction updates only `organisation_members` lifecycle/update fields and does not mutate profile/Auth identity, historical responsibility references or project-member rows.
 
 Owner/Admin users can read audit events for their workspace. Normal authenticated users cannot update or delete audit events.
 
