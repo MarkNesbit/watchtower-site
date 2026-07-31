@@ -94,6 +94,8 @@ test('Workspace Team route renders roles states filters search and accessible re
 	assert.match(route, /active member\. Open member details/);
 	assert.match(route, /workspace-team-person-pill--invited/);
 	assert.match(route, /Member details are not available until the invitation is accepted/);
+	assert.match(route, /workspace-team-person-pill--deactivated/);
+	assert.match(route, /Reinstatement is not available in this view yet/);
 	assert.match(route, /aria-label=\{\`\$\{member\.displayStatus\}\. \$\{member\.statusDescription\}\`\}/);
 	assert.match(route, /\{formatDate\(member\.lifecycleDateValue\)\}/);
 	assert.doesNotMatch(route, /formatDate\(member\.invitation_expires_at \?\? member\.lifecycleDateValue\)/);
@@ -143,7 +145,7 @@ test('Workspace Team helper resolves person names without inventing identity', (
 	assert.equal(workspaceTeamPersonName({ first_name: '', last_name: '', display_name: 'Delivery Lead', login_name: 'lead1', membership_status: 'active' }), 'Delivery Lead');
 	assert.equal(workspaceTeamPersonName({ first_name: null, last_name: null, display_name: null, login_name: 'viewer-01', membership_status: 'active' }), 'viewer-01');
 	assert.equal(workspaceTeamPersonName({ first_name: null, last_name: null, display_name: null, login_name: null, membership_status: 'active' }), 'Workspace user');
-	assert.equal(workspaceTeamPersonName({ first_name: 'Jane', last_name: 'Smith', display_name: null, login_name: 'jsmith', membership_status: 'deactivated' }), 'Jane Smith [deactivated]');
+	assert.equal(workspaceTeamPersonName({ first_name: 'Jane', last_name: 'Smith', display_name: null, login_name: 'jsmith', membership_status: 'deactivated' }), 'Jane Smith');
 });
 
 test('Workspace Team login display uses backfilled login names before Not set fallback', () => {

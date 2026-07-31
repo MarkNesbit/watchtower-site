@@ -1209,8 +1209,13 @@ const invitationOperationKey = crypto.randomUUID();
 														<span>{member.personName}</span>
 														<small>{member.displayStatus}</small>
 													</span>
+												) : member.membership_status === 'deactivated' ? (
+													<span class="workspace-team-person-pill workspace-team-person-pill--deactivated" aria-label={`${member.personName}, deactivated member. Reinstatement is not available in this view yet.`}>
+														<span>{member.personName}</span>
+														<small>Deactivated</small>
+													</span>
 												) : (
-													<strong class={member.membership_status === 'deactivated' ? 'workspace-team-person workspace-team-person--deactivated' : 'workspace-team-person'}>
+													<strong class="workspace-team-person">
 														{member.personName}
 													</strong>
 												)}
@@ -2945,9 +2950,10 @@ const invitationOperationKey = crypto.randomUUID();
 		color: #ffd28a;
 	}
 
-	.workspace-team-person--deactivated {
-		color: var(--muted-strong);
-		font-style: italic;
+	.workspace-team-person-pill--deactivated {
+		border: 1px solid rgba(148, 163, 184, 0.42);
+		background: rgba(148, 163, 184, 0.13);
+		color: #d5dde8;
 	}
 
 	.workspace-team-you,
