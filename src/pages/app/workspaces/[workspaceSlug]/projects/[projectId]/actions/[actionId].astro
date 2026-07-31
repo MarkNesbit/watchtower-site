@@ -5,6 +5,7 @@ import ProjectContentPanel from '../../../../../../../components/app/ProjectCont
 import ProjectControlPanel from '../../../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../../../components/app/ProjectPageHero.astro';
 import { can } from '../../../../../../../lib/permissions';
+import { resolveActionIdentity } from '../../../../../../../lib/actionIdentity';
 import {
 	ACTION_DISPLAY_LABELS,
 	ACTION_SOURCE_DISPLAY_LABELS,
@@ -98,6 +99,12 @@ try {
 	} else {
 		workspaceName = organisation.name;
 		workspaceRole = workspace.role;
+		try {
+			// Legacy Action rows are profile-keyed; resolve Auth to profile before read-only ownership checks.
+			actorId = (await resolveActionIdentity(serverSupabase, organisation.id)).profileId;
+		} catch {
+			actorId = '';
+		}
 		const { data, error } = await serverSupabase
 			.from('projects')
 			.select('id, name, project_ref, slug')

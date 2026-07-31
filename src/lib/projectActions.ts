@@ -1,5 +1,6 @@
 import { assertCan, can, isWorkspaceRole, type WorkspaceRole } from './permissions.ts';
 import { listWorkspacePeople, workspacePeopleByIdentity } from './workspacePeople.ts';
+import type { ActionIdentity } from './actionIdentity.ts';
 
 export const ACTION_STATUSES = [
 	'open',
@@ -566,6 +567,10 @@ export function filterProjectActionsByScope(actions: ProjectAction[], scope: Act
 	const selectedScope = normaliseActionRegisterScope(scope, defaultActionRegisterScope(actions, actorId));
 	if (selectedScope !== 'my') return actions;
 	return actorId ? actions.filter((action) => action.actioner_id === actorId) : [];
+}
+
+export function filterProjectActionsForIdentity(actions: ProjectAction[], scope: ActionRegisterScope | string | null | undefined, identity: ActionIdentity | null | undefined): ProjectAction[] {
+	return filterProjectActionsByScope(actions, scope, identity?.lifecycleEligible ? identity.profileId : null);
 }
 
 export function normaliseActionTimingFilter(value: unknown): ActionTimingFilter {
