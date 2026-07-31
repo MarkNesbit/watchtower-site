@@ -544,10 +544,11 @@ test('Current workspace lookup prefers accepted invitation membership over perso
 				resolvedProfileId: rubyProfileId,
 				resolvedMembershipId: 'cd58905f-958d-46f8-8ea8-dc45594ba9be',
 				resolvedWorkspaceId: 'mark-workspace',
-				activeMembershipCount: 2,
+				activeMembershipCount: 1,
 				resolutionPath: 'accepted_invitation_membership',
 			},
 		});
+		assert.ok(logs.some((log) => log.details?.resolutionPath === 'suppressed_personal_workspace_membership'));
 		assert.equal(JSON.stringify(logs).includes('@'), false);
 	} finally {
 		console.info = originalInfo;
