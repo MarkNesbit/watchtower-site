@@ -1592,6 +1592,12 @@ const invitationOperationKey = crypto.randomUUID();
 		save.textContent = 'Save';
 	}
 
+	function refreshMemberDeactivationReasonState(dialog) {
+		setMemberError(dialog, '');
+		updateMemberSaveState(dialog);
+		window.setTimeout(() => updateMemberSaveState(dialog), 0);
+	}
+
 	async function releaseMemberSession(dialog) {
 		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
 		const sessionId = form instanceof HTMLFormElement ? form.dataset.memberSessionId || '' : '';
@@ -1820,12 +1826,19 @@ const invitationOperationKey = crypto.randomUUID();
 		dialog.querySelectorAll('[data-member-deactivation-back]').forEach((button) => {
 			button.addEventListener('click', () => exitMemberDeactivationMode(dialog));
 		});
+		const onReasonStateChange = (event) => {
+			const target = event.target;
+			if (!(target instanceof HTMLTextAreaElement) || !target.matches('[data-member-deactivation-reason]')) return;
+			refreshMemberDeactivationReasonState(dialog);
+		};
+		dialog.addEventListener('input', onReasonStateChange);
+		dialog.addEventListener('change', onReasonStateChange);
+		dialog.addEventListener('keyup', onReasonStateChange);
+		dialog.addEventListener('paste', onReasonStateChange);
 		const reason = dialog.querySelector('[data-member-deactivation-reason]');
 		if (reason instanceof HTMLTextAreaElement) {
-			reason.addEventListener('input', () => {
-				setMemberError(dialog, '');
-				updateMemberSaveState(dialog);
-			});
+			reason.addEventListener('input', () => refreshMemberDeactivationReasonState(dialog));
+			reason.addEventListener('change', () => refreshMemberDeactivationReasonState(dialog));
 		}
 		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
 		if (form instanceof HTMLFormElement) {
