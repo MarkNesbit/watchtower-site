@@ -61,13 +61,12 @@ function errorDetails(error: unknown) {
 	};
 }
 
-export const POST: APIRoute = async ({ cookies, locals, params, request }) => {
+export const POST: APIRoute = async ({ cookies, params, request }) => {
 	const accessToken = getServerAccessToken(cookies);
 	if (!accessToken) return json({ success: false, message: 'Sign in before opening member details.' }, 401);
 
 	const workspaceSlug = params.workspaceSlug ?? '';
-	const runtimeEnv = (locals as { runtime?: { env?: Record<string, unknown> } }).runtime?.env;
-	const serverSupabase = createSupabaseServerClient(accessToken, runtimeEnv);
+	const serverSupabase = createSupabaseServerClient(accessToken);
 	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation || !isWorkspaceRole(workspace.role)) {

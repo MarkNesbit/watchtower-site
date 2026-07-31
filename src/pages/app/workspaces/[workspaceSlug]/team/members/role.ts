@@ -47,7 +47,7 @@ function roleErrorCode(error: unknown) {
 	return 'failed';
 }
 
-export const POST: APIRoute = async ({ cookies, locals, params, request }) => {
+export const POST: APIRoute = async ({ cookies, params, request }) => {
 	const jsonResponse = wantsJson(request);
 	const workspaceSlug = params.workspaceSlug ?? '';
 	const accessToken = getServerAccessToken(cookies);
@@ -57,8 +57,7 @@ export const POST: APIRoute = async ({ cookies, locals, params, request }) => {
 			: redirect(workspaceSlug, 'error', 'signin');
 	}
 
-	const runtimeEnv = (locals as { runtime?: { env?: Record<string, unknown> } }).runtime?.env;
-	const serverSupabase = createSupabaseServerClient(accessToken, runtimeEnv);
+	const serverSupabase = createSupabaseServerClient(accessToken);
 	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug, accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	if (!workspace || !organisation || !isWorkspaceRole(workspace.role)) {
