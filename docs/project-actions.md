@@ -332,3 +332,5 @@ WT-ACTION-IDENTITY-001C3 makes Actioner progress, direct completion and submissi
 WT-ACTION-IDENTITY-001C4 makes current-Approver approval, return, rejection, replacement and withdrawal split-ID safe. Administrative lifecycle operations and takeover remain C5 scope.
 
 WT-ACTION-IDENTITY-001C5 converts cancellation, formal changes, reissue and governance takeover to the same identity contract. Combined release validation remains required before deployment.
+
+Where a legacy equal-ID Profile coexists with an explicit invitation-linked Profile for the same Auth identity in another workspace history, Action identity resolution uses the unique explicit Auth linkage. The legacy equal-ID fallback applies only when no explicit link exists; it is not a competing candidate.

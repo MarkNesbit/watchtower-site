@@ -85,6 +85,8 @@ export type ProjectActionHistory = {
 	action_id: string;
 	event_type: ActionHistoryEventType | string;
 	actor_user_id: string | null;
+	actor_auth_user_id: string | null;
+	actor_membership_id: string | null;
 	from_status: ActionStatus | string | null;
 	to_status: ActionStatus | string | null;
 	reason: string | null;
@@ -380,6 +382,8 @@ const ACTION_HISTORY_SELECT = [
 	'action_id',
 	'event_type',
 	'actor_user_id',
+	'actor_auth_user_id',
+	'actor_membership_id',
 	'from_status',
 	'to_status',
 	'reason',
@@ -513,6 +517,30 @@ export function actionProfileName(profile: ActionProfile | null | undefined, fal
 export function isActionerCurrentlyAssignable(action: Pick<ProjectAction, 'actioner_id' | 'actioner'>): boolean {
 	if (!action.actioner_id) return false;
 	return action.actioner?.isAssignable === true;
+}
+
+export type ActionerEditSelection = {
+	membershipId: string | null;
+	error: string | null;
+};
+
+// Action storage remains profile-keyed until 001D, while assignment controls
+// intentionally submit workspace membership IDs. Translate at this boundary;
+// never let a failed translation masquerade as an explicit unassignment.
+export function resolveActionerEditSelection(
+	action: Pick<ProjectAction, 'actioner_id' | 'actioner'>,
+	eligibleActioners: Pick<ActionProfile, 'membershipId' | 'profileId'>[],
+): ActionerEditSelection {
+	if (!action.actioner_id) return { membershipId: null, error: null };
+
+	const currentProfileId = action.actioner?.profileId ?? action.actioner_id;
+	const matches = eligibleActioners.filter((person) => person.profileId === currentProfileId && person.membershipId);
+	if (matches.length === 1) return { membershipId: matches[0].membershipId ?? null, error: null };
+
+	return {
+		membershipId: null,
+		error: 'The current Actioner cannot be resolved to one active workspace membership. Assignment changes are unavailable until this identity is resolved.',
+	};
 }
 
 function uniqueValues<T>(values: Array<T | null | undefined>): T[] {
@@ -1008,6 +1036,8 @@ async function loadActionProfiles(organisationId: string, profileIds: string[], 
 			if (!person) continue;
 			profilesById.set(requestedId, {
 				id: person.profileId,
+				profileId: person.profileId,
+				membershipId: person.membershipId,
 				display_name: person.displayName,
 				role: person.workspaceRole,
 				membershipStatus: person.membershipStatus,
