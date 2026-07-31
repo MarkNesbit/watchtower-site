@@ -93,8 +93,9 @@ test('Workspace Team member modal page exposes accessible modal fields controls 
 	assert.match(page, /data-member-role-select/);
 	assert.match(page, /data-member-save/);
 	assert.match(page, /memberDialogDirty/);
+	assert.match(page, /memberRoleChanged/);
 	assert.match(page, /resetMemberRoleSelection/);
-	assert.match(page, /normalizeMemberRole\(select\.value\) !== normalizeMemberRole\(form\.dataset\.memberInitialRole\)/);
+	assert.match(page, /selectedRole !== initialRole/);
 	assert.match(page, /select\.addEventListener\('input', onRoleChange\)/);
 	assert.match(page, /select\.addEventListener\('change', onRoleChange\)/);
 	assert.match(page, /Discard the unsaved role change/);
@@ -121,7 +122,7 @@ test('Workspace Team member modal save state follows role changes and edit avail
 	const acquireFunction = page.match(/async function acquireMemberSession\(dialog\) \{[\s\S]*?function closeMemberDialog/)?.[0] ?? '';
 	const submitHandler = page.match(/form\.addEventListener\('submit', async \(event\) => \{[\s\S]*?window\.location\.reload\(\)/)?.[0] ?? '';
 
-	assert.match(updateFunction, /const hasChanged = select instanceof HTMLSelectElement[\s\S]*normalizeMemberRole\(select\.value\) !== normalizeMemberRole\(form\.dataset\.memberInitialRole\)/);
+	assert.match(updateFunction, /const hasChanged = memberRoleChanged\(dialog\)/);
 	assert.match(updateFunction, /const hasSession = Boolean\(form\.dataset\.memberSessionId\)/);
 	assert.match(updateFunction, /dialog\.dataset\.memberEditState === 'editable'/);
 	assert.match(updateFunction, /save\.disabled = !canEdit \|\| !hasChanged \|\| !hasSession/);

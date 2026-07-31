@@ -83,6 +83,8 @@ test('Workspace Team deactivation save state requires editability impact and rea
 	const enterFunction = page.match(/async function enterMemberDeactivationMode\(dialog\) \{[\s\S]*?\n\t\}/)?.[0] ?? '';
 	const exitFunction = page.match(/function exitMemberDeactivationMode\(dialog, options = \{\}\) \{[\s\S]*?\n\t\}/)?.[0] ?? '';
 
+	assert.match(page, /function memberRoleChanged\(dialog\)/);
+	assert.match(page, /Boolean\(selectedRole && initialRole && selectedRole !== initialRole\)/);
 	assert.match(updateFunction, /isMemberDeactivationMode\(dialog\)/);
 	assert.match(updateFunction, /dialog\.dataset\.memberCanDeactivate === 'true'/);
 	assert.match(updateFunction, /dialog\.dataset\.memberEditState === 'editable'/);
@@ -92,6 +94,7 @@ test('Workspace Team deactivation save state requires editability impact and rea
 	assert.match(updateFunction, /save\.textContent = 'Deactivate user'/);
 	assert.match(page, /const deactivateButton = dialog\.querySelector\('\[data-member-deactivation-start\]'\)/);
 	assert.match(page, /deactivateButton\.disabled = state !== 'editable' \|\| dialog\.dataset\.memberCanDeactivate !== 'true'/);
+	assert.match(enterFunction, /if \(memberRoleChanged\(dialog\)\)/);
 	assert.match(enterFunction, /Save or discard the role change before starting deactivation/);
 	assert.match(enterFunction, /await loadMemberImpactSummary\(dialog\)/);
 	assert.match(exitFunction, /options\.focus !== false/);
