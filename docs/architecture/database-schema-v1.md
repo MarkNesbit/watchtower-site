@@ -46,6 +46,12 @@ Those will be defined in later schema documents.
 
 # Core Principles
 
+## Identity contract amendment (WT-IDENTITY-MEMBERSHIP-001B)
+
+The initial equal-ID profile/Auth model has an explicit compatibility exception: `auth.users.id` is authentication identity, `profiles.id` is global person identity, and `organisation_members.id` is workspace-membership identity. `profiles.auth_user_id` and `organisation_members.auth_user_id` link an account where available; they may differ from the profile UUID for accepted invitations.
+
+`workspace_member_directory` is the migration-controlled, safe workspace-person projection. It joins a membership to its profile and exposes membership/profile/Auth identifiers, role, lifecycle, assignment eligibility and a resolved non-email name. Its active-caller workspace predicate is the access boundary; it does not widen direct `profiles` policies. New responsibility selectors must use only `assignment_eligible = true` (active accepted membership). Historical records may resolve inactive members through the same scoped view.
+
 ## Supabase Auth owns authentication
 
 The `auth.users` table is owned and managed by Supabase.

@@ -1,6 +1,7 @@
 import { assertCan, type WorkspaceRole } from './permissions.ts';
 import { createProjectNarrativeEntry } from './projectNarrative.ts';
 import { getWorkspaceBySlug } from './projects.ts';
+import { listWorkspacePeople } from './workspacePeople.ts';
 
 export const RISK_STATUSES = ['draft', 'open', 'monitoring', 'mitigating', 'escalated', 'materialised', 'closed'] as const;
 export type RiskStatus = (typeof RISK_STATUSES)[number];
@@ -372,15 +373,14 @@ async function enrichRiskProfiles(risks: ProjectRisk[], client): Promise<Project
 
 	if (profileIds.length > 0) {
 		try {
-			const { data: profiles } = await client
-				.from('profiles')
-				.select('id, display_name, email')
-				.in('id', profileIds);
-			for (const profile of profiles ?? []) {
-				profileById.set(profile.id, profile);
+			const organisationIds = uniqueValues(risks.map((risk) => risk.organisation_id));
+			const peopleByWorkspace = await Promise.all(organisationIds.map((organisationId) => listWorkspacePeople(organisationId, client)));
+			for (const person of peopleByWorkspace.flat()) {
+				if (!profileIds.includes(person.profileId)) continue;
+				profileById.set(person.profileId, { id: person.profileId, display_name: person.displayName });
 			}
 		} catch {
-			// Profile names are optional enrichment; the risk register must still render.
+			// Membership-person labels are optional enrichment; the risk register must still render.
 		}
 	}
 
@@ -401,15 +401,14 @@ async function enrichRiskCommentProfiles(comments: ProjectRiskComment[], client)
 
 	if (profileIds.length > 0) {
 		try {
-			const { data: profiles } = await client
-				.from('profiles')
-				.select('id, display_name, email')
-				.in('id', profileIds);
-			for (const profile of profiles ?? []) {
-				profileById.set(profile.id, profile);
+			const organisationIds = uniqueValues(comments.map((comment) => comment.organisation_id));
+			const peopleByWorkspace = await Promise.all(organisationIds.map((organisationId) => listWorkspacePeople(organisationId, client)));
+			for (const person of peopleByWorkspace.flat()) {
+				if (!profileIds.includes(person.profileId)) continue;
+				profileById.set(person.profileId, { id: person.profileId, display_name: person.displayName });
 			}
 		} catch {
-			// Comment author labels are optional enrichment; comments should still render.
+			// Membership-person labels are optional enrichment; comments should still render.
 		}
 	}
 
@@ -1757,41 +1756,14 @@ export async function listRiskOwnerOptions(
 ): Promise<RiskOwnerOption[]> {
 	assertCan(workspaceRole, 'risk.view', 'Your workspace role does not permit Risk Management access.');
 
-	const { data: memberships, error: membershipError } = await client
-		.from('organisation_members')
-		.select('user_id, role')
-		.eq('organisation_id', organisationId)
-		.eq('status', 'active')
-		.order('joined_at', { ascending: true, nullsFirst: false })
-		.order('created_at', { ascending: true });
-
-	if (membershipError) throw membershipError;
-
-	const memberRows = memberships ?? [];
-	const memberIds = uniqueValues(memberRows.map((membership) => membership.user_id));
-	const profilesById = new Map<string, RiskProfile>();
-
-	if (memberIds.length > 0) {
-		try {
-			const { data: profiles } = await client
-				.from('profiles')
-				.select('id, display_name, email')
-				.in('id', memberIds);
-			for (const profile of profiles ?? []) {
-				profilesById.set(profile.id, profile);
-			}
-		} catch {
-			// Member IDs are enough for safe assignment; profile labels are best-effort enrichment.
-		}
-	}
+	const memberRows = await listWorkspacePeople(organisationId, client, { eligibleOnly: true });
 
 	return memberRows.map((membership) => {
-		const profile = profilesById.get(membership.user_id);
 		return {
-			id: membership.user_id,
-			display_name: profile?.display_name ?? null,
-			email: profile?.email ?? null,
-			role: membership.role,
+			id: membership.profileId,
+			display_name: membership.displayName,
+			email: null,
+			role: membership.workspaceRole,
 		};
 	});
 }

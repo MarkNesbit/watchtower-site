@@ -1,5 +1,6 @@
 import { assertCan, type WorkspaceRole } from './permissions.ts';
 import { getWorkspaceBySlug } from './projects.ts';
+import { listWorkspacePeople } from './workspacePeople.ts';
 
 export const PROJECT_PEOPLE_ROLES = [
 	'sponsor',
@@ -86,7 +87,6 @@ export function projectPersonProfileName(profile: ProjectPersonProfile | null | 
 	return fullName
 		|| cleanProfileText(profile.display_name)
 		|| cleanProfileText(profile.login_name)
-		|| cleanProfileText(profile.email)
 		|| fallback;
 }
 
@@ -121,17 +121,15 @@ async function enrichAssignments(assignments: ProjectPersonAssignment[], client)
 
 	if (userIds.length > 0) {
 		try {
-			const { data: profiles } = await client
-				.from('workspace_member_directory')
-				.select('profile_id, display_name, first_name, last_name, login_name')
-				.in('profile_id', userIds);
-			for (const profile of profiles ?? []) {
-				profilesById.set(profile.profile_id, {
-					id: profile.profile_id,
-					display_name: profile.display_name,
-					first_name: profile.first_name,
-					last_name: profile.last_name,
-					login_name: profile.login_name,
+			const people = await listWorkspacePeople(assignments[0].organisation_id, client);
+			for (const person of people) {
+				if (!userIds.includes(person.profileId)) continue;
+				profilesById.set(person.profileId, {
+					id: person.profileId,
+					display_name: person.displayName,
+					first_name: person.firstName,
+					last_name: person.lastName,
+					login_name: person.loginName,
 					email: null,
 				});
 			}
@@ -188,17 +186,7 @@ export async function listProjectPersonOptions(
 ): Promise<ProjectPersonOption[]> {
 	assertCan(workspaceRole, 'project.editDetails', 'Your workspace role does not permit project people assignment.');
 
-	const { data: memberships, error: membershipError } = await client
-		.from('workspace_member_directory')
-		.select('organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status')
-		.eq('organisation_id', organisationId)
-		.eq('membership_status', 'active')
-		.order('joined_at', { ascending: true, nullsFirst: false })
-		.order('organisation_membership_id', { ascending: true });
-
-	if (membershipError) throw membershipError;
-
-	const memberRows = memberships ?? [];
+	const memberRows = await listWorkspacePeople(organisationId, client, { eligibleOnly: true });
 
 	let demoOptions: ProjectPersonOption[] = [];
 	try {
@@ -224,20 +212,20 @@ export async function listProjectPersonOptions(
 
 	const memberOptions = memberRows.map((membership) => {
 		const profile = {
-			id: membership.profile_id,
-			display_name: membership.display_name,
-			first_name: membership.first_name,
-			last_name: membership.last_name,
-			login_name: membership.login_name,
+			id: membership.profileId,
+			display_name: membership.displayName,
+			first_name: membership.firstName,
+			last_name: membership.lastName,
+			login_name: membership.loginName,
 			email: null,
 		};
 		return {
 			source: 'user' as const,
-			id: membership.profile_id,
+			id: membership.profileId,
 			displayName: projectPersonProfileName(profile),
 			email: null,
-			membershipId: membership.organisation_membership_id ?? null,
-			workspaceRole: membership.role,
+			membershipId: membership.membershipId,
+			workspaceRole: membership.workspaceRole,
 			projectRole: null,
 			isDemoPerson: false,
 		};
