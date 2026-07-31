@@ -1505,14 +1505,19 @@ const invitationOperationKey = crypto.randomUUID();
 		return reason instanceof HTMLTextAreaElement ? reason.value.trim() : '';
 	}
 
-	function memberDialogDirty(dialog) {
+	function memberRoleChanged(dialog) {
 		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
 		const select = dialog.querySelector('[data-member-role-select]');
+		if (!(form instanceof HTMLFormElement) || !(select instanceof HTMLSelectElement)) return false;
+		const selectedRole = normalizeMemberRole(select.value);
+		const initialRole = normalizeMemberRole(form.dataset.memberInitialRole);
+		return Boolean(selectedRole && initialRole && selectedRole !== initialRole);
+	}
+
+	function memberDialogDirty(dialog) {
 		return isMemberDeactivationMode(dialog)
 			? memberDeactivationReason(dialog).length > 0
-			: form instanceof HTMLFormElement
-			&& select instanceof HTMLSelectElement
-			&& normalizeMemberRole(select.value) !== normalizeMemberRole(form.dataset.memberInitialRole);
+			: memberRoleChanged(dialog);
 	}
 
 	function resetMemberRoleSelection(dialog) {
@@ -1566,8 +1571,7 @@ const invitationOperationKey = crypto.randomUUID();
 		const select = dialog.querySelector('[data-member-role-select]');
 		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
 		if (!(save instanceof HTMLButtonElement) || !(form instanceof HTMLFormElement)) return;
-		const hasChanged = select instanceof HTMLSelectElement
-			&& normalizeMemberRole(select.value) !== normalizeMemberRole(form.dataset.memberInitialRole);
+		const hasChanged = memberRoleChanged(dialog);
 		const hasSession = Boolean(form.dataset.memberSessionId);
 		const canEdit = dialog instanceof HTMLElement
 			&& dialog.dataset.memberCanEdit === 'true'
@@ -1699,7 +1703,7 @@ const invitationOperationKey = crypto.randomUUID();
 	}
 
 	async function enterMemberDeactivationMode(dialog) {
-		if (memberDialogDirty(dialog)) {
+		if (memberRoleChanged(dialog)) {
 			setMemberError(dialog, 'Save or discard the role change before starting deactivation.');
 			return;
 		}
