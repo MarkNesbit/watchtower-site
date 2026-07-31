@@ -1,0 +1,20 @@
+---
+const { label, selection, eligibleActioners } = Astro.props;
+const actionerDisplayName = (person) => person.display_name?.trim() || 'Workspace member';
+---
+
+{selection.error ? (
+	<p class="action-detail-muted" role="alert">{selection.error}</p>
+) : (
+	<label>
+		<span>{label}</span>
+		<select name="actioner_id">
+			<option value="" selected={selection.membershipId === null}>Unassigned</option>
+			{eligibleActioners.map((person) => (
+				<option value={person.membershipId} selected={selection.membershipId === person.membershipId}>
+					{actionerDisplayName(person)} {person.role ? `(${person.role})` : ''}
+				</option>
+			))}
+		</select>
+	</label>
+)}

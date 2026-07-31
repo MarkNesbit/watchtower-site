@@ -847,7 +847,7 @@ test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register s
 	assert.match(detail, /No due date/);
 	assert.match(detail, /assignProjectAction/);
 	assert.match(detail, /resolveActionerEditSelection/);
-	assert.match(detail, /selected=\{actionerEditSelection\.membershipId === person\.membershipId\}/);
+	assert.match(detail, /<ActionerAssignmentSelect label="Assign or reassign" selection=\{actionerEditSelection\}/);
 	assert.match(detail, /actionerEditSelection\.error/);
 	assert.match(detail, /reissueProjectAction/);
 	assert.match(detail, /completeProjectAction/);
