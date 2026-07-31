@@ -41,6 +41,7 @@ type WorkspaceMembershipRow = {
 	user_id?: string | null;
 	auth_user_id?: string | null;
 	role?: string | null;
+	status?: string | null;
 	joined_at?: string | null;
 	created_at?: string | null;
 	organisations?: {
@@ -83,14 +84,10 @@ function membershipTime(value: string | null | undefined): number {
 
 function workspaceResolutionPath(membership: WorkspaceMembershipRow | null | undefined, signedInAuthUserId: string): string {
 	if (!membership) return 'none';
-	const organisation = getMembershipOrganisation(membership);
-	const isPersonalFallback = organisation?.type === 'personal'
-		&& organisation.created_by === signedInAuthUserId
-		&& membership.user_id === signedInAuthUserId;
 	if (membership.auth_user_id === signedInAuthUserId && membership.user_id && membership.user_id !== signedInAuthUserId) {
 		return 'accepted_invitation_membership';
 	}
-	if (isPersonalFallback) return 'personal_workspace_membership';
+	if (isPersonalWorkspaceFallbackMembership(membership, signedInAuthUserId)) return 'personal_workspace_membership';
 	if (membership.auth_user_id === signedInAuthUserId) return 'explicit_auth_membership';
 	return 'legacy_profile_membership';
 }
@@ -109,6 +106,50 @@ function compareWorkspaceMembershipsForCurrentUser(a: WorkspaceMembershipRow, b:
 
 function logWorkspaceResolution(event: 'workspace_resolution_completed' | 'workspace_resolution_fallback_used' | 'workspace_resolution_failed', details: Record<string, unknown>) {
 	console.info(event, details);
+}
+
+function isPersonalWorkspaceFallbackMembership(membership: WorkspaceMembershipRow | null | undefined, signedInAuthUserId: string): boolean {
+	const organisation = getMembershipOrganisation(membership);
+	return organisation?.type === 'personal'
+		&& organisation.created_by === signedInAuthUserId
+		&& membership?.user_id === signedInAuthUserId;
+}
+
+function hasRetainedWorkspaceMembershipLifecycle(memberships: WorkspaceMembershipRow[], signedInAuthUserId: string): boolean {
+	return memberships.some((membership) => membership.auth_user_id === signedInAuthUserId
+		&& Boolean(membership.user_id)
+		&& membership.user_id !== signedInAuthUserId);
+}
+
+async function loadSignedInMembershipLifecycle(client, signedInAuthUserId: string): Promise<WorkspaceMembershipRow[]> {
+	const lifecycleQuery = filterSignedInMembership(client
+		.from('organisation_members')
+		.select('id, user_id, auth_user_id, role, status, joined_at, created_at, organisations(id, name, slug, type, created_by)'), signedInAuthUserId);
+	const { data, error } = await lifecycleQuery
+		.order('joined_at', { ascending: true, nullsFirst: false })
+		.order('created_at', { ascending: true });
+
+	if (error) throw error;
+	return (data ?? []) as WorkspaceMembershipRow[];
+}
+
+async function removeInvalidPersonalFallbackMemberships(client, signedInAuthUserId: string, memberships: WorkspaceMembershipRow[]): Promise<WorkspaceMembershipRow[]> {
+	const hasPersonalFallback = memberships.some((membership) => isPersonalWorkspaceFallbackMembership(membership, signedInAuthUserId));
+	if (!hasPersonalFallback) return memberships;
+
+	const lifecycleMemberships = await loadSignedInMembershipLifecycle(client, signedInAuthUserId);
+	if (!hasRetainedWorkspaceMembershipLifecycle(lifecycleMemberships, signedInAuthUserId)) return memberships;
+
+	const filteredMemberships = memberships.filter((membership) => !isPersonalWorkspaceFallbackMembership(membership, signedInAuthUserId));
+	const filteredCount = memberships.length - filteredMemberships.length;
+	if (filteredCount > 0) {
+		logWorkspaceResolution('workspace_resolution_fallback_used', {
+			signedInAuthUserId,
+			filteredPersonalFallbackMembershipCount: filteredCount,
+			resolutionPath: 'suppressed_personal_workspace_membership',
+		});
+	}
+	return filteredMemberships;
 }
 
 export const PROJECT_STATUSES = ['proposed', 'active', 'paused', 'completed', 'cancelled'] as const;
@@ -250,7 +291,7 @@ export async function getCurrentWorkspace(client, accessToken?: string) {
 		.order('created_at', { ascending: true });
 
 	if (error) throw error;
-	const memberships = (data ?? []) as WorkspaceMembershipRow[];
+	const memberships = await removeInvalidPersonalFallbackMemberships(client, user.id, (data ?? []) as WorkspaceMembershipRow[]);
 	if (memberships.length === 0) {
 		logWorkspaceResolution('workspace_resolution_failed', {
 			signedInAuthUserId: user.id,
@@ -289,7 +330,7 @@ export async function getWorkspaceBySlug(client, workspaceSlug: string, accessTo
 
 	const workspaceQuery = filterSignedInMembership(client
 		.from('organisation_members')
-		.select('id, user_id, auth_user_id, role, joined_at, created_at, organisations!inner(id, name, slug)')
+		.select('id, user_id, auth_user_id, role, joined_at, created_at, organisations!inner(id, name, slug, type, created_by)')
 		.eq('status', 'active'), user.id);
 	const { data, error } = await workspaceQuery
 		.eq('organisations.slug', workspaceSlug)
@@ -297,7 +338,8 @@ export async function getWorkspaceBySlug(client, workspaceSlug: string, accessTo
 		.maybeSingle();
 
 	if (error) throw error;
-	return applyRoleSimulationToMembership(data, client, user.id);
+	const [workspace] = await removeInvalidPersonalFallbackMemberships(client, user.id, data ? [data] : []);
+	return applyRoleSimulationToMembership(workspace ?? null, client, user.id);
 }
 
 export function getWorkspaceSlugFromMembership(membership: WorkspaceMembershipRow | null | undefined): string {

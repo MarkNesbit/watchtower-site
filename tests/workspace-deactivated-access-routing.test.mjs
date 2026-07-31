@@ -140,6 +140,87 @@ test('active workspace resolution ignores deactivated memberships and returns no
 	assert.equal(client.state.calls.some((call) => call.method === 'insert'), false);
 });
 
+test('active workspace resolution suppresses an accidental personal fallback when retained membership history exists', async () => {
+	const client = createWorkspaceClient({
+		memberships: [
+			membership({
+				id: 'membership-personal-fallback',
+				user_id: 'evie-auth-user',
+				auth_user_id: 'evie-auth-user',
+				role: 'owner',
+				status: 'active',
+				joined_at: '2026-07-30T16:31:09.675Z',
+				organisations: fallbackPersonalWorkspace,
+			}),
+			membership({
+				id: 'membership-deactivated-retained',
+				user_id: 'evie-profile-id',
+				auth_user_id: 'evie-auth-user',
+				role: 'viewer',
+				status: 'deactivated',
+				deactivated_at: '2026-07-31T09:00:00.000Z',
+				organisations: activeWorkspace,
+			}),
+		],
+	});
+
+	const workspace = await getCurrentWorkspace(client);
+
+	assert.equal(workspace, null);
+	assert.equal(await resolveWorkspaceAccessFallbackPath(client), NO_ACTIVE_WORKSPACE_PATH);
+	assert.ok(client.state.calls.some((call) => call.table === 'organisation_members' && call.method === 'select' && /status/.test(call.columns)));
+});
+
+test('direct workspace slug lookup rejects an accidental personal fallback workspace', async () => {
+	const client = createWorkspaceClient({
+		memberships: [
+			membership({
+				id: 'membership-personal-fallback',
+				user_id: 'evie-auth-user',
+				auth_user_id: 'evie-auth-user',
+				role: 'owner',
+				status: 'active',
+				organisations: fallbackPersonalWorkspace,
+			}),
+			membership({
+				id: 'membership-deactivated-retained',
+				user_id: 'evie-profile-id',
+				auth_user_id: 'evie-auth-user',
+				status: 'deactivated',
+				organisations: activeWorkspace,
+			}),
+		],
+	});
+
+	assert.equal(await getWorkspaceBySlug(client, 'evie-clarke-workspace'), null);
+});
+
+test('first-time personal workspaces remain available when no retained membership history exists', async () => {
+	const client = createWorkspaceClient({
+		userId: 'new-auth-user',
+		memberships: [
+			membership({
+				id: 'membership-personal',
+				user_id: 'new-auth-user',
+				auth_user_id: 'new-auth-user',
+				role: 'owner',
+				status: 'active',
+				organisations: {
+					...fallbackPersonalWorkspace,
+					created_by: 'new-auth-user',
+				},
+			}),
+		],
+	});
+
+	const workspace = await getCurrentWorkspace(client);
+	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
+
+	assert.equal(workspace.id, 'membership-personal');
+	assert.equal(organisation.slug, 'evie-clarke-workspace');
+	assert.equal((await getWorkspaceBySlug(client, 'evie-clarke-workspace'))?.id, 'membership-personal');
+});
+
 test('active workspace resolution remains deterministic when active and inactive memberships are mixed', async () => {
 	const client = createWorkspaceClient({
 		memberships: [
