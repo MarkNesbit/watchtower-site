@@ -258,3 +258,6 @@ Delivery personas may later support onboarding, dashboards, templates or AI assi
 ## Follow-up backlog notes
 
 No broad access-control refactor was required for WT-US-0105. As the product adds more domains, new write paths should continue to route role decisions through central helpers and RLS membership functions, with any duplicated permission checks consolidated in small follow-up tasks.
+# Action responsibility identity
+
+WT-ACTION-IDENTITY-001C2 authorises Action creation and responsibility management through an active workspace membership resolved server-side. Project participation is not required to receive an Action responsibility. Project Manager, Product Owner and Delivery Manager assignments provide management authority alongside the Action Raiser; they do not replace workspace membership validation.

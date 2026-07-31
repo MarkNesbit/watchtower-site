@@ -24,6 +24,7 @@ import {
 	listProjectActionHistory,
 	reissueProjectAction,
 	returnProjectActionToActioner,
+	setProjectActionApprover,
 	sourceLabelForAction,
 	takeOverProjectActionAcceptance,
 	type ProjectAction,
@@ -140,6 +141,9 @@ try {
 						} else if (intent === 'assign-actioner') {
 							const nextActioner = String(formData.get('actioner_id') ?? '');
 							await assignProjectAction(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, actionerId: nextActioner || null });
+						} else if (intent === 'set-approver') {
+							const nextApprover = String(formData.get('approver_id') ?? '');
+							await setProjectActionApprover(serverSupabase, { actionId: action.id, expectedStatus, expectedUpdatedAt, approverId: nextApprover || null });
 						} else if (intent === 'reissue') {
 							const nextActioner = String(formData.get('actioner_id') ?? '');
 							await reissueProjectAction(serverSupabase, {
@@ -310,6 +314,18 @@ const sourceUrl = action && project ? sourceHref(action, project) : '';
 											{eligibleActioners.map((person) => <option value={person.id} selected={action.actioner_id === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
 										</select></label>
 										<button class="button button--secondary" type="submit">{action.actioner_id ? 'Save assignment' : 'Assign'}</button>
+									</form>
+								)}
+								{canAssign && (
+									<form method="post" class="action-management-form">
+										<input type="hidden" name="intent" value="set-approver" />
+										<input type="hidden" name="expected_status" value={action.status} />
+										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
+										<label><span>Approver</span><select name="approver_id">
+											<option value="" selected={false}>No Approver</option>
+											{eligibleActioners.filter((person) => person.profileId !== action.actioner_id).map((person) => <option value={person.id} selected={person.profileId === action.acceptance_owner_id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
+										</select></label>
+										<button class="button button--secondary" type="submit">Save Approver</button>
 									</form>
 								)}
 								{canReissue && (

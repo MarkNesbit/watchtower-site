@@ -68,6 +68,8 @@ export type ProjectAction = {
 
 export type ActionProfile = {
 	id: string;
+	profileId?: string | null;
+	membershipId?: string | null;
 	display_name?: string | null;
 	email?: string | null;
 	role?: WorkspaceRole | string | null;
@@ -107,6 +109,7 @@ export type CreateProjectActionInput = {
 	brief: string;
 	dueDate?: string | null;
 	actionerId?: string | null;
+	approverId?: string | null;
 	sourceType?: ActionSourceType;
 	sourceRecordId?: string | null;
 	sourceRef?: string | null;
@@ -137,6 +140,11 @@ export type ActionExpectedInput = ProjectActionExpectedState & {
 export type AssignProjectActionInput = ProjectActionExpectedState & {
 	actionId: string;
 	actionerId: string | null;
+};
+
+export type SetProjectActionApproverInput = ProjectActionExpectedState & {
+	actionId: string;
+	approverId: string | null;
 };
 
 export type AmendProjectActionBriefInput = ProjectActionExpectedState & {
@@ -418,10 +426,10 @@ export function actionConcernTone(action: ProjectAction, now = new Date()): Acti
 	const timingState = deriveActionTimingState(action, now);
 	if (timingState === 'complete') return 'green';
 	if (timingState === 'cancelled') return 'grey';
+	if (!action.actioner_id) return 'red';
 	if (timingState === 'overdue' || timingState === 'due_today') return 'red';
 	if (
 		timingState === 'missing_due_date'
-		|| timingState === 'unassigned'
 		|| timingState === 'reassignment_required'
 		|| timingState === 'due_soon'
 	) {
@@ -885,6 +893,7 @@ export async function createProjectAction(client: ProjectActionRpcClient, input:
 		p_brief: input.brief,
 		p_due_date: input.dueDate?.trim() || null,
 		p_actioner_id: input.actionerId ?? null,
+		p_approver_id: input.approverId ?? null,
 		p_source_type: input.sourceType ?? 'project',
 		p_source_record_id: input.sourceRecordId ?? null,
 		p_source_ref: input.sourceRef ?? null,
@@ -944,6 +953,13 @@ export async function assignProjectAction(client: ProjectActionRpcClient, input:
 	return callProjectActionRpc(client, 'assign_project_action', {
 		...actionRpcArgs(input),
 		p_actioner_id: input.actionerId,
+	});
+}
+
+export async function setProjectActionApprover(client: ProjectActionRpcClient, input: SetProjectActionApproverInput): Promise<ProjectAction> {
+	return callProjectActionRpc(client, 'set_project_action_approver', {
+		...actionRpcArgs(input),
+		p_approver_id: input.approverId,
 	});
 }
 
@@ -1103,7 +1119,9 @@ export async function listEligibleActioners(
 	return people
 		.filter((person) => canHoldActionWorkflowRole(person.workspaceRole))
 		.map((person) => ({
-			id: person.profileId,
+			id: person.membershipId,
+			profileId: person.profileId,
+			membershipId: person.membershipId,
 			display_name: person.displayName,
 			email: null,
 			role: person.workspaceRole,

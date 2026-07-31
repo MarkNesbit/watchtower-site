@@ -63,7 +63,7 @@ let actorId = '';
 let message = '';
 let actionsLoadError = '';
 let createError = '';
-let createValues = { brief: '', actionerId: '', dueDate: '' };
+let createValues = { brief: '', actionerId: '', approverId: '', dueDate: '' };
 let createModalOpen = false;
 let actionModalId = Astro.url.searchParams.get('action') ?? '';
 let actionError = '';
@@ -176,6 +176,7 @@ try {
 					createValues = {
 						brief: String(formData.get('brief') ?? ''),
 						actionerId: String(formData.get('actioner_id') ?? ''),
+						approverId: String(formData.get('approver_id') ?? ''),
 						dueDate: String(formData.get('due_date') ?? ''),
 					};
 					try {
@@ -186,6 +187,7 @@ try {
 							brief: createValues.brief,
 							dueDate: createValues.dueDate || null,
 							actionerId: createValues.actionerId || null,
+							approverId: createValues.approverId || null,
 							sourceType: 'project',
 							sourceLabel: data.name,
 						});
@@ -758,12 +760,16 @@ const scopeItems = [
 							<option value="" selected={!createValues.actionerId}>Unassigned</option>
 							{eligibleActioners.map((person) => <option value={person.id} selected={createValues.actionerId === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
 						</select></label>
+						<label><span>Approver</span><select name="approver_id">
+							<option value="" selected={!createValues.approverId}>No Approver</option>
+							{eligibleActioners.map((person) => <option value={person.id} selected={createValues.approverId === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
+						</select></label>
 						<DateField
 							id="action-create-due-date"
 							name="due_date"
 							label="Due date"
 							value={createValues.dueDate}
-							helperText="Actions with no due date or Actioner will display as Amber."
+							helperText="Actions with no Actioner display as Red; Actions with no due date display as Amber."
 							pickerLabel="Choose due date"
 							clearLabel="Clear due date"
 						/>
