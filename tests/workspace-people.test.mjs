@@ -48,7 +48,7 @@ test('workspace person display labels never use email as a fallback', () => {
 test('workspace-person migration keeps direct profile RLS and excludes email', async () => {
 	const sql = await readFile(migrationUrl, 'utf8');
 	assert.match(sql, /create or replace view public\.workspace_member_directory/i);
-	assert.match(sql, /p\.id as profile_id[\s\S]*om\.auth_user_id/);
+	assert.match(sql, /p\.id as profile_id[\s\S]*om\.joined_at,[\s\S]*om\.auth_user_id,[\s\S]*resolved_display_name/);
 	assert.match(sql, /assignment_eligible/);
 	assert.match(sql, /is_active_organisation_member\(om\.organisation_id\)/);
 	assert.doesNotMatch(sql, /p\.email|contact_email|auth_email/i);
