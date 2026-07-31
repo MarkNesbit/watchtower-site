@@ -4,6 +4,7 @@ import EmptyState from '../../../../../../../components/app/EmptyState.astro';
 import ProjectContentPanel from '../../../../../../../components/app/ProjectContentPanel.astro';
 import ProjectControlPanel from '../../../../../../../components/app/ProjectControlPanel.astro';
 import ProjectPageHero from '../../../../../../../components/app/ProjectPageHero.astro';
+import ActionerAssignmentSelect from '../../../../../../../components/actions/ActionerAssignmentSelect.astro';
 import { can } from '../../../../../../../lib/permissions';
 import { resolveActionIdentity } from '../../../../../../../lib/actionIdentity';
 import {
@@ -317,14 +318,7 @@ const sourceUrl = action && project ? sourceHref(action, project) : '';
 										<input type="hidden" name="intent" value="assign-actioner" />
 										<input type="hidden" name="expected_status" value={action.status} />
 										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
-										{actionerEditSelection.error ? (
-											<p class="action-detail-muted" role="alert">{actionerEditSelection.error}</p>
-										) : (
-											<label><span>Assign or reassign</span><select name="actioner_id">
-												<option value="" selected={actionerEditSelection.membershipId === null}>Unassigned</option>
-												{eligibleActioners.map((person) => <option value={person.id} selected={actionerEditSelection.membershipId === person.membershipId}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
-											</select></label>
-										)}
+										<ActionerAssignmentSelect label="Assign or reassign" selection={actionerEditSelection} eligibleActioners={eligibleActioners} />
 										<button class="button button--secondary" type="submit" disabled={Boolean(actionerEditSelection.error)}>{action.actioner_id ? 'Save assignment' : 'Assign'}</button>
 									</form>
 								)}
@@ -347,14 +341,7 @@ const sourceUrl = action && project ? sourceHref(action, project) : '';
 										<input type="hidden" name="expected_updated_at" value={action.updated_at} />
 										<label><span>Reissue brief</span><textarea name="brief" rows="3">{action.brief}</textarea></label>
 										<label><span>Due date</span><input type="date" name="due_date" value={action.due_date ?? ''} /></label>
-										{actionerEditSelection.error ? (
-											<p class="action-detail-muted" role="alert">{actionerEditSelection.error}</p>
-										) : (
-											<label><span>Actioner</span><select name="actioner_id">
-												<option value="" selected={actionerEditSelection.membershipId === null}>Unassigned</option>
-												{eligibleActioners.map((person) => <option value={person.id} selected={actionerEditSelection.membershipId === person.membershipId}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
-											</select></label>
-										)}
+										<ActionerAssignmentSelect label="Actioner" selection={actionerEditSelection} eligibleActioners={eligibleActioners} />
 										<button class="button button--secondary" type="submit" disabled={Boolean(actionerEditSelection.error)}>Reissue Action</button>
 									</form>
 								)}
