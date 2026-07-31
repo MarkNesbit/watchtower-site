@@ -20,7 +20,7 @@ WT-WORKSPACE-TEAM-002 keeps this login behaviour unchanged but adds profile fiel
 
 ## Profile
 
-A profile is account identity and audit metadata only. The current profile table is linked one-to-one to `auth.users.id` and includes:
+A profile is account identity and audit metadata only. Historic self-registered records still commonly have `profiles.id = auth.users.id`, but this is a compatibility shape, not the identity contract. `profiles.id` is the global person UUID; `profiles.auth_user_id` is its explicit Auth UUID link where present. An accepted invitation may therefore have distinct Auth and profile UUIDs.
 
 - `id` — the Supabase authenticated user id.
 - `email` — the primary account email.
@@ -53,6 +53,14 @@ Projects belong to a workspace/organisation. Users gain access to workspace-owne
 - an organisation/workspace id;
 - a role;
 - a membership status.
+
+`organisation_members.id` is the workspace-membership UUID. `organisation_members.user_id` references the profile/person UUID and `organisation_members.auth_user_id` identifies the account using it. Authorisation always derives from the active membership, never from a bare profile or Auth UUID.
+
+### Canonical workspace-person read contract
+
+WT-IDENTITY-MEMBERSHIP-001B defines `workspace_member_directory` and `src/lib/workspacePeople.ts` as the single ordinary-user read contract for a person in a workspace. It exposes workspace ID, membership ID, profile ID, optional Auth ID, role, membership/invitation lifecycle, assignment eligibility and a resolved safe label. The label order is first and last name, display name, login name, then `Workspace member <membership reference>`; it never uses email as a general display fallback.
+
+The view is readable only by an active member of that same workspace, retains normal `profiles` RLS, and excludes contact and authentication email. An active accepted membership is eligible for new Risk, Action and Project People selections. Invited, expired, suspended and deactivated people are not eligible, but can remain resolvable for historic display. Risks and Actions intentionally use active workspace membership rather than project participation for new responsibility choices.
 
 This means the same user can theoretically have different roles in different workspaces. Access checks must require an active membership, so invited, invite-expired, suspended or deactivated memberships do not grant workspace/project access.
 
