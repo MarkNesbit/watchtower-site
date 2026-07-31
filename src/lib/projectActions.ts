@@ -47,6 +47,7 @@ export type ProjectAction = {
 	raiser_id: string;
 	actioner_id: string | null;
 	acceptance_owner_id: string;
+	approval_required?: boolean;
 	source_type: ActionSourceType;
 	source_record_id: string | null;
 	source_ref: string | null;
@@ -355,6 +356,7 @@ const ACTION_SELECT = [
 	'raiser_id',
 	'actioner_id',
 	'acceptance_owner_id',
+	'approval_required',
 	'source_type',
 	'source_record_id',
 	'source_ref',

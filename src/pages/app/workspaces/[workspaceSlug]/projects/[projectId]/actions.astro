@@ -367,8 +367,8 @@ const canTakeOverSelectedAction = selectedAction ? canTakeOverProjectAction(sele
 const canRespondToSelectedAction = selectedAction
 	? can(workspaceRole, 'action.respond') && selectedAction.actioner_id === actorId && ['open', 'returned_to_actioner'].includes(selectedAction.status)
 	: false;
-const canDirectCompleteSelectedAction = Boolean(canRespondToSelectedAction && selectedAction?.acceptance_owner_id === actorId);
-const canSubmitSelectedAction = Boolean(canRespondToSelectedAction && !canDirectCompleteSelectedAction);
+const canDirectCompleteSelectedAction = Boolean(canRespondToSelectedAction && !selectedAction?.approval_required);
+const canSubmitSelectedAction = Boolean(canRespondToSelectedAction && selectedAction?.approval_required);
 const canReviewSelectedAction = Boolean(canManageSelectedAction && selectedAction?.status === 'submitted');
 const canReissueSelectedAction = Boolean(canManageSelectedAction && ['returned_to_raiser', 'rejected_by_actioner'].includes(selectedAction?.status ?? ''));
 const canAssignSelectedAction = Boolean(canManageSelectedAction && selectedAction?.status !== 'submitted');
