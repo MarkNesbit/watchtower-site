@@ -85,6 +85,8 @@ export type ProjectActionHistory = {
 	action_id: string;
 	event_type: ActionHistoryEventType | string;
 	actor_user_id: string | null;
+	actor_auth_user_id: string | null;
+	actor_membership_id: string | null;
 	from_status: ActionStatus | string | null;
 	to_status: ActionStatus | string | null;
 	reason: string | null;
@@ -380,6 +382,8 @@ const ACTION_HISTORY_SELECT = [
 	'action_id',
 	'event_type',
 	'actor_user_id',
+	'actor_auth_user_id',
+	'actor_membership_id',
 	'from_status',
 	'to_status',
 	'reason',
