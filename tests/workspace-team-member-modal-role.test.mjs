@@ -17,6 +17,7 @@ import {
 const pageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro', import.meta.url);
 const roleRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/members/role.ts', import.meta.url);
 const sessionRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/members/session.ts', import.meta.url);
+const supabaseServerUrl = new URL('../src/lib/supabaseServer.ts', import.meta.url);
 const migrationUrl = new URL('../supabase/migrations/20260730000100_workspace_member_modal_role_management.sql', import.meta.url);
 const repairMigrationUrl = new URL('../supabase/migrations/20260730000200_workspace_member_modal_role_management_repair.sql', import.meta.url);
 
@@ -129,15 +130,26 @@ test('Workspace Team member modal save state follows role changes and edit avail
 });
 
 test('Workspace Team member session and role routes use workspace-scoped secure RPCs', async () => {
+	const page = await pageSource();
 	const roleRoute = await readFile(roleRouteUrl, 'utf8');
 	const sessionRoute = await readFile(sessionRouteUrl, 'utf8');
+	const supabaseServer = await readFile(supabaseServerUrl, 'utf8');
 
 	assert.equal(buildWorkspaceTeamMemberSessionPath('alpha workspace'), '/app/workspaces/alpha%20workspace/team/members/session');
 	assert.equal(buildWorkspaceTeamMemberRolePath('alpha workspace'), '/app/workspaces/alpha%20workspace/team/members/role');
 	assert.equal(WORKSPACE_TEAM_MEMBER_SESSION_RPC, 'start_workspace_member_edit_session');
 	assert.equal(WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC, 'release_workspace_member_edit_session');
 	assert.equal(WORKSPACE_TEAM_MEMBER_ROLE_CHANGE_RPC, 'change_workspace_member_role');
+	assert.match(supabaseServer, /createSupabaseServerClient\(accessToken\?: string, env\?: Record<string, unknown>\)/);
+	assert.match(supabaseServer, /runtimeString\(env, 'PUBLIC_SUPABASE_URL', supabaseUrl\)/);
+	assert.match(supabaseServer, /runtimeString\(env, 'PUBLIC_SUPABASE_ANON_KEY', supabaseAnonKey\)/);
+	assert.match(page, /Astro\.locals as \{ runtime\?: \{ env\?: Record<string, unknown> \} \}/);
+	assert.match(page, /createSupabaseServerClient\(accessToken, runtimeEnv\)/);
+	assert.match(sessionRoute, /locals, params, request/);
+	assert.match(sessionRoute, /createSupabaseServerClient\(accessToken, runtimeEnv\)/);
 	assert.match(sessionRoute, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
+	assert.match(roleRoute, /locals, params, request/);
+	assert.match(roleRoute, /createSupabaseServerClient\(accessToken, runtimeEnv\)/);
 	assert.match(sessionRoute, /can\(workspace\.role, 'workspaceTeam\.manageRoles'\)/);
 	assert.match(sessionRoute, /WORKSPACE_TEAM_MEMBER_SESSION_RPC/);
 	assert.match(sessionRoute, /WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC/);

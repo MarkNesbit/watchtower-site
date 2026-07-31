@@ -47,6 +47,7 @@ Astro.response.headers.set('Expires', '0');
 
 const workspaceSlug = Astro.params.workspaceSlug;
 const accessToken = getServerAccessToken(Astro.cookies);
+const runtimeEnv = (Astro.locals as { runtime?: { env?: Record<string, unknown> } }).runtime?.env;
 const requestedFilter = String(Astro.url.searchParams.get('state') ?? 'all').trim().toLowerCase();
 const search = String(Astro.url.searchParams.get('search') ?? '').trim();
 const requestedImportRunId = String(Astro.url.searchParams.get('import_run') ?? '').trim();
@@ -176,7 +177,7 @@ const logWorkspaceTeamLoadFailure = (
 };
 
 try {
-	const serverSupabase = createSupabaseServerClient(accessToken);
+	const serverSupabase = createSupabaseServerClient(accessToken, runtimeEnv);
 	const workspace = await getWorkspaceBySlug(serverSupabase, workspaceSlug ?? '', accessToken);
 	const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 	const { data: userData, error: userError } = accessToken

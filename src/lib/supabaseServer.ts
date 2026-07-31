@@ -41,10 +41,10 @@ export function isSupabaseAuthSessionError(error: unknown): boolean {
 	);
 }
 
-export function createSupabaseServerClient(accessToken?: string) {
+export function createSupabaseServerClient(accessToken?: string, env?: Record<string, unknown>) {
 	return createClient(
-		requirePublicEnv('PUBLIC_SUPABASE_URL', supabaseUrl),
-		requirePublicEnv('PUBLIC_SUPABASE_ANON_KEY', supabaseAnonKey),
+		requirePublicEnv('PUBLIC_SUPABASE_URL', runtimeString(env, 'PUBLIC_SUPABASE_URL', supabaseUrl)),
+		requirePublicEnv('PUBLIC_SUPABASE_ANON_KEY', runtimeString(env, 'PUBLIC_SUPABASE_ANON_KEY', supabaseAnonKey)),
 		{
 			auth: {
 				autoRefreshToken: false,
