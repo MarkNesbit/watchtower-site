@@ -14,6 +14,7 @@ import {
 	buildWorkspaceTeamInvitationSendPath,
 	buildWorkspaceTeamMemberDeactivatePath,
 	buildWorkspaceTeamMemberDeactivationImpactPath,
+	buildWorkspaceTeamMemberReactivatePath,
 	buildWorkspaceTeamMemberRolePath,
 	buildWorkspaceTeamMemberSessionPath,
 	getWorkspaceBySlug,
@@ -29,6 +30,8 @@ import {
 	membershipStateCounts,
 	workspaceTeamDeactivationAuthority,
 	WORKSPACE_TEAM_MEMBER_DEACTIVATION_REASON_MAX_LENGTH,
+	WORKSPACE_TEAM_MEMBER_REACTIVATION_REASON_MAX_LENGTH,
+	workspaceTeamReactivationAuthority,
 	workspaceTeamRoleAuthority,
 	workspaceRoleLabel,
 	workspaceTeamPersonName,
@@ -204,7 +207,7 @@ try {
 		const canUseAdminDirectory = can(workspaceRole, 'workspaceTeam.view');
 		const directoryTable = canUseAdminDirectory ? 'workspace_member_admin_directory' : 'workspace_member_directory';
 		const selectColumns = canUseAdminDirectory
-			? 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, contact_email, role, membership_status, invited_at, invitation_expires_at, joined_at, accepted_at, deactivated_at, reactivated_at, invitation_id, invitation_status, invitation_delivered_at, invitation_opened_at, invitation_accepted_at, invitation_cancelled_at, invitation_superseded_at, invitation_delivery_attempt_count, invitation_last_delivery_attempt_at, invitation_failure_code, invitation_failure_message, invitation_delivery_strategy, auth_user_id, last_login_at, updated_at'
+			? 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, contact_email, role, membership_status, invited_at, invitation_expires_at, joined_at, accepted_at, deactivated_at, reactivated_at, invitation_id, invitation_status, invitation_delivered_at, invitation_opened_at, invitation_accepted_at, invitation_cancelled_at, invitation_superseded_at, invitation_delivery_attempt_count, invitation_last_delivery_attempt_at, invitation_failure_code, invitation_failure_message, invitation_delivery_strategy, auth_user_id, last_login_at, updated_at, deactivated_by, deactivated_by_display_name, deactivation_reason, reactivated_by, reactivation_reason'
 			: 'organisation_id, organisation_membership_id, profile_id, display_name, first_name, last_name, login_name, role, membership_status, is_deactivated, joined_at, deactivated_at, reactivated_at, auth_user_id';
 		const { data, error } = await serverSupabase
 			.from(directoryTable)
@@ -358,6 +361,7 @@ const memberSessionAction = workspaceSlug ? buildWorkspaceTeamMemberSessionPath(
 const memberRoleAction = workspaceSlug ? buildWorkspaceTeamMemberRolePath(workspaceSlug) : '';
 const memberDeactivationImpactAction = workspaceSlug ? buildWorkspaceTeamMemberDeactivationImpactPath(workspaceSlug) : '';
 const memberDeactivateAction = workspaceSlug ? buildWorkspaceTeamMemberDeactivatePath(workspaceSlug) : '';
+const memberReactivateAction = workspaceSlug ? buildWorkspaceTeamMemberReactivatePath(workspaceSlug) : '';
 const importMaxSizeLabel = `${Math.round(WORKSPACE_TEAM_IMPORT_MAX_FILE_BYTES / 1024 / 1024)} MB`;
 const checkoutEditorMember = activeCheckout?.requested_by
 	? members.find((member) => member.profile_id === activeCheckout?.requested_by)
@@ -510,6 +514,32 @@ const memberDeactivationMessage = memberDeactivationState === 'success'
 			method: 'Member deactivation requires the member modal form.',
 			failed: 'The member could not be deactivated. No membership changes were applied.',
 		} as Record<string, string>)[memberDeactivationError] ?? 'The member could not be deactivated. No membership changes were applied.'
+		: '';
+const memberReactivationState = String(Astro.url.searchParams.get('member_reactivation') ?? '');
+const memberReactivationError = String(Astro.url.searchParams.get('member_reactivation_error') ?? '');
+const memberReactivationMessage = memberReactivationState === 'success'
+	? 'Workspace member reactivated.'
+	: memberReactivationState === 'error'
+		? ({
+			signin: 'Sign in before reactivating workspace members.',
+			workspace: 'Workspace access could not be confirmed for member reactivation.',
+			permission: 'Only active Workspace Owners and Admins can reactivate workspace members.',
+			stale: 'This membership changed while the modal was open. Refresh the Team page and try again.',
+			locked: 'This member is currently being viewed by another Workspace administrator. Refresh when their edit session has ended.',
+			session: 'Your member edit session expired or could not be confirmed. Close and reopen the member modal.',
+			self: 'Users cannot reactivate their own workspace membership through this modal.',
+			admin_target: 'Admins can reactivate only former Viewer and Member memberships.',
+			admin_assign: 'Admins cannot reactivate a member as Admin or Owner.',
+			invalid: 'Choose a permitted workspace role before reactivating this member.',
+			reason_required: 'Enter a reactivation reason for the audit record.',
+			reason_too_long: `Reactivation reason must be ${WORKSPACE_TEAM_MEMBER_REACTIVATION_REASON_MAX_LENGTH} characters or fewer.`,
+			deactivated_only: 'Only deactivated workspace members can be reactivated through this modal.',
+			accepted_only: 'Only a previously accepted workspace member can be reactivated without a new invitation.',
+			identity_missing: 'This member cannot be reactivated because their sign-in identity is missing. Account recovery is outside this workflow.',
+			previous_role: 'The previous role could not be confirmed, so Deactivated in error cannot be used.',
+			method: 'Member reactivation requires the member modal form.',
+			failed: 'The member could not be reactivated. No membership changes were applied.',
+		} as Record<string, string>)[memberReactivationError] ?? 'The member could not be reactivated. No membership changes were applied.'
 		: '';
 const importSummary = importRun?.validation_summary ?? {};
 const applicationSummary = importRun?.approved_change_set_summary ?? latestApplicationRun?.expected_counts ?? {};
@@ -769,6 +799,11 @@ const invitationOperationKey = crypto.randomUUID();
 					{memberDeactivationMessage && (
 						<p class={memberDeactivationState === 'success' ? 'workspace-team-release-message' : 'workspace-team-release-message workspace-team-release-message--error'} role="status" data-workspace-team-member-deactivation-message>
 							{memberDeactivationMessage}
+						</p>
+					)}
+					{memberReactivationMessage && (
+						<p class={memberReactivationState === 'success' ? 'workspace-team-release-message' : 'workspace-team-release-message workspace-team-release-message--error'} role="status" data-workspace-team-member-reactivation-message>
+							{memberReactivationMessage}
 						</p>
 					)}
 
@@ -1209,6 +1244,17 @@ const invitationOperationKey = crypto.randomUUID();
 														<span>{member.personName}</span>
 														<small>{member.displayStatus}</small>
 													</span>
+												) : member.membership_status === 'deactivated' && canAdministerLater ? (
+													<button
+														class="workspace-team-person-pill workspace-team-person-pill--deactivated"
+														type="button"
+														aria-haspopup="dialog"
+														aria-label={`${member.personName}, deactivated member. Open member details for possible reactivation.`}
+														data-workspace-team-member-open={`workspace-team-member-dialog-${member.organisation_membership_id}`}
+													>
+														<span>{member.personName}</span>
+														<small>Deactivated · Details</small>
+													</button>
 												) : member.membership_status === 'deactivated' ? (
 													<span class="workspace-team-person-pill workspace-team-person-pill--deactivated" aria-label={`${member.personName}, deactivated member. Reinstatement is not available in this view yet.`}>
 														<span>{member.personName}</span>
@@ -1270,9 +1316,10 @@ const invitationOperationKey = crypto.randomUUID();
 							</table>
 						</div>
 					)}
-					{canAdministerLater && memberRoleAction && memberSessionAction && memberDeactivateAction && memberDeactivationImpactAction && displayedMembers.filter((member) => member.membership_status === 'active').map((member) => {
+					{canAdministerLater && memberRoleAction && memberSessionAction && memberDeactivateAction && memberDeactivationImpactAction && memberReactivateAction && displayedMembers.filter((member) => member.membership_status === 'active' || member.membership_status === 'deactivated').map((member) => {
 						const roleAuthority = workspaceTeamRoleAuthority(workspaceRole, member.role, member.isCurrentUser);
 						const deactivationAuthority = workspaceTeamDeactivationAuthority(workspaceRole, member.role, member.isCurrentUser);
+						const reactivationAuthority = workspaceTeamReactivationAuthority(workspaceRole, member.role, member.isCurrentUser);
 						const modalId = `workspace-team-member-dialog-${member.organisation_membership_id}`;
 						const memberTitleId = `${modalId}-title`;
 						const memberDescriptionId = `${modalId}-description`;
@@ -1282,6 +1329,14 @@ const invitationOperationKey = crypto.randomUUID();
 						const deactivationHeadingId = `${modalId}-deactivation-heading`;
 						const deactivationReasonId = `${modalId}-deactivation-reason`;
 						const deactivationReasonHelpId = `${modalId}-deactivation-reason-help`;
+						const reactivationHeadingId = `${modalId}-reactivation-heading`;
+						const reactivationRoleId = `${modalId}-reactivation-role`;
+						const reactivationRoleLabelId = `${modalId}-reactivation-role-label`;
+						const reactivationErrorId = `${modalId}-reactivation-error`;
+						const reactivationReasonId = `${modalId}-reactivation-reason`;
+						const reactivationReasonHelpId = `${modalId}-reactivation-reason-help`;
+						const deactivatedInErrorId = `${modalId}-deactivated-in-error`;
+						const isDeactivatedMember = member.membership_status === 'deactivated';
 						const errorId = `${modalId}-error`;
 						return (
 							<dialog
@@ -1294,9 +1349,12 @@ const invitationOperationKey = crypto.randomUUID();
 								data-member-role-action={memberRoleAction}
 								data-member-deactivation-impact-action={memberDeactivationImpactAction}
 								data-member-deactivate-action={memberDeactivateAction}
+								data-member-reactivate-action={memberReactivateAction}
 								data-member-id={member.organisation_membership_id}
-								data-member-can-edit={roleAuthority.canEdit ? 'true' : 'false'}
-								data-member-can-deactivate={deactivationAuthority.canDeactivate ? 'true' : 'false'}
+								data-member-can-edit={!isDeactivatedMember && roleAuthority.canEdit ? 'true' : 'false'}
+								data-member-can-deactivate={!isDeactivatedMember && deactivationAuthority.canDeactivate ? 'true' : 'false'}
+								data-member-can-reactivate={isDeactivatedMember && reactivationAuthority.canReactivate ? 'true' : 'false'}
+								data-member-can-restore-previous-role={isDeactivatedMember && reactivationAuthority.canRestorePreviousRole ? 'true' : 'false'}
 							>
 								<form method="post" action={memberRoleAction} data-workspace-team-member-role-form data-member-initial-role={member.role} data-member-session-id="">
 									<input type="hidden" name="membership_id" value={member.organisation_membership_id} />
@@ -1325,9 +1383,9 @@ const invitationOperationKey = crypto.randomUUID();
 											<h4 id={`${modalId}-membership-heading`}>Membership</h4>
 											<dl class="workspace-team-member-modal__details">
 												<div class="workspace-team-member-modal__role-row">
-													<dt id={roleLabelId}>Workspace role</dt>
+													<dt id={roleLabelId}>{isDeactivatedMember ? 'Previous workspace role' : 'Workspace role'}</dt>
 													<dd>
-														{roleAuthority.canEdit ? (
+														{!isDeactivatedMember && roleAuthority.canEdit ? (
 															<select
 																id={roleSelectId}
 																name="target_role"
@@ -1342,20 +1400,28 @@ const invitationOperationKey = crypto.randomUUID();
 														) : (
 															<div class="workspace-team-member-modal__readonly" data-member-readonly-reason>
 																<strong>{member.displayRole}</strong>
-																<p>{roleAuthority.reason}</p>
+																<p>{isDeactivatedMember ? 'This was the role held immediately before deactivation.' : roleAuthority.reason}</p>
 															</div>
 														)}
 													</dd>
 												</div>
 												<div><dt>Membership status</dt><dd>{member.displayStatus}</dd></div>
-												<div><dt>Invitation status</dt><dd>{member.membership_status === 'active' ? 'Accepted' : workspaceInvitationStatusLabel(member.invitation_status)}</dd></div>
+												<div><dt>Invitation status</dt><dd>{member.membership_status === 'active' || member.membership_status === 'deactivated' ? 'Accepted' : workspaceInvitationStatusLabel(member.invitation_status)}</dd></div>
 												<div><dt>Joined date</dt><dd>{formatDate(member.joined_at ?? member.accepted_at ?? null)}</dd></div>
 												<div><dt>Invited date</dt><dd>{formatDate(member.invited_at ?? null)}</dd></div>
 												<div><dt>Accepted date</dt><dd>{formatDate(member.accepted_at ?? member.invitation_accepted_at ?? null)}</dd></div>
 												<div><dt>Last login</dt><dd>{formatDateTime(member.last_login_at ?? null)}</dd></div>
+												{isDeactivatedMember && (
+													<>
+														<div><dt>Deactivated date</dt><dd>{formatDateTime(member.deactivated_at ?? null)}</dd></div>
+														<div><dt>Deactivated by</dt><dd>{member.deactivated_by_display_name ?? 'Not available'}</dd></div>
+														<div class="workspace-team-member-modal__detail-wide"><dt>Deactivation reason</dt><dd>{member.deactivation_reason ?? 'Not available'}</dd></div>
+													</>
+												)}
 											</dl>
-											<p class="workspace-team-member-modal__hint" id={roleHelpId}>{roleAuthority.reason}</p>
+											<p class="workspace-team-member-modal__hint" id={roleHelpId}>{isDeactivatedMember ? reactivationAuthority.reason : roleAuthority.reason}</p>
 										</section>
+										{!isDeactivatedMember && (
 										<section class="workspace-team-member-modal__section workspace-team-member-modal__section--deactivation" aria-labelledby={deactivationHeadingId} data-member-deactivation-section>
 											<div class="workspace-team-member-modal__section-heading">
 												<div>
@@ -1399,12 +1465,80 @@ const invitationOperationKey = crypto.randomUUID();
 												<button class="button button--secondary" type="button" data-member-deactivation-back>Back to member details</button>
 											</div>
 										</section>
+										)}
+										{isDeactivatedMember && (
+										<section class="workspace-team-member-modal__section workspace-team-member-modal__section--reactivation" aria-labelledby={reactivationHeadingId} data-member-reactivation-section>
+											<div class="workspace-team-member-modal__section-heading">
+												<div>
+													<h4 id={reactivationHeadingId}>Reactivate membership</h4>
+													<p>Restore this person's access to {workspaceName}. Choose the role they should return with.</p>
+												</div>
+												{reactivationAuthority.canReactivate ? (
+													<button class="button button--secondary" type="button" data-member-reactivation-start>Reactivate user</button>
+												) : (
+													<span class="workspace-team-member-modal__readonly" data-member-reactivation-readonly>{reactivationAuthority.reason}</span>
+												)}
+											</div>
+											<div class="workspace-team-member-modal__reactivation-confirm" data-member-reactivation-confirm hidden>
+												<p class="workspace-team-member-modal__warning">
+													<strong>{member.personName} will regain access to {workspaceName}.</strong>
+													Responsibilities changed while they were inactive will not automatically return, and this operation affects only this workspace.
+												</p>
+												<div class="workspace-team-member-modal__role-row">
+													<label id={reactivationRoleLabelId} for={reactivationRoleId}>New workspace role</label>
+													<select
+														id={reactivationRoleId}
+														name="reactivation_target_role"
+														aria-labelledby={reactivationRoleLabelId}
+														aria-describedby={`${reactivationErrorId} ${errorId}`}
+														data-member-reactivation-role-select
+													>
+														<option value="" selected>Select role</option>
+														{reactivationAuthority.options.map((role) => (
+															<option value={role}>{workspaceRoleLabel(role)}</option>
+														))}
+													</select>
+													<p class="workspace-team-member-modal__hint" id={reactivationErrorId}>Previous role: {member.displayRole}. A new role is required unless Deactivated in error is selected.</p>
+												</div>
+												<label class="workspace-team-member-modal__checkbox" for={deactivatedInErrorId}>
+													<input
+														id={deactivatedInErrorId}
+														type="checkbox"
+														name="deactivated_in_error"
+														disabled={!reactivationAuthority.canRestorePreviousRole}
+														data-member-deactivated-in-error
+													/>
+													<span>Deactivated in error</span>
+												</label>
+												<p class="workspace-team-member-modal__hint" data-member-reactivation-restore-help>
+													{reactivationAuthority.canRestorePreviousRole
+														? `Restores the previous ${member.displayRole} role and records this reactivation as a correction. The original deactivation audit entry remains unchanged.`
+														: reactivationAuthority.restoreReason}
+												</p>
+												<label class="workspace-team-member-modal__reason" for={reactivationReasonId}>
+													<span>Reactivation reason</span>
+													<textarea
+														id={reactivationReasonId}
+														name="reactivation_reason"
+														rows="3"
+														maxlength={WORKSPACE_TEAM_MEMBER_REACTIVATION_REASON_MAX_LENGTH}
+														aria-describedby={`${reactivationReasonHelpId} ${errorId}`}
+														data-member-reactivation-reason
+													></textarea>
+												</label>
+												<p class="workspace-team-member-modal__hint" id={reactivationReasonHelpId}>Required. This reason is trimmed and stored as part of the membership audit record.</p>
+												<button class="button button--secondary" type="button" data-member-reactivation-back>Back to member details</button>
+											</div>
+										</section>
+										)}
 									</div>
 									<div class="workspace-team-member-modal__actions">
 										<button class="button button--secondary" type="button" data-workspace-team-member-cancel>Cancel</button>
-										{roleAuthority.canEdit ? (
+										{!isDeactivatedMember && roleAuthority.canEdit ? (
 											<button class="button button--primary" type="submit" disabled data-member-save>Save</button>
-										) : deactivationAuthority.canDeactivate ? (
+										) : !isDeactivatedMember && deactivationAuthority.canDeactivate ? (
+											<button class="button button--primary" type="submit" disabled data-member-save>Save</button>
+										) : isDeactivatedMember && reactivationAuthority.canReactivate ? (
 											<button class="button button--primary" type="submit" disabled data-member-save>Save</button>
 										) : (
 											<button class="button button--primary" type="button" disabled data-member-save>Save</button>
@@ -1505,9 +1639,34 @@ const invitationOperationKey = crypto.randomUUID();
 		return dialog instanceof HTMLElement && dialog.dataset.memberMode === 'deactivation';
 	}
 
+	function isMemberReactivationMode(dialog) {
+		return dialog instanceof HTMLElement && dialog.dataset.memberMode === 'reactivation';
+	}
+
 	function memberDeactivationReason(dialog) {
 		const reason = dialog.querySelector('[data-member-deactivation-reason]');
 		return reason instanceof HTMLTextAreaElement ? reason.value.trim() : '';
+	}
+
+	function memberReactivationReason(dialog) {
+		const reason = dialog.querySelector('[data-member-reactivation-reason]');
+		return reason instanceof HTMLTextAreaElement ? reason.value.trim() : '';
+	}
+
+	function memberReactivationRoleDecision(dialog) {
+		const select = dialog.querySelector('[data-member-reactivation-role-select]');
+		return select instanceof HTMLSelectElement ? normalizeMemberRole(select.value) : '';
+	}
+
+	function memberDeactivatedInError(dialog) {
+		const input = dialog.querySelector('[data-member-deactivated-in-error]');
+		return input instanceof HTMLInputElement && input.checked;
+	}
+
+	function memberHasReactivationDecision(dialog) {
+		return memberDeactivatedInError(dialog)
+			? dialog instanceof HTMLElement && dialog.dataset.memberCanRestorePreviousRole === 'true'
+			: Boolean(memberReactivationRoleDecision(dialog));
 	}
 
 	function memberRoleChanged(dialog) {
@@ -1520,9 +1679,9 @@ const invitationOperationKey = crypto.randomUUID();
 	}
 
 	function memberDialogDirty(dialog) {
-		return isMemberDeactivationMode(dialog)
-			? memberDeactivationReason(dialog).length > 0
-			: memberRoleChanged(dialog);
+		if (isMemberDeactivationMode(dialog)) return memberDeactivationReason(dialog).length > 0;
+		if (isMemberReactivationMode(dialog)) return memberReactivationReason(dialog).length > 0 || memberHasReactivationDecision(dialog);
+		return memberRoleChanged(dialog);
 	}
 
 	function resetMemberRoleSelection(dialog) {
@@ -1530,6 +1689,15 @@ const invitationOperationKey = crypto.randomUUID();
 		const select = dialog.querySelector('[data-member-role-select]');
 		if (!(form instanceof HTMLFormElement) || !(select instanceof HTMLSelectElement)) return;
 		select.value = normalizeMemberRole(form.dataset.memberInitialRole);
+	}
+
+	function resetMemberReactivationSelection(dialog) {
+		const select = dialog.querySelector('[data-member-reactivation-role-select]');
+		const checkbox = dialog.querySelector('[data-member-deactivated-in-error]');
+		const reason = dialog.querySelector('[data-member-reactivation-reason]');
+		if (select instanceof HTMLSelectElement) select.value = '';
+		if (checkbox instanceof HTMLInputElement) checkbox.checked = false;
+		if (reason instanceof HTMLTextAreaElement) reason.value = '';
 	}
 
 	function setMemberError(dialog, message) {
@@ -1565,9 +1733,21 @@ const invitationOperationKey = crypto.randomUUID();
 		if (select instanceof HTMLSelectElement) {
 			select.disabled = state !== 'editable' || isMemberDeactivationMode(dialog);
 		}
+		const reactivationSelect = dialog.querySelector('[data-member-reactivation-role-select]');
+		if (reactivationSelect instanceof HTMLSelectElement) {
+			reactivationSelect.disabled = state !== 'editable' || !isMemberReactivationMode(dialog) || memberDeactivatedInError(dialog);
+		}
+		const reactivationCheckbox = dialog.querySelector('[data-member-deactivated-in-error]');
+		if (reactivationCheckbox instanceof HTMLInputElement) {
+			reactivationCheckbox.disabled = state !== 'editable' || !isMemberReactivationMode(dialog) || dialog.dataset.memberCanRestorePreviousRole !== 'true';
+		}
 		const deactivateButton = dialog.querySelector('[data-member-deactivation-start]');
 		if (deactivateButton instanceof HTMLButtonElement) {
 			deactivateButton.disabled = state !== 'editable' || dialog.dataset.memberCanDeactivate !== 'true';
+		}
+		const reactivateButton = dialog.querySelector('[data-member-reactivation-start]');
+		if (reactivateButton instanceof HTMLButtonElement) {
+			reactivateButton.disabled = state !== 'editable' || dialog.dataset.memberCanReactivate !== 'true';
 		}
 	}
 
@@ -1593,12 +1773,34 @@ const invitationOperationKey = crypto.randomUUID();
 			save.textContent = 'Deactivate user';
 			return;
 		}
+		if (isMemberReactivationMode(dialog)) {
+			const reason = memberReactivationReason(dialog);
+			const canReactivate = dialog instanceof HTMLElement
+				&& dialog.dataset.memberCanReactivate === 'true'
+				&& dialog.dataset.memberEditState === 'editable'
+				&& !dialog.dataset.memberLocked;
+			save.disabled = !canReactivate || !hasSession || !memberHasReactivationDecision(dialog) || reason.length === 0 || reason.length > 500;
+			save.textContent = 'Reactivate user';
+			return;
+		}
 		save.disabled = !canEdit || !hasChanged || !hasSession;
 		save.textContent = 'Save';
 	}
 
 	function refreshMemberDeactivationReasonState(dialog) {
 		setMemberError(dialog, '');
+		updateMemberSaveState(dialog);
+		window.setTimeout(() => updateMemberSaveState(dialog), 0);
+	}
+
+	function refreshMemberReactivationState(dialog) {
+		setMemberError(dialog, '');
+		const select = dialog.querySelector('[data-member-reactivation-role-select]');
+		const checked = memberDeactivatedInError(dialog);
+		if (select instanceof HTMLSelectElement) {
+			select.disabled = checked || !(dialog instanceof HTMLElement) || dialog.dataset.memberEditState !== 'editable';
+			if (checked) select.value = '';
+		}
 		updateMemberSaveState(dialog);
 		window.setTimeout(() => updateMemberSaveState(dialog), 0);
 	}
@@ -1745,15 +1947,48 @@ const invitationOperationKey = crypto.randomUUID();
 		if (options.focus !== false && start instanceof HTMLButtonElement) start.focus();
 	}
 
+	function enterMemberReactivationMode(dialog) {
+		if (!(dialog instanceof HTMLElement) || dialog.dataset.memberCanReactivate !== 'true') return;
+		dialog.dataset.memberMode = 'reactivation';
+		const confirm = dialog.querySelector('[data-member-reactivation-confirm]');
+		if (confirm instanceof HTMLElement) confirm.hidden = false;
+		setMemberEditState(dialog, dialog.dataset.memberEditState || 'checking');
+		refreshMemberReactivationState(dialog);
+		const select = dialog.querySelector('[data-member-reactivation-role-select]');
+		const checkbox = dialog.querySelector('[data-member-deactivated-in-error]');
+		if (select instanceof HTMLSelectElement && !select.disabled) {
+			select.focus();
+		} else if (checkbox instanceof HTMLInputElement && !checkbox.disabled) {
+			checkbox.focus();
+		}
+	}
+
+	function exitMemberReactivationMode(dialog, options = {}) {
+		if (!(dialog instanceof HTMLElement)) return;
+		dialog.dataset.memberMode = 'role';
+		const confirm = dialog.querySelector('[data-member-reactivation-confirm]');
+		if (confirm instanceof HTMLElement) confirm.hidden = true;
+		resetMemberReactivationSelection(dialog);
+		setMemberError(dialog, '');
+		setMemberEditState(dialog, dialog.dataset.memberEditState || 'checking');
+		updateMemberSaveState(dialog);
+		const start = dialog.querySelector('[data-member-reactivation-start]');
+		if (options.focus !== false && start instanceof HTMLButtonElement) start.focus();
+	}
+
 	function closeMemberDialog(dialog, options = {}) {
 		if (!(dialog instanceof HTMLDialogElement)) return;
 		if (!options.force && memberDialogDirty(dialog)) {
 			const discard = window.confirm(isMemberDeactivationMode(dialog)
 				? 'Discard the unsaved deactivation reason?'
-				: 'Discard the unsaved role change?');
+				: isMemberReactivationMode(dialog)
+					? 'Discard the unsaved reactivation decision?'
+					: 'Discard the unsaved role change?');
 			if (!discard) return;
 			if (isMemberDeactivationMode(dialog)) {
 				exitMemberDeactivationMode(dialog);
+			} else if (isMemberReactivationMode(dialog)) {
+				exitMemberReactivationMode(dialog);
 			} else {
 				resetMemberRoleSelection(dialog);
 			}
@@ -1770,7 +2005,9 @@ const invitationOperationKey = crypto.randomUUID();
 			if (!(dialog instanceof HTMLDialogElement)) return;
 			lastTriggerByDialog.set(dialog, trigger);
 			exitMemberDeactivationMode(dialog, { focus: false });
+			exitMemberReactivationMode(dialog, { focus: false });
 			resetMemberRoleSelection(dialog);
+			resetMemberReactivationSelection(dialog);
 			if (!dialog.open) dialog.showModal();
 			const focusTarget = dialog.querySelector('[data-workspace-team-dialog-focus], [data-member-role-select], button');
 			if (focusTarget instanceof HTMLElement) focusTarget.focus();
@@ -1831,6 +2068,12 @@ const invitationOperationKey = crypto.randomUUID();
 		dialog.querySelectorAll('[data-member-deactivation-back]').forEach((button) => {
 			button.addEventListener('click', () => exitMemberDeactivationMode(dialog));
 		});
+		dialog.querySelectorAll('[data-member-reactivation-start]').forEach((button) => {
+			button.addEventListener('click', () => enterMemberReactivationMode(dialog));
+		});
+		dialog.querySelectorAll('[data-member-reactivation-back]').forEach((button) => {
+			button.addEventListener('click', () => exitMemberReactivationMode(dialog));
+		});
 		const onReasonStateChange = (event) => {
 			const target = event.target;
 			if (!(target instanceof HTMLTextAreaElement) || !target.matches('[data-member-deactivation-reason]')) return;
@@ -1845,6 +2088,36 @@ const invitationOperationKey = crypto.randomUUID();
 			reason.addEventListener('input', () => refreshMemberDeactivationReasonState(dialog));
 			reason.addEventListener('change', () => refreshMemberDeactivationReasonState(dialog));
 		}
+		const onReactivationStateChange = (event) => {
+			const target = event.target;
+			if (
+				!(target instanceof HTMLTextAreaElement)
+				&& !(target instanceof HTMLSelectElement)
+				&& !(target instanceof HTMLInputElement)
+			) return;
+			if (!target.matches('[data-member-reactivation-reason], [data-member-reactivation-role-select], [data-member-deactivated-in-error]')) return;
+			refreshMemberReactivationState(dialog);
+		};
+		dialog.addEventListener('input', onReactivationStateChange);
+		dialog.addEventListener('change', onReactivationStateChange);
+		dialog.addEventListener('keyup', onReactivationStateChange);
+		dialog.addEventListener('paste', onReactivationStateChange);
+		const reactivationSelect = dialog.querySelector('[data-member-reactivation-role-select]');
+		if (reactivationSelect instanceof HTMLSelectElement) {
+			reactivationSelect.addEventListener('input', () => refreshMemberReactivationState(dialog));
+			reactivationSelect.addEventListener('change', () => refreshMemberReactivationState(dialog));
+			reactivationSelect.disabled = true;
+		}
+		const reactivationCheckbox = dialog.querySelector('[data-member-deactivated-in-error]');
+		if (reactivationCheckbox instanceof HTMLInputElement) {
+			reactivationCheckbox.addEventListener('input', () => refreshMemberReactivationState(dialog));
+			reactivationCheckbox.addEventListener('change', () => refreshMemberReactivationState(dialog));
+		}
+		const reactivationReason = dialog.querySelector('[data-member-reactivation-reason]');
+		if (reactivationReason instanceof HTMLTextAreaElement) {
+			reactivationReason.addEventListener('input', () => refreshMemberReactivationState(dialog));
+			reactivationReason.addEventListener('change', () => refreshMemberReactivationState(dialog));
+		}
 		const form = dialog.querySelector('[data-workspace-team-member-role-form]');
 		if (form instanceof HTMLFormElement) {
 			form.addEventListener('submit', async (event) => {
@@ -1857,11 +2130,17 @@ const invitationOperationKey = crypto.randomUUID();
 				if (submitButton instanceof HTMLButtonElement) {
 					submitButton.disabled = true;
 					submitButton.dataset.originalText = submitButton.textContent || '';
-					submitButton.textContent = isMemberDeactivationMode(dialog) ? 'Deactivating...' : 'Saving...';
+					submitButton.textContent = isMemberDeactivationMode(dialog)
+						? 'Deactivating...'
+						: isMemberReactivationMode(dialog)
+							? 'Reactivating...'
+							: 'Saving...';
 				}
 				try {
 					const action = isMemberDeactivationMode(dialog)
 						? dialog.dataset.memberDeactivateAction || form.action
+						: isMemberReactivationMode(dialog)
+							? dialog.dataset.memberReactivateAction || form.action
 						: form.action;
 					const response = await fetch(action, {
 						method: 'POST',
@@ -1873,6 +2152,8 @@ const invitationOperationKey = crypto.randomUUID();
 					if (!response.ok || !payload.success) {
 						throw new Error(payload.message || (isMemberDeactivationMode(dialog)
 							? 'The member could not be deactivated. No membership changes were applied.'
+							: isMemberReactivationMode(dialog)
+								? 'The member could not be reactivated. No membership changes were applied.'
 							: 'The role change could not be saved. No membership changes were applied.'));
 					}
 					setMemberSession(dialog, '');
@@ -1881,6 +2162,8 @@ const invitationOperationKey = crypto.randomUUID();
 				} catch (error) {
 					setMemberError(dialog, error instanceof Error ? error.message : (isMemberDeactivationMode(dialog)
 						? 'The member could not be deactivated. No membership changes were applied.'
+						: isMemberReactivationMode(dialog)
+							? 'The member could not be reactivated. No membership changes were applied.'
 						: 'The role change could not be saved. No membership changes were applied.'));
 					updateMemberSaveState(dialog);
 				} finally {
@@ -3171,6 +3454,12 @@ const invitationOperationKey = crypto.randomUUID();
 	}
 
 	.workspace-team-member-modal__role-row {
+		display: grid;
+		gap: 0.35rem;
+		grid-column: 1 / -1;
+	}
+
+	.workspace-team-member-modal__detail-wide {
 		grid-column: 1 / -1;
 	}
 
@@ -3187,7 +3476,8 @@ const invitationOperationKey = crypto.randomUUID();
 		font-weight: 800;
 	}
 
-	.workspace-team-member-modal__details select {
+	.workspace-team-member-modal__details select,
+	.workspace-team-member-modal__role-row select {
 		width: min(100%, 18rem);
 		border: 1px solid rgba(110, 181, 224, 0.3);
 		border-radius: 0.5rem;
@@ -3197,12 +3487,14 @@ const invitationOperationKey = crypto.randomUUID();
 		font: inherit;
 	}
 
-	.workspace-team-member-modal__details select:disabled {
+	.workspace-team-member-modal__details select:disabled,
+	.workspace-team-member-modal__role-row select:disabled {
 		cursor: not-allowed;
 		opacity: 0.72;
 	}
 
-	.workspace-team-member-modal__details select:focus-visible {
+	.workspace-team-member-modal__details select:focus-visible,
+	.workspace-team-member-modal__role-row select:focus-visible {
 		border-color: rgba(0, 160, 255, 0.68);
 		outline: 3px solid rgba(0, 160, 255, 0.2);
 		outline-offset: 2px;
@@ -3213,13 +3505,35 @@ const invitationOperationKey = crypto.randomUUID();
 		background: rgba(37, 25, 12, 0.22);
 	}
 
-	.workspace-team-member-modal__deactivation-confirm {
+	.workspace-team-member-modal__section--reactivation {
+		border-color: rgba(64, 178, 121, 0.24);
+		background: rgba(12, 37, 25, 0.2);
+	}
+
+	.workspace-team-member-modal__deactivation-confirm,
+	.workspace-team-member-modal__reactivation-confirm {
 		display: grid;
 		gap: 0.7rem;
 	}
 
-	.workspace-team-member-modal__deactivation-confirm[hidden] {
+	.workspace-team-member-modal__deactivation-confirm[hidden],
+	.workspace-team-member-modal__reactivation-confirm[hidden] {
 		display: none;
+	}
+
+	.workspace-team-member-modal__checkbox {
+		display: flex;
+		align-items: center;
+		gap: 0.55rem;
+		width: fit-content;
+		color: var(--text);
+		font-weight: 850;
+	}
+
+	.workspace-team-member-modal__checkbox input {
+		width: 1rem;
+		height: 1rem;
+		accent-color: #40b279;
 	}
 
 	.workspace-team-member-modal__warning {
