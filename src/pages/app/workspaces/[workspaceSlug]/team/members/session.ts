@@ -27,6 +27,9 @@ function errorDetails(error: unknown) {
 	const hint = typeof (error as { hint?: unknown })?.hint === 'string'
 		? (error as { hint: string }).hint
 		: '';
+	const postgresCode = typeof (error as { code?: unknown })?.code === 'string'
+		? (error as { code: string }).code
+		: 'unknown';
 	const diagnostic = `${message} ${details} ${hint}`;
 	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) {
 		return {
@@ -38,6 +41,12 @@ function errorDetails(error: unknown) {
 		return {
 			code: 'active_member_required',
 			message: 'Only active workspace members can be opened for role management.',
+		};
+	}
+	if (postgresCode === 'PGRST202') {
+		return {
+			code: 'rest_schema_cache_stale',
+			message: 'Workspace role editing is waiting for the Supabase REST schema cache to refresh. Reopen this member after the REST API has reloaded.',
 		};
 	}
 	if (
@@ -52,11 +61,8 @@ function errorDetails(error: unknown) {
 			message: 'Workspace role editing is not ready yet. Apply the latest Workspace Team database migration, then reopen this member.',
 		};
 	}
-	const code = typeof (error as { code?: unknown })?.code === 'string'
-		? (error as { code: string }).code
-		: 'unknown';
 	return {
-		code: `database_${code.replace(/[^A-Za-z0-9_]/g, '_')}`,
+		code: `database_${postgresCode.replace(/[^A-Za-z0-9_]/g, '_')}`,
 		message: 'Member edit availability could not be checked.',
 	};
 }
