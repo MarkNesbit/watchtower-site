@@ -331,6 +331,8 @@ test('Authenticated dashboard workspace-name failure does not replace the person
 test('Authenticated dashboard source resolves through auth_user_id and member directory', async () => {
 	const source = await appLandingSource();
 
+	assert.match(source, /Astro\.locals as \{ runtime\?: \{ env\?: Record<string, unknown> \} \} \| undefined\)\?\.runtime\?\.env/);
+	assert.match(source, /createSupabaseServerClient\(accessToken, runtimeEnv\)/);
 	assert.match(source, /loadAuthenticatedDashboardContext\(serverSupabase, accessToken\)/);
 	assert.match(source, /data-signed-in-person/);
 	assert.match(source, /data-current-workspace/);

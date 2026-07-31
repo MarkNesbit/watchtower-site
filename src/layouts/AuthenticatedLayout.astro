@@ -9,12 +9,13 @@ import '../styles/rag.css';
 type Props = { title?: string; description?: string };
 const { title = 'WatchTower App', description = 'Authenticated WatchTower workspace area.' } = Astro.props;
 const accessToken = getServerAccessToken(Astro.cookies);
+const runtimeEnv = (Astro.locals as { runtime?: { env?: Record<string, unknown> } } | undefined)?.runtime?.env;
 let roleSimulationState: RoleSimulationState | null = null;
 let serverSessionConfirmed = false;
 
 if (accessToken) {
 	try {
-		const serverSupabase = createSupabaseServerClient(accessToken);
+		const serverSupabase = createSupabaseServerClient(accessToken, runtimeEnv);
 		const { data, error } = await serverSupabase.auth.getUser(accessToken);
 		serverSessionConfirmed = Boolean(data.user && !error);
 		if (serverSessionConfirmed) {
