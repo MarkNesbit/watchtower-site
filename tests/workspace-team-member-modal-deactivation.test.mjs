@@ -17,6 +17,7 @@ const pageUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro'
 const deactivateRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/members/deactivate.ts', import.meta.url);
 const impactRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team/members/deactivation-impact.ts', import.meta.url);
 const migrationUrl = new URL('../supabase/migrations/20260731000200_workspace_member_modal_deactivation.sql', import.meta.url);
+const auditTargetRepairMigrationUrl = new URL('../supabase/migrations/20260731000300_workspace_member_modal_deactivation_audit_target_repair.sql', import.meta.url);
 
 async function pageSource() {
 	return readFile(pageUrl, 'utf8');
@@ -32,6 +33,10 @@ async function impactRouteSource() {
 
 async function migrationSql() {
 	return readFile(migrationUrl, 'utf8');
+}
+
+async function auditTargetRepairMigrationSql() {
+	return readFile(auditTargetRepairMigrationUrl, 'utf8');
 }
 
 test('Workspace Team deactivation authority follows Owner and Admin rules', () => {
@@ -194,6 +199,20 @@ test('Workspace Team deactivation migration mutates only membership lifecycle an
 	assert.match(sql, /notify pgrst, 'reload schema'/);
 	assert.doesNotMatch(sql, /update public\.profiles|delete from public\.profiles|delete from auth\.users|update auth\.users/i);
 	assert.doesNotMatch(sql, /insert into public\.project_members|update public\.project_members|delete from public\.project_members/i);
+});
+
+test('Workspace Team deactivation audit target repair keeps target_user_id in the Auth UUID domain', async () => {
+	const sql = await auditTargetRepairMigrationSql();
+
+	assert.match(sql, /workspace_membership_audit_events\.target_user_id references auth\.users\(id\)/);
+	assert.match(sql, /create or replace function public\.deactivate_workspace_member_from_modal_api/);
+	assert.match(sql, /perform public\.record_workspace_membership_audit_event\(/);
+	assert.match(sql, /v_updated\.auth_user_id,\s*\n\s*v_actor\.actor_user_id,\s*\n\s*'membership_deactivated'/);
+	assert.match(sql, /'profile_id', v_updated\.user_id/);
+	assert.match(sql, /'target_auth_user_id', v_updated\.auth_user_id/);
+	assert.doesNotMatch(sql, /coalesce\(v_updated\.auth_user_id, v_updated\.user_id\)/);
+	assert.match(sql, /grant execute on function public\.deactivate_workspace_member_from_modal_api\(uuid, uuid, text, uuid, text\) to anon, authenticated, service_role/);
+	assert.match(sql, /notify pgrst, 'reload schema'/);
 });
 
 test('Workspace Team deactivation errors are clear and non-leaky', () => {
