@@ -1,4 +1,5 @@
 import { assertCan, can, isWorkspaceRole, type WorkspaceRole } from './permissions.ts';
+import { listWorkspacePeople, workspacePeopleByIdentity } from './workspacePeople.ts';
 
 export const ACTION_STATUSES = [
 	'open',
@@ -495,8 +496,6 @@ export function canTakeOverActionAcceptanceRole(role: unknown): role is 'owner' 
 export function actionProfileName(profile: ActionProfile | null | undefined, fallback = 'Unassigned'): string {
 	const displayName = profile?.display_name?.trim();
 	if (displayName) return displayName;
-	const email = profile?.email?.trim();
-	if (email) return email;
 	return fallback;
 }
 
@@ -980,34 +979,20 @@ async function loadActionProfiles(organisationId: string, profileIds: string[], 
 	if (uniqueProfileIds.length === 0) return profilesById;
 
 	try {
-		const { data: profiles } = await client
-			.from('profiles')
-			.select('id, display_name, email')
-			.in('id', uniqueProfileIds);
-		for (const profile of profiles ?? []) {
-			profilesById.set(profile.id, { ...profile, isAssignable: false });
-		}
-	} catch {
-		for (const profileId of uniqueProfileIds) profilesById.set(profileId, { id: profileId, isAssignable: false });
-	}
-
-	try {
-		const { data: memberships } = await client
-			.from('organisation_members')
-			.select('user_id, role, status')
-			.eq('organisation_id', organisationId)
-			.in('user_id', uniqueProfileIds);
-		for (const membership of memberships ?? []) {
-			const existing = profilesById.get(membership.user_id) ?? { id: membership.user_id };
-			profilesById.set(membership.user_id, {
-				...existing,
-				role: membership.role,
-				membershipStatus: membership.status,
-				isAssignable: membership.status === 'active' && canHoldActionWorkflowRole(membership.role),
+		const peopleByIdentity = workspacePeopleByIdentity(await listWorkspacePeople(organisationId, client));
+		for (const requestedId of uniqueProfileIds) {
+			const person = peopleByIdentity.get(requestedId);
+			if (!person) continue;
+			profilesById.set(requestedId, {
+				id: person.profileId,
+				display_name: person.displayName,
+				role: person.workspaceRole,
+				membershipStatus: person.membershipStatus,
+				isAssignable: person.assignmentEligible && canHoldActionWorkflowRole(person.workspaceRole),
 			});
 		}
 	} catch {
-		// Profile labels are best-effort; permission-critical checks remain in RPCs.
+		for (const profileId of uniqueProfileIds) profilesById.set(profileId, { id: profileId, isAssignable: false });
 	}
 
 	return profilesById;
@@ -1109,27 +1094,17 @@ export async function listEligibleActioners(
 ): Promise<ActionProfile[]> {
 	assertCan(workspaceRole, 'action.view', 'Your workspace role does not permit Actions access.');
 
-	const { data: memberships, error: membershipError } = await client
-		.from('organisation_members')
-		.select('user_id, role, status')
-		.eq('organisation_id', organisationId)
-		.eq('status', 'active')
-		.in('role', ['owner', 'admin', 'member'])
-		.order('joined_at', { ascending: true, nullsFirst: false })
-		.order('created_at', { ascending: true });
-
-	if (membershipError) throw membershipError;
-	const memberRows = memberships ?? [];
-	const profiles = await loadActionProfiles(organisationId, memberRows.map((membership) => membership.user_id), client);
-
-	return memberRows.map((membership) => ({
-		id: membership.user_id,
-		display_name: profiles.get(membership.user_id)?.display_name ?? null,
-		email: profiles.get(membership.user_id)?.email ?? null,
-		role: membership.role,
-		membershipStatus: membership.status,
-		isAssignable: true,
-	}));
+	const people = await listWorkspacePeople(organisationId, client, { eligibleOnly: true });
+	return people
+		.filter((person) => canHoldActionWorkflowRole(person.workspaceRole))
+		.map((person) => ({
+			id: person.profileId,
+			display_name: person.displayName,
+			email: null,
+			role: person.workspaceRole,
+			membershipStatus: person.membershipStatus,
+			isAssignable: true,
+		}));
 }
 
 export function canManageProjectAction(action: ProjectAction, userId: string | null | undefined, workspaceRole: WorkspaceRole | string | null | undefined): boolean {

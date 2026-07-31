@@ -2734,6 +2734,7 @@ test('Risk Register data access filters by selected workspace and project', asyn
 		[
 			['eq', 'organisation_id', 'workspace-1'],
 			['eq', 'project_id', 'project-1'],
+			['eq', 'organisation_id', 'workspace-1'],
 		],
 	);
 	assert.deepEqual(
@@ -2772,6 +2773,7 @@ test('Source risk preview data access stays scoped to selected workspace and pro
 		[
 			['eq', 'organisation_id', 'workspace-1'],
 			['eq', 'project_id', 'project-1'],
+			['eq', 'organisation_id', 'workspace-1'],
 		],
 	);
 	assert.deepEqual(client.calls.find((call) => call[0] === 'in'), ['in', 'risk_id', ['risk-1']]);
@@ -2817,6 +2819,7 @@ test('Risk comments use project risk notes as a scoped top-level comment stream'
 			['eq', 'organisation_id', 'workspace-1'],
 			['eq', 'project_id', 'project-1'],
 			['eq', 'risk_id', 'risk-1'],
+			['eq', 'organisation_id', 'workspace-1'],
 		],
 	);
 	assert.ok(listClient.calls.some((call) => call[0] === 'from' && call[1] === 'project_risk_notes'));
