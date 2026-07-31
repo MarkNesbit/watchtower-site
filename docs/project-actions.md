@@ -330,3 +330,5 @@ Creation and responsibility management use the workspace-scoped Action identity 
 WT-ACTION-IDENTITY-001C3 makes Actioner progress, direct completion and submission split-ID safe. Approval and administrative operations remain deferred to C4/C5.
 
 WT-ACTION-IDENTITY-001C4 makes current-Approver approval, return, rejection, replacement and withdrawal split-ID safe. Administrative lifecycle operations and takeover remain C5 scope.
+
+WT-ACTION-IDENTITY-001C5 converts cancellation, formal changes, reissue and governance takeover to the same identity contract. Combined release validation remains required before deployment.
