@@ -38,6 +38,7 @@ import {
 	parseActionRegisterVisibleCount,
 	reissueProjectAction,
 	returnProjectActionToActioner,
+	rejectProjectAction,
 	saveProjectActionProgress,
 	sourceLabelForAction,
 	submitProjectAction,
@@ -216,12 +217,13 @@ try {
 						} else if (intent === 'submit-for-review') {
 							await submitProjectAction(serverSupabase, { ...expected, response: modalValues.progress });
 						} else if (intent === 'direct-complete') {
-							const submitted = await submitProjectAction(serverSupabase, { ...expected, response: modalValues.progress });
-							await completeProjectAction(serverSupabase, { actionId, expectedStatus: submitted.status, expectedUpdatedAt: submitted.updated_at });
+							await completeProjectAction(serverSupabase, expected);
 						} else if (intent === 'complete') {
 							await completeProjectAction(serverSupabase, expected);
 						} else if (intent === 'return-to-actioner') {
 							await returnProjectActionToActioner(serverSupabase, { ...expected, reason: modalValues.reason });
+						} else if (intent === 'reject') {
+							await rejectProjectAction(serverSupabase, { ...expected, reason: modalValues.reason });
 						} else if (intent === 'cancel') {
 							await cancelProjectAction(serverSupabase, { ...expected, reason: modalValues.reason });
 						} else if (intent === 'amend-brief') {
@@ -646,6 +648,14 @@ const scopeItems = [
 											<input type="hidden" name="expected_updated_at" value={selectedAction.updated_at} />
 											<input type="hidden" name="return_to" value={buildRegisterPath({ action: selectedAction.id })} />
 											<button class="button button--primary" type="submit" name="intent" value="complete">Mark complete</button>
+										</form>
+										<form method="post" class="action-workflow-form">
+											<input type="hidden" name="action_id" value={selectedAction.id} />
+											<input type="hidden" name="expected_status" value={selectedAction.status} />
+											<input type="hidden" name="expected_updated_at" value={selectedAction.updated_at} />
+											<input type="hidden" name="return_to" value={buildRegisterPath({ action: selectedAction.id })} />
+											<label><span>Reject reason</span><textarea name="reason" rows="3" required>{modalValues.reason}</textarea></label>
+											<button class="button button--secondary" type="submit" name="intent" value="reject">Reject Action</button>
 										</form>
 									</div>
 								</section>

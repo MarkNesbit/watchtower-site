@@ -328,3 +328,5 @@ The following remain outside this foundation:
 Creation and responsibility management use the workspace-scoped Action identity resolver introduced by WT-ACTION-IDENTITY-001C1. New Actioner and Approver selections are membership IDs and are translated to the current profile-keyed storage contract within the Action RPCs. The remaining lifecycle transitions retain their legacy contract pending C3–C5; they must not be represented as split-ID safe.
 
 WT-ACTION-IDENTITY-001C3 makes Actioner progress, direct completion and submission split-ID safe. Approval and administrative operations remain deferred to C4/C5.
+
+WT-ACTION-IDENTITY-001C4 makes current-Approver approval, return, rejection, replacement and withdrawal split-ID safe. Administrative lifecycle operations and takeover remain C5 scope.
