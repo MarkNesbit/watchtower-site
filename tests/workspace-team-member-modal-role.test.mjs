@@ -20,6 +20,7 @@ const sessionRouteUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/tea
 const supabaseServerUrl = new URL('../src/lib/supabaseServer.ts', import.meta.url);
 const migrationUrl = new URL('../supabase/migrations/20260730000100_workspace_member_modal_role_management.sql', import.meta.url);
 const repairMigrationUrl = new URL('../supabase/migrations/20260730000200_workspace_member_modal_role_management_repair.sql', import.meta.url);
+const apiWrapperMigrationUrl = new URL('../supabase/migrations/20260731000100_workspace_member_modal_rpc_api_wrappers.sql', import.meta.url);
 
 async function pageSource() {
 	return readFile(pageUrl, 'utf8');
@@ -31,6 +32,10 @@ async function migrationSql() {
 
 async function repairMigrationSql() {
 	return readFile(repairMigrationUrl, 'utf8');
+}
+
+async function apiWrapperMigrationSql() {
+	return readFile(apiWrapperMigrationUrl, 'utf8');
 }
 
 test('Workspace Team central permissions restrict page access to Owner and Admin', () => {
@@ -134,12 +139,13 @@ test('Workspace Team member session and role routes use workspace-scoped secure 
 	const roleRoute = await readFile(roleRouteUrl, 'utf8');
 	const sessionRoute = await readFile(sessionRouteUrl, 'utf8');
 	const supabaseServer = await readFile(supabaseServerUrl, 'utf8');
+	const workspaceTeam = await readFile(new URL('../src/lib/workspaceTeam.ts', import.meta.url), 'utf8');
 
 	assert.equal(buildWorkspaceTeamMemberSessionPath('alpha workspace'), '/app/workspaces/alpha%20workspace/team/members/session');
 	assert.equal(buildWorkspaceTeamMemberRolePath('alpha workspace'), '/app/workspaces/alpha%20workspace/team/members/role');
-	assert.equal(WORKSPACE_TEAM_MEMBER_SESSION_RPC, 'start_workspace_member_edit_session');
-	assert.equal(WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC, 'release_workspace_member_edit_session');
-	assert.equal(WORKSPACE_TEAM_MEMBER_ROLE_CHANGE_RPC, 'change_workspace_member_role');
+	assert.equal(WORKSPACE_TEAM_MEMBER_SESSION_RPC, 'start_workspace_member_edit_session_api');
+	assert.equal(WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC, 'release_workspace_member_edit_session_api');
+	assert.equal(WORKSPACE_TEAM_MEMBER_ROLE_CHANGE_RPC, 'change_workspace_member_role_api');
 	assert.match(supabaseServer, /createSupabaseServerClient\(accessToken\?: string, env\?: Record<string, unknown>\)/);
 	assert.match(supabaseServer, /runtimeString\(env, 'PUBLIC_SUPABASE_URL', supabaseUrl\)/);
 	assert.match(supabaseServer, /runtimeString\(env, 'PUBLIC_SUPABASE_ANON_KEY', supabaseAnonKey\)/);
@@ -157,10 +163,15 @@ test('Workspace Team member session and role routes use workspace-scoped secure 
 	assert.match(sessionRoute, /WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC/);
 	assert.match(sessionRoute, /Workspace role editing is not ready yet/);
 	assert.match(sessionRoute, /Apply the latest Workspace Team database migration/);
+	assert.match(sessionRoute, /postgresCode === 'PGRST202'/);
+	assert.match(sessionRoute, /rest_schema_cache_stale/);
+	assert.match(sessionRoute, /Supabase REST schema cache to refresh/);
 	assert.match(sessionRoute, /error_code: detail\.code/);
 	assert.match(sessionRoute, /schema_not_ready/);
-	assert.match(sessionRoute, /database_\$\{code\.replace/);
-	assert.match(sessionRoute, /start_workspace_member_edit_session/);
+	assert.match(sessionRoute, /database_\$\{postgresCode\.replace/);
+	assert.match(workspaceTeam, /start_workspace_member_edit_session_api/);
+	assert.match(workspaceTeam, /release_workspace_member_edit_session_api/);
+	assert.match(workspaceTeam, /change_workspace_member_role_api/);
 	assert.match(sessionRoute, /workspace_member_edit_sessions/);
 	assert.match(roleRoute, /getWorkspaceBySlug\(serverSupabase, workspaceSlug, accessToken\)/);
 	assert.match(roleRoute, /can\(workspace\.role, 'workspaceTeam\.manageRoles'\)/);
@@ -168,6 +179,24 @@ test('Workspace Team member session and role routes use workspace-scoped secure 
 	assert.match(roleRoute, /p_edit_session_id/);
 	assert.match(roleRoute, /WORKSPACE_TEAM_MEMBER_ROLE_CHANGE_RPC/);
 	assert.doesNotMatch(roleRoute, /\.from\('organisation_members'\)\.update|\.from\("organisation_members"\)\.update/);
+});
+
+test('Workspace Team member role API wrapper migration exposes REST-visible secure RPC wrappers', async () => {
+	const sql = await apiWrapperMigrationSql();
+
+	assert.match(sql, /create or replace function public\.start_workspace_member_edit_session_api/);
+	assert.match(sql, /returns jsonb/);
+	assert.match(sql, /from public\.start_workspace_member_edit_session\(p_organisation_id, p_membership_id\)/);
+	assert.match(sql, /jsonb_build_object\(/);
+	assert.match(sql, /create or replace function public\.release_workspace_member_edit_session_api/);
+	assert.match(sql, /select public\.release_workspace_member_edit_session\(/);
+	assert.match(sql, /create or replace function public\.change_workspace_member_role_api/);
+	assert.match(sql, /select public\.change_workspace_member_role\(/);
+	assert.match(sql, /revoke all on function public\.start_workspace_member_edit_session_api\(uuid, uuid\) from public/);
+	assert.match(sql, /grant execute on function public\.start_workspace_member_edit_session_api\(uuid, uuid\) to anon, authenticated, service_role/);
+	assert.match(sql, /grant execute on function public\.release_workspace_member_edit_session_api\(uuid, uuid, text\) to anon, authenticated, service_role/);
+	assert.match(sql, /grant execute on function public\.change_workspace_member_role_api\(uuid, uuid, text, text, uuid\) to anon, authenticated, service_role/);
+	assert.match(sql, /notify pgrst, 'reload schema'/);
 });
 
 test('Workspace Team member role migration adds scoped edit sessions RLS and expiry release', async () => {

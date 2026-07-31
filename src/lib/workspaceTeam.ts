@@ -86,9 +86,9 @@ const ROLE_LABELS: Record<WorkspaceRole, string> = {
 	viewer: 'Viewer',
 };
 
-export const WORKSPACE_TEAM_MEMBER_SESSION_RPC = 'start_workspace_member_edit_session';
-export const WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC = 'release_workspace_member_edit_session';
-export const WORKSPACE_TEAM_MEMBER_ROLE_CHANGE_RPC = 'change_workspace_member_role';
+export const WORKSPACE_TEAM_MEMBER_SESSION_RPC = 'start_workspace_member_edit_session_api';
+export const WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC = 'release_workspace_member_edit_session_api';
+export const WORKSPACE_TEAM_MEMBER_ROLE_CHANGE_RPC = 'change_workspace_member_role_api';
 
 export type WorkspaceTeamRoleAuthority = {
 	canEdit: boolean;
