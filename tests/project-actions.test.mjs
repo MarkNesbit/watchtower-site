@@ -568,7 +568,7 @@ test('Project Action register concern tones and due-date labels combine timing a
 	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-11' }), now), 'red');
 	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-12' }), now), 'red');
 	assert.equal(actionConcernTone(actionFixture({ due_date: null }), now), 'amber');
-	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-13', actioner_id: null }), now), 'amber');
+	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-13', actioner_id: null }), now), 'red');
 	assert.equal(actionConcernTone(actionFixture({ due_date: '2026-07-15' }), now), 'amber');
 	assert.equal(actionConcernTone(actionFixture({ status: 'submitted', due_date: '2026-07-20' }), now), 'neutral');
 	assert.equal(actionConcernTone(actionFixture({ status: 'complete', due_date: '2026-07-01' }), now), 'green');
@@ -669,8 +669,8 @@ test('Project Action All project Outstanding includes null Actioner and due-date
 	assert.equal(actionProfileName(unassignedUndated.actioner, 'Workspace member'), 'Workspace member');
 	assert.equal(unassignedUndated.actioner_id ? actionProfileName(unassignedUndated.actioner, 'Workspace member') : 'Unassigned', 'Unassigned');
 	assert.deepEqual(actionDueDateDisplay(unassignedUndated, now), { label: 'No due date', tone: 'amber' });
-	assert.equal(actionConcernTone(unassignedUndated, now), 'amber');
-	assert.equal(actionConcernTone(unassignedDated, now), 'amber');
+	assert.equal(actionConcernTone(unassignedUndated, now), 'red');
+	assert.equal(actionConcernTone(unassignedDated, now), 'red');
 	assert.equal(actionConcernTone(assignedUndated, now), 'amber');
 	assert.equal(projectOutstanding.at(-1)?.action_ref, 'Action-HHH-004');
 });
@@ -718,7 +718,7 @@ test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register s
 	assert.match(register, /title="Actions"/);
 	assert.match(register, /Track project actions from creation to closure\./);
 	assert.match(register, /New Action/);
-	assert.match(register, /Actions with no due date or Actioner will display as Amber\./);
+	assert.match(register, /Actions with no Actioner display as Red; Actions with no due date display as Amber\./);
 	assert.match(register, /import DateField/);
 	assert.match(register, /<DateField[\s\S]*name="due_date"[\s\S]*pickerLabel="Choose due date"[\s\S]*clearLabel="Clear due date"/);
 	assert.doesNotMatch(register, /data-action-date-input|data-action-date-clear|data-action-date-picker/);

@@ -880,3 +880,6 @@ Valid workflow transitions are limited to the MVP matrix: create to `open`; Acti
 History is append-only for authenticated users. No authenticated update/delete grants are provided, and a trigger prevents non-service-role update/delete attempts.
 
 WT-ACTION-002 adds the first authenticated Actions interface at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/actions` with detail pages at `/app/workspaces/{workspaceSlug}/projects/{projectSlug}/actions/{actionId}`. The register uses query-backed tabs, search, filters, sorting and pagination; direct register creation uses the controlled `create_project_action` RPC with Project as the source. Detail pages show read-only immutable history and expose only state-valid management controls backed by the WT-ACTION-001B RPCs. Viewer remains read-only. The complete Actioner response journey remains deferred to WT-ACTION-003.
+# Action identity compatibility (WT-ACTION-IDENTITY-001C2)
+
+`project_actions` responsibility columns remain profile-keyed pending the 001D migration. C2 adds `created_by_auth_user_id`, `updated_by_auth_user_id` and `approval_required`; `project_action_history` adds `actor_auth_user_id` and `actor_membership_id`. These separate authenticated audit identity from profile attribution and record the membership used for converted creation and responsibility events.

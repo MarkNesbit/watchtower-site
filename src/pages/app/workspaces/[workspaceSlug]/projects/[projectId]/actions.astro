@@ -7,6 +7,7 @@ import ProjectContentPanel from '../../../../../../components/app/ProjectContent
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
 import { can } from '../../../../../../lib/permissions';
+import { resolveActionIdentity } from '../../../../../../lib/actionIdentity';
 import {
 	ACTION_DISPLAY_LABELS,
 	ACTION_REGISTER_LOAD_INCREMENT,
@@ -37,6 +38,7 @@ import {
 	parseActionRegisterVisibleCount,
 	reissueProjectAction,
 	returnProjectActionToActioner,
+	rejectProjectAction,
 	saveProjectActionProgress,
 	sourceLabelForAction,
 	submitProjectAction,
@@ -62,7 +64,7 @@ let actorId = '';
 let message = '';
 let actionsLoadError = '';
 let createError = '';
-let createValues = { brief: '', actionerId: '', dueDate: '' };
+let createValues = { brief: '', actionerId: '', approverId: '', dueDate: '' };
 let createModalOpen = false;
 let actionModalId = Astro.url.searchParams.get('action') ?? '';
 let actionError = '';
@@ -139,6 +141,12 @@ try {
 	} else {
 		workspaceName = organisation.name;
 		workspaceRole = workspace.role;
+		try {
+			// Legacy Action rows are profile-keyed; resolve Auth to profile before read-only ownership checks.
+			actorId = (await resolveActionIdentity(serverSupabase, organisation.id)).profileId;
+		} catch {
+			actorId = '';
+		}
 		const { data, error } = await serverSupabase
 			.from('projects')
 			.select('id, name, project_ref, slug')
@@ -169,6 +177,7 @@ try {
 					createValues = {
 						brief: String(formData.get('brief') ?? ''),
 						actionerId: String(formData.get('actioner_id') ?? ''),
+						approverId: String(formData.get('approver_id') ?? ''),
 						dueDate: String(formData.get('due_date') ?? ''),
 					};
 					try {
@@ -179,6 +188,7 @@ try {
 							brief: createValues.brief,
 							dueDate: createValues.dueDate || null,
 							actionerId: createValues.actionerId || null,
+							approverId: createValues.approverId || null,
 							sourceType: 'project',
 							sourceLabel: data.name,
 						});
@@ -207,12 +217,13 @@ try {
 						} else if (intent === 'submit-for-review') {
 							await submitProjectAction(serverSupabase, { ...expected, response: modalValues.progress });
 						} else if (intent === 'direct-complete') {
-							const submitted = await submitProjectAction(serverSupabase, { ...expected, response: modalValues.progress });
-							await completeProjectAction(serverSupabase, { actionId, expectedStatus: submitted.status, expectedUpdatedAt: submitted.updated_at });
+							await completeProjectAction(serverSupabase, expected);
 						} else if (intent === 'complete') {
 							await completeProjectAction(serverSupabase, expected);
 						} else if (intent === 'return-to-actioner') {
 							await returnProjectActionToActioner(serverSupabase, { ...expected, reason: modalValues.reason });
+						} else if (intent === 'reject') {
+							await rejectProjectAction(serverSupabase, { ...expected, reason: modalValues.reason });
 						} else if (intent === 'cancel') {
 							await cancelProjectAction(serverSupabase, { ...expected, reason: modalValues.reason });
 						} else if (intent === 'amend-brief') {
@@ -358,8 +369,8 @@ const canTakeOverSelectedAction = selectedAction ? canTakeOverProjectAction(sele
 const canRespondToSelectedAction = selectedAction
 	? can(workspaceRole, 'action.respond') && selectedAction.actioner_id === actorId && ['open', 'returned_to_actioner'].includes(selectedAction.status)
 	: false;
-const canDirectCompleteSelectedAction = Boolean(canRespondToSelectedAction && selectedAction?.acceptance_owner_id === actorId);
-const canSubmitSelectedAction = Boolean(canRespondToSelectedAction && !canDirectCompleteSelectedAction);
+const canDirectCompleteSelectedAction = Boolean(canRespondToSelectedAction && !selectedAction?.approval_required);
+const canSubmitSelectedAction = Boolean(canRespondToSelectedAction && selectedAction?.approval_required);
 const canReviewSelectedAction = Boolean(canManageSelectedAction && selectedAction?.status === 'submitted');
 const canReissueSelectedAction = Boolean(canManageSelectedAction && ['returned_to_raiser', 'rejected_by_actioner'].includes(selectedAction?.status ?? ''));
 const canAssignSelectedAction = Boolean(canManageSelectedAction && selectedAction?.status !== 'submitted');
@@ -638,6 +649,14 @@ const scopeItems = [
 											<input type="hidden" name="return_to" value={buildRegisterPath({ action: selectedAction.id })} />
 											<button class="button button--primary" type="submit" name="intent" value="complete">Mark complete</button>
 										</form>
+										<form method="post" class="action-workflow-form">
+											<input type="hidden" name="action_id" value={selectedAction.id} />
+											<input type="hidden" name="expected_status" value={selectedAction.status} />
+											<input type="hidden" name="expected_updated_at" value={selectedAction.updated_at} />
+											<input type="hidden" name="return_to" value={buildRegisterPath({ action: selectedAction.id })} />
+											<label><span>Reject reason</span><textarea name="reason" rows="3" required>{modalValues.reason}</textarea></label>
+											<button class="button button--secondary" type="submit" name="intent" value="reject">Reject Action</button>
+										</form>
 									</div>
 								</section>
 							)}
@@ -751,12 +770,16 @@ const scopeItems = [
 							<option value="" selected={!createValues.actionerId}>Unassigned</option>
 							{eligibleActioners.map((person) => <option value={person.id} selected={createValues.actionerId === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
 						</select></label>
+						<label><span>Approver</span><select name="approver_id">
+							<option value="" selected={!createValues.approverId}>No Approver</option>
+							{eligibleActioners.map((person) => <option value={person.id} selected={createValues.approverId === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
+						</select></label>
 						<DateField
 							id="action-create-due-date"
 							name="due_date"
 							label="Due date"
 							value={createValues.dueDate}
-							helperText="Actions with no due date or Actioner will display as Amber."
+							helperText="Actions with no Actioner display as Red; Actions with no due date display as Amber."
 							pickerLabel="Choose due date"
 							clearLabel="Clear due date"
 						/>
