@@ -25,6 +25,7 @@ import {
 	buildWorkspaceTeamMemberRolePath,
 	buildWorkspaceTeamMemberSessionPath,
 	buildWorkspaceTeamPath,
+	NO_ACTIVE_WORKSPACE_PATH,
 } from './projectRoutes.ts';
 import { buildUniqueSlug, slugifyProjectName } from './projectSlugs.ts';
 import { buildUniqueProjectRef, normaliseProjectRef, projectRefValidationMessage, suggestProjectRef } from './projectRefs.ts';
@@ -162,6 +163,7 @@ export {
 	buildWorkspaceTeamMemberRolePath,
 	buildWorkspaceTeamMemberSessionPath,
 	buildWorkspaceTeamPath,
+	NO_ACTIVE_WORKSPACE_PATH,
 	buildUniqueProjectRef,
 	normaliseProjectRef,
 	projectRefValidationMessage,
@@ -296,6 +298,21 @@ export async function getWorkspaceBySlug(client, workspaceSlug: string, accessTo
 
 	if (error) throw error;
 	return applyRoleSimulationToMembership(data, client, user.id);
+}
+
+export function getWorkspaceSlugFromMembership(membership: WorkspaceMembershipRow | null | undefined): string {
+	const organisation = getMembershipOrganisation(membership);
+	return typeof organisation?.slug === 'string' ? organisation.slug : '';
+}
+
+export function buildWorkspaceAccessFallbackPath(membership: WorkspaceMembershipRow | null | undefined): string {
+	const workspaceSlug = getWorkspaceSlugFromMembership(membership);
+	return workspaceSlug ? '/app' : NO_ACTIVE_WORKSPACE_PATH;
+}
+
+export async function resolveWorkspaceAccessFallbackPath(client, accessToken?: string): Promise<string> {
+	const workspace = await getCurrentWorkspace(client, accessToken);
+	return buildWorkspaceAccessFallbackPath(workspace);
 }
 
 export async function getAccessibleProjectsBySlug(client, projectSlug: string, accessToken?: string) {

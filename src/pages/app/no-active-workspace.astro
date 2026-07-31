@@ -1,0 +1,79 @@
+---
+import SignOutButton from '../../components/auth/SignOutButton.astro';
+import AuthenticatedLayout from '../../layouts/AuthenticatedLayout.astro';
+import { loadAuthenticatedDashboardContext } from '../../lib/authenticatedDashboard';
+import { createSupabaseServerClient, getServerAccessToken } from '../../lib/supabaseServer';
+
+const accessToken = getServerAccessToken(Astro.cookies);
+let personName = 'Signed-in user';
+
+if (accessToken) {
+	try {
+		const serverSupabase = createSupabaseServerClient(accessToken);
+		const context = await loadAuthenticatedDashboardContext(serverSupabase, accessToken);
+		personName = context.personName;
+	} catch {
+		personName = 'Signed-in user';
+	}
+}
+---
+<AuthenticatedLayout
+	title="No Active Workspace | WatchTower"
+	description="Signed-in WatchTower account without an active workspace."
+	hideAppNavigation
+>
+	<section class="no-active-workspace" aria-labelledby="no-active-workspace-heading">
+		<div class="no-active-workspace__panel">
+			<p class="eyebrow">Workspace access</p>
+			<h1 id="no-active-workspace-heading">No active workspace access</h1>
+			<p class="no-active-workspace__lead" data-no-active-workspace-message>
+				You do not currently have access to an active WatchTower workspace.
+			</p>
+			<p data-no-active-workspace-identity>Signed in as {personName}.</p>
+			<p>
+				Your account can still authenticate, but workspace membership is checked separately.
+				Contact a Workspace Owner or Admin if you need access restored.
+			</p>
+			<div class="no-active-workspace__actions">
+				<SignOutButton className="button button--primary" label="Sign out" />
+			</div>
+		</div>
+	</section>
+</AuthenticatedLayout>
+
+<style>
+	.no-active-workspace {
+		display: grid;
+		min-height: 56vh;
+		place-items: center;
+		padding: clamp(2rem, 6vw, 5rem) 0;
+	}
+
+	.no-active-workspace__panel {
+		width: min(100%, 48rem);
+		border: 1px solid var(--border);
+		border-radius: 1rem;
+		padding: clamp(1.25rem, 3vw, 2rem);
+		background: rgba(5, 14, 25, 0.92);
+		box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+	}
+
+	.no-active-workspace h1 {
+		margin-bottom: 0.75rem;
+		font-size: clamp(2.2rem, 5vw, 4rem);
+		letter-spacing: 0;
+	}
+
+	.no-active-workspace p {
+		max-width: 42rem;
+	}
+
+	.no-active-workspace__lead {
+		color: var(--muted-strong);
+		font-weight: 760;
+	}
+
+	.no-active-workspace__actions {
+		margin-top: 1.3rem;
+	}
+</style>
