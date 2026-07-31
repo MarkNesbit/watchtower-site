@@ -40,4 +40,7 @@ jobs:
         run: npm run build
 
       - name: Deploy to Cloudflare Workers
-        run: npx wrangler deploy
+        run: >
+          npx wrangler deploy
+          --var PUBLIC_SUPABASE_URL:${PUBLIC_SUPABASE_URL}
+          --var PUBLIC_SUPABASE_ANON_KEY:${PUBLIC_SUPABASE_ANON_KEY}

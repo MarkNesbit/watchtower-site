@@ -22,6 +22,7 @@ const routeUrl = new URL('../src/pages/app/workspaces/[workspaceSlug]/team.astro
 const headerUrl = new URL('../src/components/Header.astro', import.meta.url);
 const projectRoutesUrl = new URL('../src/lib/projectRoutes.ts', import.meta.url);
 const projectsUrl = new URL('../src/lib/projects.ts', import.meta.url);
+const workerDeployWorkflowUrl = new URL('../.github/workflows/deploy-cloudflare-worker.yml', import.meta.url);
 
 async function routeSource() {
 	return readFile(routeUrl, 'utf8');
@@ -265,10 +266,19 @@ test('Workspace navigation links to the workspace-level team route when a worksp
 	assert.equal(buildWorkspaceTeamInvitationSendPath('mark-nesbit-professional-workspace'), '/app/workspaces/mark-nesbit-professional-workspace/team/invitations/send');
 	assert.match(projectRoutes, /export function buildWorkspaceTeamPath\(workspaceSlug: string\)/);
 	assert.match(projectRoutes, /export function buildWorkspaceTeamInvitationSendPath\(workspaceSlug: string\)/);
-	assert.match(header, /Astro\.locals as \{ runtime\?: \{ env\?: Record<string, unknown> \} \} \| undefined\)\?\.runtime\?\.env/);
-	assert.match(header, /createSupabaseServerClient\(accessToken, runtimeEnv\)/);
+	assert.doesNotMatch(header, /Astro\.locals\.runtime|runtime\?\.env|runtimeEnv/);
+	assert.match(header, /createSupabaseServerClient\(accessToken\)/);
 	assert.match(header, /getCurrentWorkspace\(serverSupabase, accessToken\)/);
 	assert.match(header, /can\(workspace\?\.role, 'workspaceTeam\.view'\)/);
 	assert.match(header, /buildWorkspaceTeamPath\(organisation\.slug\)/);
 	assert.match(header, /workspaceTeamHref \? \{ href: workspaceTeamHref, label: 'Workspace' \} : \{ label: 'Workspace' \}/);
+});
+
+test('Workspace Team Worker deploy passes public Supabase bindings without removed Astro runtime locals', async () => {
+	const workflow = await readFile(workerDeployWorkflowUrl, 'utf8');
+	const route = await routeSource();
+
+	assert.match(workflow, /--var PUBLIC_SUPABASE_URL:\$\{PUBLIC_SUPABASE_URL\}/);
+	assert.match(workflow, /--var PUBLIC_SUPABASE_ANON_KEY:\$\{PUBLIC_SUPABASE_ANON_KEY\}/);
+	assert.doesNotMatch(route, /Astro\.locals\.runtime|runtime\?\.env|runtimeEnv/);
 });
