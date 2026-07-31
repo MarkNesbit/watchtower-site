@@ -92,8 +92,14 @@ test('Workspace Team deactivation save state requires editability impact and rea
 	assert.match(updateFunction, /dialog\.dataset\.memberImpactLoaded === 'true'/);
 	assert.match(updateFunction, /save\.disabled = !canDeactivate \|\| !hasSession \|\| reason\.length === 0 \|\| reason\.length > 500/);
 	assert.match(updateFunction, /save\.textContent = 'Deactivate user'/);
+	assert.match(page, /function refreshMemberDeactivationReasonState\(dialog\)/);
+	assert.match(page, /window\.setTimeout\(\(\) => updateMemberSaveState\(dialog\), 0\)/);
 	assert.match(page, /const deactivateButton = dialog\.querySelector\('\[data-member-deactivation-start\]'\)/);
 	assert.match(page, /deactivateButton\.disabled = state !== 'editable' \|\| dialog\.dataset\.memberCanDeactivate !== 'true'/);
+	assert.match(page, /dialog\.addEventListener\('input', onReasonStateChange\)/);
+	assert.match(page, /dialog\.addEventListener\('change', onReasonStateChange\)/);
+	assert.match(page, /dialog\.addEventListener\('keyup', onReasonStateChange\)/);
+	assert.match(page, /dialog\.addEventListener\('paste', onReasonStateChange\)/);
 	assert.match(enterFunction, /if \(memberRoleChanged\(dialog\)\)/);
 	assert.match(enterFunction, /Save or discard the role change before starting deactivation/);
 	assert.match(enterFunction, /await loadMemberImpactSummary\(dialog\)/);
