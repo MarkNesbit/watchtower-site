@@ -205,6 +205,16 @@ Role saves include the current workspace membership snapshot version. If members
 
 WT-WORKSPACE-TEAM-009A does not edit profile identity, send/resend/cancel invitations, deactivate/reactivate/suspend memberships, add responsibility-impact summaries, add audit-history UI, create project-specific roles, add an ownership-transfer wizard or change the CSV workflow.
 
+## Workspace Team individual member deactivation
+
+WT-WORKSPACE-TEAM-009B extends the active-member modal with a permitted `Deactivate user` journey. Owners may deactivate another active Viewer, Member, Admin or Owner, while Admins may deactivate only active Viewers and Members. Self-deactivation, invited/inactive/deactivated memberships, cross-workspace memberships and unauthorised direct requests are rejected by the server-side RPC rather than relying on the visible modal controls.
+
+Before confirmation, the modal shows a high-level responsibility-impact summary for reliable current schema references: active risks owned, active risk action responsibilities, outstanding actions assigned and actions awaiting the member's approval. These counts are informational only and do not block deactivation by themselves. Project-role responsibility counts are deliberately marked unavailable while `WT-PROJECT-TEAM-DEFECT-001` remains open, so the modal does not present those counts as reliable.
+
+Deactivation requires the existing membership-scoped advisory edit session, a current workspace membership snapshot version and a mandatory free-text reason of 500 characters or fewer. The save transaction revalidates actor authority, selected active membership, session ownership, final active Owner protection, stale snapshot state and the responsibility summary before changing the membership lifecycle state to `deactivated`. It records `deactivated_at`, `deactivated_by`, `deactivation_reason`, update metadata and a `membership_deactivated` audit event sourced from `workspace_member_modal_deactivation`.
+
+WT-WORKSPACE-TEAM-009B does not edit profile identity, authentication identity or email fields, delete users, alter historical project/risk/action/comment/narrative references, perform responsibility reassignment, implement reactivation, fix project member assignment persistence, send notifications, expose audit history or change the CSV workflow.
+
 ## Future concepts not implemented in MVP
 
 The following concepts are recognised as possible future needs but are explicitly not implemented by WT-US-0105:

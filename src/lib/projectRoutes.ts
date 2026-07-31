@@ -46,6 +46,14 @@ export function buildWorkspaceTeamMemberRolePath(workspaceSlug: string): string 
 	return `${buildWorkspaceTeamPath(workspaceSlug)}/members/role`;
 }
 
+export function buildWorkspaceTeamMemberDeactivationImpactPath(workspaceSlug: string): string {
+	return `${buildWorkspaceTeamPath(workspaceSlug)}/members/deactivation-impact`;
+}
+
+export function buildWorkspaceTeamMemberDeactivatePath(workspaceSlug: string): string {
+	return `${buildWorkspaceTeamPath(workspaceSlug)}/members/deactivate`;
+}
+
 export function buildProjectEditPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/edit`;
 }
