@@ -5,11 +5,13 @@ import Footer from '../components/Footer.astro';
 type Props = {
 	title?: string;
 	description?: string;
+	hideAppNavigation?: boolean;
 };
 
 const {
 	title = 'WatchTower | Delivery Intelligence Platform',
 	description = 'WatchTower is a Delivery Intelligence Platform for evidence-based forecasting and delivery risk clarity.',
+	hideAppNavigation = false,
 } = Astro.props;
 ---
 
@@ -27,7 +29,7 @@ const {
 	<body>
 		<a class="skip-link" href="#main-content">Skip to content</a>
 		<div class="page-shell">
-			<Header />
+			<Header hideAppNavigation={hideAppNavigation} />
 			<main id="main-content">
 				<slot />
 			</main>

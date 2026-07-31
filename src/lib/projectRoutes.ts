@@ -1,3 +1,5 @@
+export const NO_ACTIVE_WORKSPACE_PATH = '/app/no-active-workspace';
+
 export function buildProjectPath(workspaceSlug: string, projectSlug: string): string {
 	return `/app/workspaces/${encodeURIComponent(workspaceSlug)}/projects/${encodeURIComponent(projectSlug)}`;
 }

@@ -37,7 +37,9 @@ Profiles deliberately do not store global roles, workspace roles, workspace perm
 
 ## Profile creation
 
-When a Supabase user has verified their email, the onboarding trigger creates or refreshes the matching profile using the auth user id, primary email, derived display name, contact email, unique login name and safe first/last-name defaults where available. The same onboarding path also creates the user's default personal Workspace, adds an active owner membership and creates default organisation settings.
+When a Supabase user has verified their email, the onboarding trigger creates or refreshes the matching profile using the auth user id, primary email, derived display name, contact email, unique login name and safe first/last-name defaults where available. The same onboarding path may create the user's default personal Workspace, add an active owner membership and create default organisation settings only for a genuine first-time account with no existing `organisation_members` lifecycle history.
+
+Users already linked to invited, active, suspended, deactivated, removed or otherwise retained workspace memberships are not first-time accounts for bootstrap purposes. If such a user has no active workspace membership after deactivation, authentication may still succeed, but WatchTower routes them to `/app/no-active-workspace` and does not create a replacement personal workspace, silently add an Owner membership, duplicate their profile identity or rename an existing workspace.
 
 Because onboarding is keyed by the Supabase user id, each authenticated account has at most one profile record. If the auth email changes in future, the onboarding function can refresh the mirrored profile email without creating a second profile or modelling secondary email addresses.
 
@@ -214,6 +216,8 @@ Before confirmation, the modal shows a high-level responsibility-impact summary 
 Deactivation requires the existing membership-scoped advisory edit session, a current workspace membership snapshot version and a mandatory free-text reason of 500 characters or fewer. The save transaction revalidates actor authority, selected active membership, session ownership, final active Owner protection, stale snapshot state and the responsibility summary before changing the membership lifecycle state to `deactivated`. It records `deactivated_at`, `deactivated_by`, `deactivation_reason`, update metadata and a `membership_deactivated` audit event sourced from `workspace_member_modal_deactivation`.
 
 WT-WORKSPACE-TEAM-009B does not edit profile identity, authentication identity or email fields, delete users, alter historical project/risk/action/comment/narrative references, perform responsibility reassignment, implement reactivation, fix project member assignment persistence, send notifications, expose audit history or change the CSV workflow.
+
+WT-WORKSPACE-TEAM-009B-FIX-001 clarifies post-deactivation access routing. Active workspace resolution uses only `organisation_members.status = 'active'` rows linked to the signed-in Auth identity. Direct workspace-scoped HTML routes revalidate the requested workspace slug against active membership on every request; stale browser state cannot keep a deactivated workspace open. If another active workspace exists, the user is sent back through the deterministic `/app` workspace selector. If no active workspace exists, the user sees the controlled no-active-workspace page with sign-out guidance and no workspace navigation.
 
 ## Workspace Team individual member reactivation
 

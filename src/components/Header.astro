@@ -4,6 +4,9 @@ import { buildWorkspaceTeamPath, getCurrentWorkspace } from '../lib/projects';
 import { can } from '../lib/permissions';
 import { createSupabaseServerClient, getServerAccessToken } from '../lib/supabaseServer';
 
+type Props = { hideAppNavigation?: boolean };
+const { hideAppNavigation = false } = Astro.props;
+
 const publicNavItems = [
 	{ href: '/', label: 'Home' },
 	{ href: '/products', label: 'Products' },
@@ -56,17 +59,19 @@ const isActivePath = (href: string, exact = false) => {
 				</a>
 			))}
 		</nav>
-		<nav class="nav" aria-label="App navigation" data-app-nav hidden={!hasAuthCookie || undefined}>
-			{appNavItems.map((item) => item.href ? (
-				<a href={item.href} aria-current={isActivePath(item.href, item.exact) ? 'page' : undefined}>
-					{item.label}
-				</a>
-			) : (
-				<span class="nav__item nav__item--disabled" aria-disabled="true" title={`${item.label} navigation is not available yet.`}>
-					{item.label}
-				</span>
-			))}
-		</nav>
+		{!hideAppNavigation && (
+			<nav class="nav" aria-label="App navigation" data-app-nav hidden={!hasAuthCookie || undefined}>
+				{appNavItems.map((item) => item.href ? (
+					<a href={item.href} aria-current={isActivePath(item.href, item.exact) ? 'page' : undefined}>
+						{item.label}
+					</a>
+				) : (
+					<span class="nav__item nav__item--disabled" aria-disabled="true" title={`${item.label} navigation is not available yet.`}>
+						{item.label}
+					</span>
+				))}
+			</nav>
+		)}
 		<a class="login-slot" href="/login" data-header-login hidden={hasAuthCookie || undefined}>Login</a>
 		<div data-header-sign-out hidden={!hasAuthCookie || undefined}>
 			<SignOutButton className="login-slot login-slot--button" label="Sign out" />

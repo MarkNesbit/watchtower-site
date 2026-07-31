@@ -1,6 +1,27 @@
 ---
 import AppLanding from '../../components/app/AppLanding.astro';
 import AuthenticatedLayout from '../../layouts/AuthenticatedLayout.astro';
+import {
+	NO_ACTIVE_WORKSPACE_PATH,
+	buildWorkspaceAccessFallbackPath,
+	getCurrentWorkspace,
+} from '../../lib/projects';
+import { createSupabaseServerClient, getServerAccessToken } from '../../lib/supabaseServer';
+
+const accessToken = getServerAccessToken(Astro.cookies);
+
+if (accessToken) {
+	try {
+		const serverSupabase = createSupabaseServerClient(accessToken);
+		const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
+		const fallbackPath = buildWorkspaceAccessFallbackPath(workspace);
+		if (fallbackPath === NO_ACTIVE_WORKSPACE_PATH) {
+			return Astro.redirect(NO_ACTIVE_WORKSPACE_PATH, 303);
+		}
+	} catch {
+		// AuthStatus handles stale client sessions; transient data errors should not create fallback workspaces.
+	}
+}
 ---
 <AuthenticatedLayout title="WatchTower Workspace | WatchTower">
 	<AppLanding />

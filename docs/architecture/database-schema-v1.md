@@ -374,6 +374,8 @@ WT-WORKSPACE-TEAM-009B modal deactivation events use `membership_deactivated`, s
 
 WT-WORKSPACE-TEAM-009C modal reactivation events use `membership_reactivated`, source `workspace_member_modal_reactivation` or `workspace_member_modal_reactivation_correction`, the affected membership id, the target Auth UUID, the actor Auth UUID, previous/new lifecycle values, previous role, selected/restored role, `deactivated_in_error`, reactivation reason and explicit audit flags that responsibilities and project roles were not restored automatically. The reactivation transaction updates only the existing membership row's `status`, `role`, `reactivated_at`, `reactivated_by`, `reactivation_reason` and update metadata. It preserves original deactivation fields, joined/accepted dates, profile/Auth identity and historical references.
 
+WT-WORKSPACE-TEAM-009B-FIX-001 updates the verified-user onboarding trigger so default personal workspace creation is limited to genuine first-time Auth users with no `organisation_members` lifecycle rows linked by `auth_user_id` or `user_id`. Invited, active, suspended, deactivated or removed membership history blocks fallback workspace and Owner-membership creation. This preserves authentication identity while preventing post-deactivation sign-in from recreating workspace access or duplicating the person's profile.
+
 Owner/Admin users can read audit events for their workspace. Normal authenticated users cannot update or delete audit events.
 
 ---

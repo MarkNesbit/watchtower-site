@@ -6,8 +6,12 @@ import { getInternalRoleSimulationState, type RoleSimulationState } from '../lib
 import { createSupabaseServerClient, getServerAccessToken } from '../lib/supabaseServer';
 import '../styles/rag.css';
 
-type Props = { title?: string; description?: string };
-const { title = 'WatchTower App', description = 'Authenticated WatchTower workspace area.' } = Astro.props;
+type Props = { title?: string; description?: string; hideAppNavigation?: boolean };
+const {
+	title = 'WatchTower App',
+	description = 'Authenticated WatchTower workspace area.',
+	hideAppNavigation = false,
+} = Astro.props;
 const accessToken = getServerAccessToken(Astro.cookies);
 let roleSimulationState: RoleSimulationState | null = null;
 let serverSessionConfirmed = false;
@@ -26,7 +30,7 @@ if (accessToken) {
 	}
 }
 ---
-<SiteLayout title={title} description={description}>
+<SiteLayout title={title} description={description} hideAppNavigation={hideAppNavigation}>
 	<AuthStatus />
 	<section class="app-shell" data-authenticated-shell data-server-authenticated={serverSessionConfirmed ? 'true' : undefined} hidden>
 		<TestingModeBanner state={roleSimulationState} returnTo={Astro.url.pathname + Astro.url.search} />
