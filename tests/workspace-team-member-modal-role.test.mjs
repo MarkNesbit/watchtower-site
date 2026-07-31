@@ -143,7 +143,7 @@ test('Workspace Team member session and role routes use workspace-scoped secure 
 	assert.match(supabaseServer, /createSupabaseServerClient\(accessToken\?: string, env\?: Record<string, unknown>\)/);
 	assert.match(supabaseServer, /runtimeString\(env, 'PUBLIC_SUPABASE_URL', supabaseUrl\)/);
 	assert.match(supabaseServer, /runtimeString\(env, 'PUBLIC_SUPABASE_ANON_KEY', supabaseAnonKey\)/);
-	assert.match(page, /Astro\.locals as \{ runtime\?: \{ env\?: Record<string, unknown> \} \}/);
+	assert.match(page, /Astro\.locals as \{ runtime\?: \{ env\?: Record<string, unknown> \} \} \| undefined\)\?\.runtime\?\.env/);
 	assert.match(page, /createSupabaseServerClient\(accessToken, runtimeEnv\)/);
 	assert.match(sessionRoute, /locals, params, request/);
 	assert.match(sessionRoute, /createSupabaseServerClient\(accessToken, runtimeEnv\)/);

@@ -11,11 +11,12 @@ const publicNavItems = [
 	{ href: '/about', label: 'About' },
 ];
 const accessToken = getServerAccessToken(Astro.cookies);
+const runtimeEnv = (Astro.locals as { runtime?: { env?: Record<string, unknown> } } | undefined)?.runtime?.env;
 let workspaceTeamHref = '';
 
 if (accessToken) {
 	try {
-		const serverSupabase = createSupabaseServerClient(accessToken);
+		const serverSupabase = createSupabaseServerClient(accessToken, runtimeEnv);
 		const workspace = await getCurrentWorkspace(serverSupabase, accessToken);
 		const organisation = Array.isArray(workspace?.organisations) ? workspace?.organisations[0] : workspace?.organisations;
 		workspaceTeamHref = organisation?.slug && can(workspace?.role, 'workspaceTeam.view') ? buildWorkspaceTeamPath(organisation.slug) : '';

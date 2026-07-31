@@ -3,6 +3,7 @@ import { loadAuthenticatedDashboardContext } from '../../lib/authenticatedDashbo
 import { createSupabaseServerClient, getServerAccessToken } from '../../lib/supabaseServer';
 
 const accessToken = getServerAccessToken(Astro.cookies);
+const runtimeEnv = (Astro.locals as { runtime?: { env?: Record<string, unknown> } } | undefined)?.runtime?.env;
 let dashboardContext = {
 	personName: 'Signed-in user',
 	workspaceName: 'Workspace unavailable',
@@ -11,7 +12,7 @@ let dashboardContext = {
 };
 
 if (accessToken) {
-	const serverSupabase = createSupabaseServerClient(accessToken);
+	const serverSupabase = createSupabaseServerClient(accessToken, runtimeEnv);
 	dashboardContext = await loadAuthenticatedDashboardContext(serverSupabase, accessToken);
 }
 const needsDashboardSessionRefresh = !accessToken || (dashboardContext.personFallbackUsed && dashboardContext.workspaceFallbackUsed);

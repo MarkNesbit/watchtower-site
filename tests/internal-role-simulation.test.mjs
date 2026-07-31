@@ -295,6 +295,8 @@ test('Viewer simulation blocks create/edit server actions before mutation', asyn
 test('Banner renders only for active simulations and includes reset action', async () => {
 	const banner = await readFile(bannerUrl, 'utf8');
 	const layout = await readFile(authenticatedLayoutUrl, 'utf8');
+	assert.match(layout, /Astro\.locals as \{ runtime\?: \{ env\?: Record<string, unknown> \} \} \| undefined\)\?\.runtime\?\.env/);
+	assert.match(layout, /createSupabaseServerClient\(accessToken, runtimeEnv\)/);
 	assert.match(layout, /getInternalRoleSimulationState\(serverSupabase, accessToken\)/);
 	assert.match(layout, /<TestingModeBanner state=\{roleSimulationState\}/);
 	assert.match(banner, /data-testing-mode-banner/);

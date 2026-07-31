@@ -265,6 +265,8 @@ test('Workspace navigation links to the workspace-level team route when a worksp
 	assert.equal(buildWorkspaceTeamInvitationSendPath('mark-nesbit-professional-workspace'), '/app/workspaces/mark-nesbit-professional-workspace/team/invitations/send');
 	assert.match(projectRoutes, /export function buildWorkspaceTeamPath\(workspaceSlug: string\)/);
 	assert.match(projectRoutes, /export function buildWorkspaceTeamInvitationSendPath\(workspaceSlug: string\)/);
+	assert.match(header, /Astro\.locals as \{ runtime\?: \{ env\?: Record<string, unknown> \} \} \| undefined\)\?\.runtime\?\.env/);
+	assert.match(header, /createSupabaseServerClient\(accessToken, runtimeEnv\)/);
 	assert.match(header, /getCurrentWorkspace\(serverSupabase, accessToken\)/);
 	assert.match(header, /can\(workspace\?\.role, 'workspaceTeam\.view'\)/);
 	assert.match(header, /buildWorkspaceTeamPath\(organisation\.slug\)/);

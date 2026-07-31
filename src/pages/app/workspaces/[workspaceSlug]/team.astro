@@ -47,7 +47,7 @@ Astro.response.headers.set('Expires', '0');
 
 const workspaceSlug = Astro.params.workspaceSlug;
 const accessToken = getServerAccessToken(Astro.cookies);
-const runtimeEnv = (Astro.locals as { runtime?: { env?: Record<string, unknown> } }).runtime?.env;
+const runtimeEnv = (Astro.locals as { runtime?: { env?: Record<string, unknown> } } | undefined)?.runtime?.env;
 const requestedFilter = String(Astro.url.searchParams.get('state') ?? 'all').trim().toLowerCase();
 const search = String(Astro.url.searchParams.get('search') ?? '').trim();
 const requestedImportRunId = String(Astro.url.searchParams.get('import_run') ?? '').trim();
