@@ -321,8 +321,7 @@ export function workspaceTeamPersonName(member: Pick<WorkspaceTeamMember, 'first
 	const firstName = cleanText(member.first_name);
 	const lastName = cleanText(member.last_name);
 	const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
-	const baseName = fullName || cleanText(member.display_name) || cleanText(member.login_name) || 'Workspace user';
-	return member.membership_status === 'deactivated' ? `${baseName} [deactivated]` : baseName;
+	return fullName || cleanText(member.display_name) || cleanText(member.login_name) || 'Workspace user';
 }
 
 export function workspaceTeamLoginLabel(member: Pick<WorkspaceTeamMember, 'login_name' | 'display_name'>): string {
