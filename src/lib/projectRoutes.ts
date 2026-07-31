@@ -54,6 +54,10 @@ export function buildWorkspaceTeamMemberDeactivatePath(workspaceSlug: string): s
 	return `${buildWorkspaceTeamPath(workspaceSlug)}/members/deactivate`;
 }
 
+export function buildWorkspaceTeamMemberReactivatePath(workspaceSlug: string): string {
+	return `${buildWorkspaceTeamPath(workspaceSlug)}/members/reactivate`;
+}
+
 export function buildProjectEditPath(workspaceSlug: string, projectSlug: string): string {
 	return `${buildProjectPath(workspaceSlug, projectSlug)}/edit`;
 }

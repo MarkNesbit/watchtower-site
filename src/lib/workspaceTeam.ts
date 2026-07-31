@@ -23,7 +23,12 @@ export type WorkspaceTeamMember = {
 	joined_at?: string | null;
 	accepted_at?: string | null;
 	deactivated_at?: string | null;
+	deactivated_by?: string | null;
+	deactivated_by_display_name?: string | null;
+	deactivation_reason?: string | null;
 	reactivated_at?: string | null;
+	reactivated_by?: string | null;
+	reactivation_reason?: string | null;
 	invitation_id?: string | null;
 	invitation_status?: string | null;
 	invitation_delivered_at?: string | null;
@@ -91,7 +96,9 @@ export const WORKSPACE_TEAM_MEMBER_SESSION_RELEASE_RPC = 'release_workspace_memb
 export const WORKSPACE_TEAM_MEMBER_ROLE_CHANGE_RPC = 'change_workspace_member_role_api';
 export const WORKSPACE_TEAM_MEMBER_DEACTIVATION_IMPACT_RPC = 'workspace_member_deactivation_impact_summary_api';
 export const WORKSPACE_TEAM_MEMBER_DEACTIVATE_RPC = 'deactivate_workspace_member_from_modal_api';
+export const WORKSPACE_TEAM_MEMBER_REACTIVATE_RPC = 'reactivate_workspace_member_from_modal_api';
 export const WORKSPACE_TEAM_MEMBER_DEACTIVATION_REASON_MAX_LENGTH = 500;
+export const WORKSPACE_TEAM_MEMBER_REACTIVATION_REASON_MAX_LENGTH = 500;
 
 export type WorkspaceTeamRoleAuthority = {
 	canEdit: boolean;
@@ -102,6 +109,14 @@ export type WorkspaceTeamRoleAuthority = {
 export type WorkspaceTeamDeactivationAuthority = {
 	canDeactivate: boolean;
 	reason: string;
+};
+
+export type WorkspaceTeamReactivationAuthority = {
+	canReactivate: boolean;
+	options: WorkspaceRole[];
+	canRestorePreviousRole: boolean;
+	reason: string;
+	restoreReason: string;
 };
 
 const STATUS_LABELS: Record<MembershipStatus, string> = {
@@ -238,6 +253,79 @@ export function workspaceTeamDeactivationAuthority(actorRole: unknown, targetRol
 	};
 }
 
+export function workspaceTeamReactivationAuthority(actorRole: unknown, previousRole: unknown, isSelf = false): WorkspaceTeamReactivationAuthority {
+	if (!isWorkspaceRole(actorRole)) {
+		return {
+			canReactivate: false,
+			options: [],
+			canRestorePreviousRole: false,
+			reason: 'Only active Workspace Owners and Admins can reactivate workspace members.',
+			restoreReason: 'The previous role cannot be restored because your workspace authority could not be confirmed.',
+		};
+	}
+	if (!isWorkspaceRole(previousRole)) {
+		return {
+			canReactivate: false,
+			options: [],
+			canRestorePreviousRole: false,
+			reason: 'The previous workspace role could not be confirmed. Choose a new role after support has reviewed the membership history.',
+			restoreReason: 'Deactivated in error is unavailable because the previous role is not reliable.',
+		};
+	}
+	if (actorRole !== 'owner' && actorRole !== 'admin') {
+		return {
+			canReactivate: false,
+			options: [],
+			canRestorePreviousRole: false,
+			reason: 'Only active Workspace Owners and Admins can reactivate workspace members.',
+			restoreReason: 'Only active Workspace Owners and Admins can restore a previous workspace role.',
+		};
+	}
+	if (isSelf) {
+		return {
+			canReactivate: false,
+			options: [],
+			canRestorePreviousRole: false,
+			reason: 'Users cannot reactivate their own workspace membership through this modal.',
+			restoreReason: 'Users cannot restore their own previous workspace role through this modal.',
+		};
+	}
+	if (actorRole === 'owner') {
+		return {
+			canReactivate: true,
+			options: ['viewer', 'member', 'admin', 'owner'],
+			canRestorePreviousRole: true,
+			reason: 'Owners can reactivate a deactivated member as Viewer, Member, Admin or Owner.',
+			restoreReason: `Deactivated in error can restore the previous ${workspaceRoleLabel(previousRole)} role.`,
+		};
+	}
+	if (previousRole === 'viewer' || previousRole === 'member') {
+		return {
+			canReactivate: true,
+			options: ['viewer', 'member'],
+			canRestorePreviousRole: true,
+			reason: 'Admins can reactivate former Viewers and Members as Viewer or Member.',
+			restoreReason: `Deactivated in error can restore the previous ${workspaceRoleLabel(previousRole)} role.`,
+		};
+	}
+	if (previousRole === 'admin') {
+		return {
+			canReactivate: false,
+			options: [],
+			canRestorePreviousRole: false,
+			reason: 'Only a Workspace Owner may reactivate a former Admin.',
+			restoreReason: 'Admins cannot restore a previous Admin role.',
+		};
+	}
+	return {
+		canReactivate: false,
+		options: [],
+		canRestorePreviousRole: false,
+		reason: 'Admins cannot reactivate a former Owner.',
+		restoreReason: 'Admins cannot restore a previous Owner role.',
+	};
+}
+
 export function workspaceTeamRoleChangeErrorMessage(error: unknown): string {
 	const message = typeof (error as { message?: unknown })?.message === 'string'
 		? (error as { message: string }).message
@@ -269,6 +357,27 @@ export function workspaceTeamDeactivationErrorMessage(error: unknown): string {
 	if (message.includes('WT_MEMBERSHIP_FINAL_OWNER')) return 'The final active Workspace Owner cannot be deactivated.';
 	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) return 'Only active Workspace Owners and Admins can deactivate workspace members.';
 	return 'The member could not be deactivated. No membership changes were applied.';
+}
+
+export function workspaceTeamReactivationErrorMessage(error: unknown): string {
+	const message = typeof (error as { message?: unknown })?.message === 'string'
+		? (error as { message: string }).message
+		: '';
+	if (message.includes('WT_MEMBER_REACTIVATION_STALE')) return 'This membership changed while the modal was open. Refresh the Team page and try again.';
+	if (message.includes('WT_MEMBER_REACTIVATION_LOCKED')) return 'This member is currently being viewed by another Workspace administrator. Refresh when their edit session has ended.';
+	if (message.includes('WT_MEMBER_REACTIVATION_SESSION')) return 'Your member edit session expired or could not be confirmed. Close and reopen the member modal.';
+	if (message.includes('WT_MEMBER_REACTIVATION_SELF_DENIED')) return 'Users cannot reactivate their own workspace membership through this modal.';
+	if (message.includes('WT_MEMBER_REACTIVATION_ADMIN_TARGET_DENIED')) return 'Admins can reactivate only former Viewer and Member memberships.';
+	if (message.includes('WT_MEMBER_REACTIVATION_ADMIN_ASSIGN_DENIED')) return 'Admins cannot reactivate a member as Admin or Owner.';
+	if (message.includes('WT_MEMBER_REACTIVATION_INVALID_TARGET')) return 'Choose a permitted workspace role before reactivating this member.';
+	if (message.includes('WT_MEMBER_REACTIVATION_REASON_REQUIRED')) return 'Enter a reactivation reason for the audit record.';
+	if (message.includes('WT_MEMBER_REACTIVATION_REASON_TOO_LONG')) return `Reactivation reason must be ${WORKSPACE_TEAM_MEMBER_REACTIVATION_REASON_MAX_LENGTH} characters or fewer.`;
+	if (message.includes('WT_MEMBER_REACTIVATION_DEACTIVATED_ONLY')) return 'Only deactivated workspace members can be reactivated through this modal.';
+	if (message.includes('WT_MEMBER_REACTIVATION_ACCEPTED_ONLY')) return 'Only a previously accepted workspace member can be reactivated without a new invitation.';
+	if (message.includes('WT_MEMBER_REACTIVATION_AUTH_IDENTITY_MISSING')) return 'This member cannot be reactivated because their sign-in identity is missing. Account recovery is outside this workflow.';
+	if (message.includes('WT_MEMBER_REACTIVATION_PREVIOUS_ROLE_UNAVAILABLE')) return 'The previous role could not be confirmed, so Deactivated in error cannot be used.';
+	if (message.includes('WT_MEMBERSHIP_PERMISSION_DENIED')) return 'Only active Workspace Owners and Admins can reactivate workspace members.';
+	return 'The member could not be reactivated. No membership changes were applied.';
 }
 
 export function isMembershipStatus(status: unknown): status is MembershipStatus {

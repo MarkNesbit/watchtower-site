@@ -215,6 +215,14 @@ Deactivation requires the existing membership-scoped advisory edit session, a cu
 
 WT-WORKSPACE-TEAM-009B does not edit profile identity, authentication identity or email fields, delete users, alter historical project/risk/action/comment/narrative references, perform responsibility reassignment, implement reactivation, fix project member assignment persistence, send notifications, expose audit history or change the CSV workflow.
 
+## Workspace Team individual member reactivation
+
+WT-WORKSPACE-TEAM-009C extends the deactivated-member row and member modal with a permitted `Reactivate user` journey. Owners may reactivate a former Viewer, Member, Admin or Owner and assign Viewer, Member, Admin or Owner. Admins may reactivate only former Viewers and Members and may assign only Viewer or Member. The server-side RPC enforces the same authority, rejects invited/active/non-workspace targets, rejects stale snapshots and requires the existing accepted Auth identity to remain present; it does not create accounts, send invitations or recover missing identities.
+
+Normal reactivation requires a deliberate target-role selection and a mandatory free-text reason of 500 characters or fewer. `Deactivated in error` is an explicit checkbox that restores the role retained on the deactivated membership only when that previous role is reliable and within the actor's authority. The checkbox disables manual role selection, still requires a correction note and records the reactivation source as a correction while preserving the original deactivation audit evidence.
+
+The reactivation transaction reuses the membership-scoped advisory edit session, validates the current membership snapshot, changes only the existing `organisation_members` row to `active`, sets the selected/restored role, records `reactivated_at`, `reactivated_by`, `reactivation_reason` and update metadata, releases the edit session and writes a `membership_reactivated` audit event sourced from the individual member modal. Joined/accepted dates, deactivation timestamp/actor/reason, profile identity, Auth identity and historical references are preserved. Risks, actions, approvals, project roles and replacement actions are not automatically restored or altered.
+
 ## Future concepts not implemented in MVP
 
 The following concepts are recognised as possible future needs but are explicitly not implemented by WT-US-0105:

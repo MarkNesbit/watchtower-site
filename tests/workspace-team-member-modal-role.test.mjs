@@ -108,7 +108,7 @@ test('Workspace Team member modal keeps editable role control in primary members
 	const page = await pageSource();
 	const membershipSection = page.match(/<section class="workspace-team-member-modal__section" aria-labelledby=\{`\$\{modalId\}-membership-heading`\}>[\s\S]*?<\/section>/)?.[0] ?? '';
 
-	assert.match(membershipSection, /<dt id=\{roleLabelId\}>Workspace role<\/dt>[\s\S]*data-member-role-select/);
+	assert.match(membershipSection, /<dt id=\{roleLabelId\}>\{isDeactivatedMember \? 'Previous workspace role' : 'Workspace role'\}<\/dt>[\s\S]*data-member-role-select/);
 	assert.match(membershipSection, /aria-labelledby=\{roleLabelId\}/);
 	assert.match(membershipSection, /aria-describedby=\{`\$\{roleHelpId\} \$\{errorId\}`\}/);
 	assert.match(membershipSection, /Membership status/);
