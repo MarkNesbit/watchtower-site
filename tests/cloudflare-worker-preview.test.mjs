@@ -70,7 +70,7 @@ test('Preview uploads preserve Astro generated settings while explicitly enablin
 	assert.deepEqual(config.assets, generated.assets);
 	assert.deepEqual(config.routes, generated.routes);
 	assert.deepEqual(config.custom_domains, generated.custom_domains);
-	assert.deepEqual(config.compatibility_flags, ['nodejs_compat', 'global_fetch_strictly_public']);
+	assert.deepEqual(config.compatibility_flags, generated.compatibility_flags);
 	assert.deepEqual(config.vars, generated.vars);
 	assert.throws(() => previewWranglerConfigFor({ assets: generated.assets }, 'watchtower-preview'), /no Worker main entry point/);
 	assert.throws(() => previewWranglerConfigFor({ main: generated.main }, 'watchtower-preview'), /no assets directory/);
