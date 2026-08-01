@@ -157,10 +157,29 @@ async function previewWranglerConfigFile(previewWorkerName) {
 		throw new Error('Effective Preview Wrangler configuration must explicitly enable workers_dev, preview_urls and assets.run_worker_first.');
 	}
 
-	const file = join(dirname(generatedFile), 'wrangler.preview.json');
+	const directory = dirname(generatedFile);
+	const entryFile = join(directory, 'entry.preview.mjs');
+	await writeFile(entryFile, [
+		"import worker from './entry.mjs';",
+		'export default {',
+		'\tasync fetch(request, env, context) {',
+		'\t\ttry {',
+		'\t\t\tconst response = await worker.fetch(request, env, context);',
+		'\t\t\tconst diagnosed = new Response(response.body, response);',
+		"\t\t\tdiagnosed.headers.set('X-Watchtower-Preview-Entry', 'astro-entry');",
+		'\t\t\treturn diagnosed;',
+		'\t\t} catch {',
+		"\t\t\treturn new Response('Preview Worker entry failure.', { status: 500, headers: { 'X-Watchtower-Preview-Entry': 'astro-entry-error' } });",
+		'\t\t}',
+		'\t},',
+		'};',
+		'',
+	].join('\n'));
+	config.main = 'entry.preview.mjs';
+	const file = join(directory, 'wrangler.preview.json');
 	await writeFile(file, `${JSON.stringify(config, null, 2)}\n`);
 	console.log(`Effective Preview Wrangler configuration: ${JSON.stringify(previewWranglerConfigSummary(config))}`);
-	return file;
+	return { directory, entryFile, file };
 }
 
 export function previewDeploymentContext(environment = process.env) {
@@ -195,19 +214,20 @@ export async function uploadPreviewVersion(context = previewDeploymentContext())
 	process.env.PUBLIC_SUPABASE_URL = context.previewSupabaseUrl;
 	process.env.PUBLIC_SUPABASE_ANON_KEY = context.previewSupabaseAnonKey;
 	execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
-	const configFile = await previewWranglerConfigFile(context.previewWorkerName);
+	const config = await previewWranglerConfigFile(context.previewWorkerName);
 	const secrets = await previewSecretsFile(context);
 	try {
 		console.log('Applying workers.dev and Preview URL settings to the dedicated Preview Worker only.');
-		execFileSync('npx', previewTriggerArguments(configFile), { stdio: 'inherit' });
+		execFileSync('npx', previewTriggerArguments(config.file), { stdio: 'inherit' });
 		const argumentsForUpload = previewUploadArguments({
 			...context,
 			hasPreviewResendKey: Boolean(context.previewResendApiKey),
 		});
 		const [command, ...commandArguments] = argumentsForUpload;
-		execFileSync('npx', [command, '--config', configFile, ...commandArguments, '--secrets-file', secrets.file], { stdio: 'inherit' });
+		execFileSync('npx', [command, '--config', config.file, ...commandArguments, '--secrets-file', secrets.file], { stdio: 'inherit' });
 	} finally {
-		await rm(configFile, { force: true });
+		await rm(config.file, { force: true });
+		await rm(config.entryFile, { force: true });
 		await rm(secrets.directory, { recursive: true, force: true });
 	}
 	console.log('Preview version uploaded to the dedicated preview Worker without changing production traffic. Wrangler prints the immutable preview URL above.');
