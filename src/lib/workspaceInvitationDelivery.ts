@@ -3,19 +3,19 @@ import {
 	renderInvitationEmail,
 	type InvitationDeliveryResult,
 } from './workspaceInvitations.ts';
+import { resolveWatchtowerSiteOrigin, type WatchtowerOriginEnv } from './watchtowerOrigins.ts';
 
 const RESEND_EMAIL_ENDPOINT = 'https://api.resend.com/emails';
 const PRODUCTION_INVITATION_ORIGIN = 'https://watch-tower.co.uk';
 const PROVIDER_TIMEOUT_MS = 10_000;
 
-export type InvitationDeliveryEnv = {
+export type InvitationDeliveryEnv = WatchtowerOriginEnv & {
 	WATCHTOWER_INVITATION_DELIVERY_MODE?: string;
 	WATCHTOWER_EMAIL_PROVIDER?: string;
 	WATCHTOWER_RESEND_API_KEY?: string;
 	WATCHTOWER_EMAIL_FROM_ADDRESS?: string;
 	WATCHTOWER_EMAIL_FROM_NAME?: string;
 	WATCHTOWER_INVITATION_REPLY_TO?: string;
-	WATCHTOWER_SITE_URL?: string;
 	WATCHTOWER_INVITATION_FROM_EMAIL?: string;
 	WATCHTOWER_INVITATION_FROM_NAME?: string;
 };
@@ -51,15 +51,7 @@ export function workspaceInvitationDeliveryMode(env: InvitationDeliveryEnv = imp
 }
 
 export function resolveWorkspaceInvitationSiteOrigin(env: InvitationDeliveryEnv = import.meta.env ?? {}): string | null {
-	const configured = String(env.WATCHTOWER_SITE_URL ?? '').trim();
-	if (!configured) return null;
-	try {
-		const url = new URL(configured);
-		if (url.protocol !== 'https:' || url.origin !== PRODUCTION_INVITATION_ORIGIN) return null;
-		return url.origin;
-	} catch {
-		return null;
-	}
+	return resolveWatchtowerSiteOrigin(env);
 }
 
 export function workspaceInvitationEmailConfigDiagnostics(env: InvitationDeliveryEnv = import.meta.env ?? {}) {

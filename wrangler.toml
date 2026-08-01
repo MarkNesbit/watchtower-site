@@ -1,6 +1,10 @@
 name = "watchtower-site"
 main = "@astrojs/cloudflare/entrypoints/server"
 compatibility_date = "2026-06-17"
+# Worker preview URLs are intentionally enabled for `wrangler versions upload`.
+# A preview version is not routed to the production custom domain until an
+# explicit `wrangler versions deploy` or `wrangler deploy` action occurs.
+preview_urls = true
 
 [vars]
 PUBLIC_SUPABASE_URL = "https://wwxauzcgqtrqjyyskqzp.supabase.co"

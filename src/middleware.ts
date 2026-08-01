@@ -1,4 +1,5 @@
 import { defineMiddleware } from 'astro:middleware';
+import { env } from 'cloudflare:workers';
 import {
 	NO_ACTIVE_WORKSPACE_PATH,
 	getCurrentWorkspace,
@@ -20,6 +21,13 @@ function workspaceSlugFromPath(pathname: string): string {
 function acceptsHtml(request: Request): boolean {
 	const accept = request.headers.get('accept') ?? '';
 	return accept.includes('text/html') || accept.includes('*/*');
+}
+
+function previewDeploymentMarker(): string | null {
+	if (env.WATCHTOWER_DEPLOYMENT_KIND !== 'preview') return null;
+	const branch = String(env.WATCHTOWER_PREVIEW_BRANCH ?? 'unknown').replace(/[^a-z0-9-]/gi, '').slice(0, 47);
+	const commit = String(env.WATCHTOWER_PREVIEW_COMMIT ?? 'unknown').replace(/[^a-f0-9]/gi, '').slice(0, 12);
+	return `branch=${branch || 'unknown'}; commit=${commit || 'unknown'}`;
 }
 
 // Do not treat client-written marker cookies as authentication; protected pages
@@ -56,6 +64,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
 	}
 
 	const response = await next();
+	const previewMarker = previewDeploymentMarker();
+	if (previewMarker) response.headers.set('X-Watchtower-Preview', previewMarker);
 	if (context.url.pathname.startsWith('/app')) {
 		response.headers.set('Cache-Control', 'private, no-store, no-cache, must-revalidate');
 		response.headers.set('Pragma', 'no-cache');
