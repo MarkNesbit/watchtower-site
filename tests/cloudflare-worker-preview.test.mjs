@@ -5,6 +5,7 @@ import {
 	previewAliasForBranch,
 	previewOriginFor,
 	previewUploadArguments,
+	previewWranglerConfigFor,
 } from '../scripts/deploy-worker-preview.mjs';
 import { resolveWatchtowerSiteOrigin } from '../src/lib/watchtowerOrigins.ts';
 
@@ -42,6 +43,31 @@ test('Preview origin accepts only the configured dedicated Worker preview hostna
 	);
 	assert.throws(() => previewOriginFor('https://watch-tower.co.uk', 'watchtower-preview'), /exact HTTPS workers.dev preview URL/);
 	assert.throws(() => previewOriginFor('https://branch-other-worker.example.workers.dev', 'watchtower-preview'), /exact HTTPS workers.dev preview URL/);
+});
+
+test('Preview uploads preserve Astro generated settings while explicitly enabling Workers preview URLs', () => {
+	const generated = {
+		name: 'watchtower-site',
+		main: '_worker.js',
+		compatibility_date: '2026-06-17',
+		compatibility_flags: ['nodejs_compat'],
+		assets: { directory: '../client', binding: 'ASSETS' },
+		routes: [{ pattern: 'watch-tower.co.uk/*', zone_name: 'watch-tower.co.uk' }],
+		custom_domains: ['watch-tower.co.uk'],
+		vars: { WATCHTOWER_SITE_URL: 'https://watch-tower.co.uk' },
+	};
+	const config = previewWranglerConfigFor(generated, 'watchtower-preview');
+	assert.equal(config.name, 'watchtower-preview');
+	assert.equal(config.workers_dev, true);
+	assert.equal(config.preview_urls, true);
+	assert.equal(config.main, generated.main);
+	assert.deepEqual(config.assets, generated.assets);
+	assert.deepEqual(config.routes, generated.routes);
+	assert.deepEqual(config.custom_domains, generated.custom_domains);
+	assert.deepEqual(config.compatibility_flags, generated.compatibility_flags);
+	assert.deepEqual(config.vars, generated.vars);
+	assert.throws(() => previewWranglerConfigFor({ assets: generated.assets }, 'watchtower-preview'), /no Worker main entry point/);
+	assert.throws(() => previewWranglerConfigFor({ main: generated.main }, 'watchtower-preview'), /no assets directory/);
 });
 
 test('Application callback origins keep production strict and accept only the configured preview Worker origin', () => {

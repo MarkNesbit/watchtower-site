@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const defaultPreviewWorkerName = 'watchtower-preview';
 
@@ -92,6 +92,59 @@ export function previewUploadArguments({
 	];
 }
 
+export function previewWranglerConfigFor(generatedConfig, previewWorkerName) {
+	if (!generatedConfig || typeof generatedConfig !== 'object' || Array.isArray(generatedConfig)) {
+		throw new Error('Astro-generated Preview Wrangler configuration must be a JSON object.');
+	}
+	if (typeof generatedConfig.main !== 'string' || !generatedConfig.main.trim()) {
+		throw new Error('Astro-generated Preview Wrangler configuration has no Worker main entry point.');
+	}
+	if (!generatedConfig.assets || typeof generatedConfig.assets.directory !== 'string' || !generatedConfig.assets.directory.trim()) {
+		throw new Error('Astro-generated Preview Wrangler configuration has no assets directory.');
+	}
+
+	return {
+		...generatedConfig,
+		name: previewWorkerNameFor(previewWorkerName),
+		workers_dev: true,
+		preview_urls: true,
+	};
+}
+
+function previewWranglerConfigSummary(config) {
+	return {
+		name: config.name,
+		workers_dev: config.workers_dev,
+		preview_urls: config.preview_urls,
+		main: config.main,
+		assets: Boolean(config.assets?.directory),
+		routes: Boolean(config.routes || config.route),
+		custom_domains: Boolean(config.custom_domains),
+		compatibility_date: config.compatibility_date ?? null,
+		compatibility_flags: Boolean(config.compatibility_flags),
+	};
+}
+
+async function previewWranglerConfigFile(previewWorkerName) {
+	const generatedFile = join(process.cwd(), 'dist', 'server', 'wrangler.json');
+	let generatedConfig;
+	try {
+		generatedConfig = JSON.parse(await readFile(generatedFile, 'utf8'));
+	} catch (error) {
+		throw new Error(`Unable to read Astro-generated Wrangler configuration at ${generatedFile}: ${error.message}`);
+	}
+
+	const config = previewWranglerConfigFor(generatedConfig, previewWorkerName);
+	if (config.workers_dev !== true || config.preview_urls !== true) {
+		throw new Error('Effective Preview Wrangler configuration must explicitly enable workers_dev and preview_urls.');
+	}
+
+	const file = join(dirname(generatedFile), 'wrangler.preview.json');
+	await writeFile(file, `${JSON.stringify(config, null, 2)}\n`);
+	console.log(`Effective Preview Wrangler configuration: ${JSON.stringify(previewWranglerConfigSummary(config))}`);
+	return file;
+}
+
 export function previewDeploymentContext(environment = process.env) {
 	const branchName = String(environment.GITHUB_HEAD_REF || environment.GITHUB_REF_NAME || commandOutput('git', ['branch', '--show-current'])).trim();
 	const commitSha = String(environment.GITHUB_SHA || commandOutput('git', ['rev-parse', 'HEAD'])).trim();
@@ -124,14 +177,17 @@ export async function uploadPreviewVersion(context = previewDeploymentContext())
 	process.env.PUBLIC_SUPABASE_URL = context.previewSupabaseUrl;
 	process.env.PUBLIC_SUPABASE_ANON_KEY = context.previewSupabaseAnonKey;
 	execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
+	const configFile = await previewWranglerConfigFile(context.previewWorkerName);
 	const secrets = await previewSecretsFile(context);
 	try {
 		const argumentsForUpload = previewUploadArguments({
 			...context,
 			hasPreviewResendKey: Boolean(context.previewResendApiKey),
 		});
-		execFileSync('npx', [...argumentsForUpload, '--secrets-file', secrets.file], { stdio: 'inherit' });
+		const [command, ...commandArguments] = argumentsForUpload;
+		execFileSync('npx', [command, '--config', configFile, ...commandArguments, '--secrets-file', secrets.file], { stdio: 'inherit' });
 	} finally {
+		await rm(configFile, { force: true });
 		await rm(secrets.directory, { recursive: true, force: true });
 	}
 	console.log('Preview version uploaded to the dedicated preview Worker without changing production traffic. Wrangler prints the immutable preview URL above.');
