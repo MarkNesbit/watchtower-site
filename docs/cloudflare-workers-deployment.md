@@ -75,6 +75,43 @@ On push to `main`, GitHub Actions runs:
 3. `npm run build`
 4. `npx wrangler deploy`
 
+## Non-production Worker previews
+
+Use `npm run deploy:preview` only from a supported Linux environment, or run
+the manual **Upload Cloudflare Worker preview** GitHub Actions workflow on the
+feature branch. The command builds Astro and runs `wrangler versions upload`;
+it does not run `wrangler deploy` or `wrangler versions deploy`, so it cannot
+change traffic served by `https://watch-tower.co.uk`.
+
+Preview uploads target the separately named `watchtower-preview` Worker rather
+than the production Worker. This keeps Preview-only Supabase bindings and
+secrets isolated from the production Worker while retaining the same Astro
+Worker SSR architecture. The uploaded version receives an immutable Workers
+preview URL and an optional stable alias URL.
+
+Before enabling the workflow, create the GitHub Actions environment
+`cloudflare-preview` and configure its Preview-only values:
+
+- variables: `WATCHTOWER_PREVIEW_WORKER_NAME`,
+  `WATCHTOWER_PREVIEW_ALIAS`, `WATCHTOWER_PREVIEW_ORIGIN`,
+  `WATCHTOWER_PREVIEW_SUPABASE_URL`, and
+  `WATCHTOWER_PREVIEW_SUPABASE_ANON_KEY`;
+- secret: `WATCHTOWER_PREVIEW_SUPABASE_SERVICE_ROLE_KEY`;
+- optional secret: `WATCHTOWER_PREVIEW_RESEND_API_KEY` only when Preview email
+  delivery is deliberately enabled.
+
+`WATCHTOWER_PREVIEW_ORIGIN` must be the exact stable alias URL for the
+dedicated Worker, in the form
+`https://<alias>-watchtower-preview.<account-subdomain>.workers.dev`.
+`watchtower-preview` has no production custom domain and must not be attached
+to `watch-tower.co.uk`.
+
+The Preview worker defaults email delivery to safe record-only handling when
+the optional Preview Resend secret is absent. It must use a separate Supabase
+project before Preview use expands beyond controlled testing. See
+`docs/delivery/WT-CLOUDFLARE-WORKER-PREVIEW-001-delivery-note.md` for the full
+operational and security requirements.
+
 ## Validation routes
 
 After deployment, test:

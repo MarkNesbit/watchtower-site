@@ -1,10 +1,11 @@
+import { resolveWatchtowerSiteOrigin, type WatchtowerOriginEnv } from './watchtowerOrigins.ts';
+
 const RESEND_EMAIL_ENDPOINT = 'https://api.resend.com/emails';
-const PRODUCTION_SITE_ORIGIN = 'https://watch-tower.co.uk';
 const PROVIDER_TIMEOUT_MS = 10_000;
 
 export const PASSWORD_RESET_PUBLIC_CONFIRMATION = 'If an eligible account matches that login name, password reset instructions have been sent.';
 
-export type PasswordResetDeliveryEnv = {
+export type PasswordResetDeliveryEnv = WatchtowerOriginEnv & {
 	PUBLIC_SUPABASE_URL?: string;
 	SUPABASE_AUTH_ACTION_ORIGIN?: string;
 	SUPABASE_AUTH_ACTION_ORIGINS?: string;
@@ -15,7 +16,6 @@ export type PasswordResetDeliveryEnv = {
 	WATCHTOWER_EMAIL_FROM_NAME?: string;
 	WATCHTOWER_PASSWORD_RESET_REPLY_TO?: string;
 	WATCHTOWER_INVITATION_REPLY_TO?: string;
-	WATCHTOWER_SITE_URL?: string;
 	WATCHTOWER_INVITATION_FROM_EMAIL?: string;
 	WATCHTOWER_INVITATION_FROM_NAME?: string;
 };
@@ -99,15 +99,7 @@ function formatDisplayName(value: string): string {
 }
 
 export function resolvePasswordResetSiteOrigin(env: PasswordResetDeliveryEnv = import.meta.env ?? {}): string | null {
-	const configured = String(env.WATCHTOWER_SITE_URL ?? '').trim();
-	if (!configured) return null;
-	try {
-		const url = new URL(configured);
-		if (url.protocol !== 'https:' || url.origin !== PRODUCTION_SITE_ORIGIN) return null;
-		return url.origin;
-	} catch {
-		return null;
-	}
+	return resolveWatchtowerSiteOrigin(env);
 }
 
 export function passwordResetDeliveryMode(env: PasswordResetDeliveryEnv = import.meta.env ?? {}): 'provider_required' | 'test_record_only' {

@@ -10,6 +10,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
+    "deploy:preview": "node scripts/deploy-worker-preview.mjs",
     "seed:risk-prompts": "node scripts/seed-risk-prompts.mjs",
     "seed:risk-prompts:sql": "node scripts/seed-risk-prompts.mjs --write-sql",
     "test": "node --experimental-strip-types --test tests/*.test.mjs"

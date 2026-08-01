@@ -2721,8 +2721,8 @@ test('Workspace invitation setup route generates setup link for exact invited au
 	assert.match(route, /auth\.admin\.generateLink\(\{/);
 	assert.match(route, /type: 'recovery'/);
 	assert.match(route, /buildWorkspaceInvitationResetPasswordPath\(token\)/);
-	assert.match(route, /watchtowerReturnOrigin\(runtimeEnv, url\.origin\)/);
-	assert.match(route, /WATCHTOWER_SITE_URL/);
+	assert.match(route, /resolveWatchtowerSiteOrigin\(runtimeEnv\)/);
+	assert.match(route, /Invitation return origin is not configured for this deployment/);
 	assert.match(route, /safeSupabaseActionLink/);
 	assert.match(route, /clearAuthCookies\(response\.headers\)/);
 	assert.doesNotMatch(route, /formData\.get\('auth_user_id'\)|formData\.get\('email'\)|contact_email|login_name/);

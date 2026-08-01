@@ -14,6 +14,7 @@ import {
 	hashInvitationToken,
 	isWorkspaceInvitationToken,
 } from '../../lib/workspaceInvitations.ts';
+import { resolveWatchtowerSiteOrigin } from '../../lib/watchtowerOrigins.ts';
 
 type InvitationInfo = {
 	auth_user_id: string;
@@ -71,16 +72,6 @@ function safeSupabaseActionLink(actionLink: string | undefined, runtimeEnv: Runt
 		return parsedAction.origin === parsedSupabase.origin ? parsedAction.toString() : null;
 	} catch {
 		return null;
-	}
-}
-
-function watchtowerReturnOrigin(runtimeEnv: RuntimeEnv, requestOrigin: string) {
-	const configuredSiteUrl = runtimeString(runtimeEnv, 'WATCHTOWER_SITE_URL');
-	try {
-		const parsed = new URL(configuredSiteUrl ?? requestOrigin);
-		return parsed.origin;
-	} catch {
-		return requestOrigin;
 	}
 }
 
@@ -163,12 +154,14 @@ export const POST: APIRoute = async ({ request, url }) => {
 		const authEmail = userData.user?.email;
 		if (userError || !authEmail) throw userError ?? new Error('Linked invitation auth user has no email.');
 
+		const returnOrigin = resolveWatchtowerSiteOrigin(runtimeEnv);
+		if (!returnOrigin) throw new Error('Invitation return origin is not configured for this deployment.');
 		setupStage = 'generate_link';
 		const { data: linkData, error: linkError } = await adminSupabase.auth.admin.generateLink({
 			type: 'recovery',
 			email: authEmail,
 			options: {
-				redirectTo: new URL(buildWorkspaceInvitationResetPasswordPath(token), watchtowerReturnOrigin(runtimeEnv, url.origin)).toString(),
+				redirectTo: new URL(buildWorkspaceInvitationResetPasswordPath(token), returnOrigin).toString(),
 			},
 		});
 		if (linkError) throw linkError;
