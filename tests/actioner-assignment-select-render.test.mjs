@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { transform } from '@astrojs/compiler';
 import { experimental_AstroContainer as AstroContainer } from 'astro/container';
+import { resolveActionerEditSelection } from '../src/lib/projectActions.ts';
 
 const fixtureOptions = [
 	{ id: 'membership-ella', membershipId: 'membership-ella', profileId: 'profile-ella', display_name: 'Ella Underwood', role: 'member' },
@@ -23,6 +24,26 @@ test('rendered Actioner selector selects the split-ID current member rather than
 	const html = await renderActionerSelect({ membershipId: 'membership-ella', error: null });
 	assert.match(html, /<option value="">Unassigned<\/option>/);
 	assert.match(html, /<option value="membership-ella" selected>\s*Ella Underwood \(member\)\s*<\/option>/);
+	assert.doesNotMatch(html, /<option value="" selected>Unassigned<\/option>/);
+});
+
+test('production-shaped split identity renders the persisted Actioner option as selected', async () => {
+	const ellaProfileId = 'profile-986b040b';
+	const ellaMembershipId = 'membership-43488e1b';
+	const ellaDirectoryOption = {
+		id: ellaMembershipId,
+		membershipId: ellaMembershipId,
+		profileId: ellaProfileId,
+		display_name: 'Ella Underwood',
+		role: 'member',
+	};
+	const selection = resolveActionerEditSelection({
+		actioner_id: ellaProfileId,
+		actioner: { id: ellaProfileId, profileId: ellaProfileId, membershipId: ellaMembershipId },
+	}, [ellaDirectoryOption]);
+
+	const html = await renderActionerSelect(selection, [ellaDirectoryOption]);
+	assert.match(html, new RegExp(`<option value="${ellaMembershipId}" selected>\\s*Ella Underwood`));
 	assert.doesNotMatch(html, /<option value="" selected>Unassigned<\/option>/);
 });
 
