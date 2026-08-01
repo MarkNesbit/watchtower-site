@@ -67,7 +67,7 @@ test('Preview uploads preserve Astro generated settings while explicitly enablin
 	assert.equal(config.workers_dev, true);
 	assert.equal(config.preview_urls, true);
 	assert.equal(config.main, generated.main);
-	assert.deepEqual(config.assets, { ...generated.assets, run_worker_first: true });
+	assert.deepEqual(config.assets, generated.assets);
 	assert.deepEqual(config.routes, generated.routes);
 	assert.deepEqual(config.custom_domains, generated.custom_domains);
 	assert.deepEqual(config.compatibility_flags, generated.compatibility_flags);
