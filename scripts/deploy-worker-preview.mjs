@@ -92,6 +92,12 @@ export function previewUploadArguments({
 	];
 }
 
+export function previewTriggerArguments(configFile) {
+	const file = String(configFile ?? '').trim();
+	if (!file) throw new Error('Preview trigger deployment requires an effective Wrangler configuration file.');
+	return ['wrangler', '--config', file, 'triggers', 'deploy'];
+}
+
 export function previewWranglerConfigFor(generatedConfig, previewWorkerName) {
 	if (!generatedConfig || typeof generatedConfig !== 'object' || Array.isArray(generatedConfig)) {
 		throw new Error('Astro-generated Preview Wrangler configuration must be a JSON object.');
@@ -180,6 +186,8 @@ export async function uploadPreviewVersion(context = previewDeploymentContext())
 	const configFile = await previewWranglerConfigFile(context.previewWorkerName);
 	const secrets = await previewSecretsFile(context);
 	try {
+		console.log('Applying workers.dev and Preview URL settings to the dedicated Preview Worker only.');
+		execFileSync('npx', previewTriggerArguments(configFile), { stdio: 'inherit' });
 		const argumentsForUpload = previewUploadArguments({
 			...context,
 			hasPreviewResendKey: Boolean(context.previewResendApiKey),

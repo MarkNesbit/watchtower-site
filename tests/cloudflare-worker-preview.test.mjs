@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
 	previewAliasForBranch,
 	previewOriginFor,
+	previewTriggerArguments,
 	previewUploadArguments,
 	previewWranglerConfigFor,
 } from '../scripts/deploy-worker-preview.mjs';
@@ -34,6 +35,11 @@ test('Preview upload targets the dedicated Worker with explicit staging bindings
 	assert.ok(args.includes('WATCHTOWER_EMAIL_PROVIDER:disabled'));
 	assert.ok(!args.includes('deploy'));
 	assert.match(args.join(' '), /Preview agent\/cloudflare-worker-preview-001 at abcdef0123456789abcdef0123456789abcdef01/);
+	assert.deepEqual(
+		previewTriggerArguments('dist/server/wrangler.preview.json'),
+		['wrangler', '--config', 'dist/server/wrangler.preview.json', 'triggers', 'deploy'],
+	);
+	assert.throws(() => previewTriggerArguments(''), /requires an effective Wrangler configuration/);
 });
 
 test('Preview origin accepts only the configured dedicated Worker preview hostname pattern', () => {
