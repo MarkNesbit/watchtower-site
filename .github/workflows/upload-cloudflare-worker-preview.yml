@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   preview:
@@ -21,6 +20,7 @@ jobs:
 
     env:
       WATCHTOWER_PREVIEW_SUPABASE_URL: ${{ vars.WATCHTOWER_PREVIEW_SUPABASE_URL }}
+      WATCHTOWER_PREVIEW_SUPABASE_ANON_KEY: ${{ vars.WATCHTOWER_PREVIEW_SUPABASE_ANON_KEY }}
       WATCHTOWER_PREVIEW_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.WATCHTOWER_PREVIEW_SUPABASE_SERVICE_ROLE_KEY }}
       WATCHTOWER_PREVIEW_RESEND_API_KEY: ${{ secrets.WATCHTOWER_PREVIEW_RESEND_API_KEY }}
       WATCHTOWER_PREVIEW_ORIGIN: ${{ vars.WATCHTOWER_PREVIEW_ORIGIN }}
@@ -44,20 +44,6 @@ jobs:
 
       - name: Run tests
         run: npm test
-
-      # Environment variables are not automatically masked in Actions logs. Read
-      # this value from the already-selected GitHub Environment, mask it, then
-      # make it available to the upload step without changing where it is stored.
-      - name: Load masked Preview anon key
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          preview_anon_key="$(gh api \
-            -H 'Accept: application/vnd.github+json' \
-            "/repos/${GITHUB_REPOSITORY}/environments/cloudflare-preview/variables/WATCHTOWER_PREVIEW_SUPABASE_ANON_KEY" \
-            --jq .value)"
-          printf '::add-mask::%s\n' "$preview_anon_key"
-          printf 'WATCHTOWER_PREVIEW_SUPABASE_ANON_KEY=%s\n' "$preview_anon_key" >> "$GITHUB_ENV"
 
       - name: Verify Preview configuration presence
         env:
