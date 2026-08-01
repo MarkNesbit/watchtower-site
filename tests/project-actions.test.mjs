@@ -564,6 +564,30 @@ test('Actioner edit selection translates stored Profile identity to the workspac
 	assert.match(unresolved.error ?? '', /cannot be resolved to one active workspace membership/);
 });
 
+test('Actioner edit selection resolves the production-shaped split identity without crossing workspace memberships', () => {
+	// This mirrors the relevant relationship shape for Action-WAT-006 without
+	// retaining live identifiers: an Action stores the Profile key while the
+	// active workspace directory exposes a distinct Membership key.
+	const ellaAction = actionFixture({
+		actioner_id: 'profile-986b040b',
+		actioner: {
+			id: 'profile-986b040b',
+			profileId: 'profile-986b040b',
+			membershipId: 'membership-43488e1b',
+			display_name: 'Ella Underwood',
+		},
+	});
+	const targetWorkspaceMembers = [
+		{ profileId: 'profile-986b040b', membershipId: 'membership-43488e1b' },
+		{ profileId: 'profile-other-workspace', membershipId: 'membership-other-workspace' },
+	];
+
+	assert.deepEqual(resolveActionerEditSelection(ellaAction, targetWorkspaceMembers), {
+		membershipId: 'membership-43488e1b',
+		error: null,
+	});
+});
+
 test('Project Actions route builders use workspace-safe project paths', () => {
 	assert.equal(buildProjectActionsPath('mark-workspace', 'hhh-website-build'), '/app/workspaces/mark-workspace/projects/hhh-website-build/actions');
 	assert.equal(buildProjectActionPath('mark-workspace', 'hhh-website-build', 'action/1'), '/app/workspaces/mark-workspace/projects/hhh-website-build/actions/action%2F1');
@@ -813,6 +837,11 @@ test('Project Actions route exposes the simplified WT-ACTIONS-UX-002A register s
 	assert.match(register, /createProjectAction/);
 	assert.match(register, /listProjectActions/);
 	assert.match(register, /listEligibleActioners/);
+	assert.match(register, /resolveActionerEditSelection/);
+	assert.match(register, /<ActionerAssignmentSelect label="Actioner" selection=\{modalActionerSelection\}/);
+	assert.match(register, /storedActionerSelection\.membershipId/);
+	assert.match(register, /actionerFormSubmitted = intent === 'assign-actioner'/);
+	assert.doesNotMatch(register, /modalActionerValue/);
 	assert.match(register, /ACTION_REGISTER_SCOPE_LABELS\.my/);
 	assert.match(register, /ACTION_REGISTER_SCOPE_LABELS\.project/);
 	assert.match(register, /data-actions-scope-switch/);

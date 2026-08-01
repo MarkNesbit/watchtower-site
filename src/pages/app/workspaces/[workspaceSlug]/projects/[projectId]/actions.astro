@@ -6,6 +6,7 @@ import DateField from '../../../../../../components/forms/DateField.astro';
 import ProjectContentPanel from '../../../../../../components/app/ProjectContentPanel.astro';
 import ProjectPageHero from '../../../../../../components/app/ProjectPageHero.astro';
 import RagReferencePill from '../../../../../../components/app/RagReferencePill.astro';
+import ActionerAssignmentSelect from '../../../../../../components/actions/ActionerAssignmentSelect.astro';
 import { can } from '../../../../../../lib/permissions';
 import { resolveActionIdentity } from '../../../../../../lib/actionIdentity';
 import {
@@ -32,6 +33,7 @@ import {
 	filterAndSortProjectActions,
 	listEligibleActioners,
 	listProjectActions,
+	resolveActionerEditSelection,
 	normaliseActionRegisterScope,
 	normaliseActionRegisterSort,
 	normaliseActionRegisterTab,
@@ -70,6 +72,7 @@ let actionModalId = Astro.url.searchParams.get('action') ?? '';
 let actionError = '';
 let modalValues = { progress: '', reason: '', brief: '', actionerId: '', dueDate: '' };
 let modalFormSubmitted = false;
+let actionerFormSubmitted = false;
 let selectedLinkedRisk: ProjectRisk | null = null;
 
 const formatDate = (value, fallback = 'Not available') => value
@@ -200,6 +203,7 @@ try {
 				} else {
 					actionModalId = actionId;
 					modalFormSubmitted = true;
+					actionerFormSubmitted = intent === 'assign-actioner';
 					const expectedStatus = String(formData.get('expected_status') ?? '');
 					const expectedUpdatedAt = String(formData.get('expected_updated_at') ?? '');
 					modalValues = {
@@ -378,7 +382,15 @@ const canCancelSelectedAction = Boolean(canManageSelectedAction && selectedActio
 const modalProgressValue = modalValues.progress || selectedAction?.latest_response || '';
 const modalBriefValue = modalValues.brief || selectedAction?.brief || '';
 const modalDueDateValue = modalValues.dueDate || selectedAction?.due_date || '';
-const modalActionerValue = modalFormSubmitted ? modalValues.actionerId : selectedAction?.actioner_id ?? '';
+const storedActionerSelection = selectedAction
+	? resolveActionerEditSelection(selectedAction, eligibleActioners)
+	: { membershipId: null, error: null };
+// Preserve the submitted membership choice only for an unsuccessful Actioner
+// assignment. Other modal submissions must continue to render the persisted
+// responsibility, rather than treating their absent actioner_id as Unassigned.
+const modalActionerSelection = actionerFormSubmitted && !storedActionerSelection.error
+	? { membershipId: modalValues.actionerId || null, error: null }
+	: storedActionerSelection;
 const scopeItems = [
 	{ id: 'my', label: ACTION_REGISTER_SCOPE_LABELS.my, active: selectedScope === 'my', href: buildRegisterPath({ scope: 'my', visible: undefined }) },
 	{ id: 'project', label: ACTION_REGISTER_SCOPE_LABELS.project, active: selectedScope === 'project', href: buildRegisterPath({ scope: 'project', visible: undefined }) },
@@ -682,11 +694,8 @@ const scopeItems = [
 												<input type="hidden" name="expected_status" value={selectedAction.status} />
 												<input type="hidden" name="expected_updated_at" value={selectedAction.updated_at} />
 												<input type="hidden" name="return_to" value={buildRegisterPath({ action: selectedAction.id })} />
-												<label><span>Actioner</span><select name="actioner_id">
-													<option value="" selected={!modalActionerValue}>Unassigned</option>
-													{eligibleActioners.map((person) => <option value={person.id} selected={modalActionerValue === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
-												</select></label>
-												<button class="button button--secondary" type="submit" name="intent" value="assign-actioner">Save Actioner</button>
+												<ActionerAssignmentSelect label="Actioner" selection={modalActionerSelection} eligibleActioners={eligibleActioners} />
+												<button class="button button--secondary" type="submit" name="intent" value="assign-actioner" disabled={Boolean(modalActionerSelection.error)}>Save Actioner</button>
 											</form>
 										)}
 
@@ -716,8 +725,9 @@ const scopeItems = [
 												<input type="hidden" name="return_to" value={buildRegisterPath({ action: selectedAction.id })} />
 												<input type="hidden" name="brief" value={selectedAction.brief} />
 												<input type="hidden" name="due_date" value={selectedAction.due_date ?? ''} />
-												<input type="hidden" name="actioner_id" value={selectedAction.actioner_id ?? ''} />
-												<button class="button button--secondary" type="submit" name="intent" value="reissue">Reissue as Outstanding</button>
+												{storedActionerSelection.error && <p class="action-detail-muted" role="alert">{storedActionerSelection.error}</p>}
+												<input type="hidden" name="actioner_id" value={storedActionerSelection.membershipId ?? ''} />
+												<button class="button button--secondary" type="submit" name="intent" value="reissue" disabled={Boolean(storedActionerSelection.error)}>Reissue as Outstanding</button>
 											</form>
 										)}
 
@@ -768,11 +778,11 @@ const scopeItems = [
 						<label><span>Brief</span><textarea name="brief" rows="4" required>{createValues.brief}</textarea></label>
 						<label><span>Actioner</span><select name="actioner_id">
 							<option value="" selected={!createValues.actionerId}>Unassigned</option>
-							{eligibleActioners.map((person) => <option value={person.id} selected={createValues.actionerId === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
+							{eligibleActioners.map((person) => <option value={person.membershipId} selected={createValues.actionerId === person.membershipId}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
 						</select></label>
 						<label><span>Approver</span><select name="approver_id">
 							<option value="" selected={!createValues.approverId}>No Approver</option>
-							{eligibleActioners.map((person) => <option value={person.id} selected={createValues.approverId === person.id}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
+							{eligibleActioners.map((person) => <option value={person.membershipId} selected={createValues.approverId === person.membershipId}>{actionProfileName(person, 'Workspace member')} {person.role ? `(${person.role})` : ''}</option>)}
 						</select></label>
 						<DateField
 							id="action-create-due-date"
