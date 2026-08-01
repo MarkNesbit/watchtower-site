@@ -109,11 +109,15 @@ export function previewWranglerConfigFor(generatedConfig, previewWorkerName) {
 		throw new Error('Astro-generated Preview Wrangler configuration has no assets directory.');
 	}
 
+	const compatibilityFlags = new Set(generatedConfig.compatibility_flags ?? []);
+	compatibilityFlags.add('global_fetch_strictly_public');
+
 	return {
 		...generatedConfig,
 		name: previewWorkerNameFor(previewWorkerName),
 		workers_dev: true,
 		preview_urls: true,
+		compatibility_flags: [...compatibilityFlags],
 	};
 }
 
@@ -128,6 +132,7 @@ function previewWranglerConfigSummary(config) {
 		custom_domains: Boolean(config.custom_domains),
 		compatibility_date: config.compatibility_date ?? null,
 		compatibility_flags: Boolean(config.compatibility_flags),
+		global_fetch_strictly_public: config.compatibility_flags?.includes('global_fetch_strictly_public') ?? false,
 	};
 }
 
