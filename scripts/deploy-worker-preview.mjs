@@ -114,6 +114,12 @@ export function previewWranglerConfigFor(generatedConfig, previewWorkerName) {
 		name: previewWorkerNameFor(previewWorkerName),
 		workers_dev: true,
 		preview_urls: true,
+		assets: {
+			...generatedConfig.assets,
+			// The Preview Worker must enter Astro before static routing. Astro then
+			// serves known files through env.ASSETS without a public same-zone fetch.
+			run_worker_first: true,
+		},
 	};
 }
 
@@ -123,7 +129,12 @@ function previewWranglerConfigSummary(config) {
 		workers_dev: config.workers_dev,
 		preview_urls: config.preview_urls,
 		main: config.main,
-		assets: Boolean(config.assets?.directory),
+		assets: {
+			directory: Boolean(config.assets?.directory),
+			binding: Boolean(config.assets?.binding),
+			run_worker_first: config.assets?.run_worker_first === true,
+			not_found_handling: config.assets?.not_found_handling ?? null,
+		},
 		routes: Boolean(config.routes || config.route),
 		custom_domains: Boolean(config.custom_domains),
 		compatibility_date: config.compatibility_date ?? null,
@@ -140,9 +151,10 @@ async function previewWranglerConfigFile(previewWorkerName) {
 		throw new Error(`Unable to read Astro-generated Wrangler configuration at ${generatedFile}: ${error.message}`);
 	}
 
+	console.log(`Astro-generated Wrangler configuration: ${JSON.stringify(previewWranglerConfigSummary(generatedConfig))}`);
 	const config = previewWranglerConfigFor(generatedConfig, previewWorkerName);
-	if (config.workers_dev !== true || config.preview_urls !== true) {
-		throw new Error('Effective Preview Wrangler configuration must explicitly enable workers_dev and preview_urls.');
+	if (config.workers_dev !== true || config.preview_urls !== true || config.assets.run_worker_first !== true) {
+		throw new Error('Effective Preview Wrangler configuration must explicitly enable workers_dev, preview_urls and assets.run_worker_first.');
 	}
 
 	const file = join(dirname(generatedFile), 'wrangler.preview.json');
