@@ -45,5 +45,35 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Verify Preview configuration presence
+        env:
+          PREVIEW_SUPABASE_URL_PRESENT: ${{ vars.WATCHTOWER_PREVIEW_SUPABASE_URL != '' }}
+          PREVIEW_SUPABASE_ANON_KEY_PRESENT: ${{ vars.WATCHTOWER_PREVIEW_SUPABASE_ANON_KEY != '' }}
+          PREVIEW_SUPABASE_SERVICE_ROLE_KEY_PRESENT: ${{ secrets.WATCHTOWER_PREVIEW_SUPABASE_SERVICE_ROLE_KEY != '' }}
+          PREVIEW_ORIGIN_PRESENT: ${{ vars.WATCHTOWER_PREVIEW_ORIGIN != '' }}
+          PREVIEW_WORKER_NAME_PRESENT: ${{ vars.WATCHTOWER_PREVIEW_WORKER_NAME != '' }}
+          PREVIEW_ALIAS_PRESENT: ${{ inputs.preview_alias != '' || vars.WATCHTOWER_PREVIEW_ALIAS != '' }}
+          CLOUDFLARE_ACCOUNT_ID_PRESENT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+          CLOUDFLARE_API_TOKEN_PRESENT: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+        run: |
+          missing=0
+          check() {
+            if [ "$2" = "true" ]; then
+              printf '%s=PRESENT\n' "$1"
+            else
+              printf '%s=MISSING\n' "$1"
+              missing=1
+            fi
+          }
+          check WATCHTOWER_PREVIEW_SUPABASE_URL "$PREVIEW_SUPABASE_URL_PRESENT"
+          check WATCHTOWER_PREVIEW_SUPABASE_ANON_KEY "$PREVIEW_SUPABASE_ANON_KEY_PRESENT"
+          check WATCHTOWER_PREVIEW_SUPABASE_SERVICE_ROLE_KEY "$PREVIEW_SUPABASE_SERVICE_ROLE_KEY_PRESENT"
+          check WATCHTOWER_PREVIEW_ORIGIN "$PREVIEW_ORIGIN_PRESENT"
+          check WATCHTOWER_PREVIEW_WORKER_NAME "$PREVIEW_WORKER_NAME_PRESENT"
+          check WATCHTOWER_PREVIEW_ALIAS "$PREVIEW_ALIAS_PRESENT"
+          check CLOUDFLARE_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID_PRESENT"
+          check CLOUDFLARE_API_TOKEN "$CLOUDFLARE_API_TOKEN_PRESENT"
+          exit "$missing"
+
       - name: Build and upload preview version
         run: npm run deploy:preview

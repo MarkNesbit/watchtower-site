@@ -75,6 +75,8 @@ test('Preview workflow is manual only and never deploys production traffic', asy
 	assert.match(workflow, /github\.ref_name != 'main'/);
 	assert.match(workflow, /environment: cloudflare-preview/);
 	assert.match(workflow, /WATCHTOWER_PREVIEW_SUPABASE_URL/);
+	assert.match(workflow, /PREVIEW_SUPABASE_ANON_KEY_PRESENT: \$\{\{ vars\.WATCHTOWER_PREVIEW_SUPABASE_ANON_KEY != '' \}\}/);
+	assert.match(workflow, /check WATCHTOWER_PREVIEW_SUPABASE_ANON_KEY "\$PREVIEW_SUPABASE_ANON_KEY_PRESENT"/);
 	assert.match(workflow, /WATCHTOWER_PREVIEW_SUPABASE_SERVICE_ROLE_KEY/);
 	assert.match(workflow, /npm run deploy:preview/);
 	assert.doesNotMatch(workflow, /wrangler deploy|versions deploy/);
